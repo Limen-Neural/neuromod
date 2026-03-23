@@ -5,79 +5,58 @@
 [![License: GPL-3.0](https://img.shields.io/badge/License-GPL_3.0-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
 [![GitHub](https://img.shields.io/badge/GitHub-rmems/neuromod-black.svg)](https://github.com/rmems/neuromod)
 
-A lightweight, focused Rust crate for neuromorphic computing with reward-modulated spiking neural networks. Designed for high-frequency trading (HFT) applications and FPGA deployment.
+**v0.2.1** — Now with lean **mining_dopamine** reward signal.
+
+A lightweight, zero-unsafe Rust crate for neuromorphic computing. Designed as the official Rust backend for **Spikenaut-v2** — the 16-channel neuromorphic HFT + FPGA system.
 
 ## Features
 
-- **LIF Neurons**: Fast, reactive leaky integrate-and-fire neurons
-- **Izhikevich Neurons**: Complex, adaptive neuron dynamics with rich firing patterns
-- **STDP Learning**: Spike-timing-dependent plasticity with reward modulation
-- **Neuromodulators**: Dopamine, cortisol, acetylcholine, tempo control, and mining efficiency rewards
-- **HFT Optimized**: Built for real-time trading applications with microsecond latency
-- **FPGA Ready**: Architecture supports hardware acceleration deployment
-- **Mining Integration**: Lean mining efficiency reward signals without bloat
+- LIF + Izhikevich neurons
+- Reward-modulated STDP learning
+- Full neuromodulator system (dopamine, cortisol, acetylcholine, tempo, **mining_dopamine**)
+- Lean MiningReward EMA calculation (no heavy dependencies)
+- Sub-1 µs modulator updates
+- ~1.6 KB memory footprint
+- no_std + Q8.8 fixed-point FPGA .mem export ready
+- jlrs zero-copy interop for Julia training
 
 ## Quick Start
 
 ```rust
-use neuromod::{SpikingNetwork, NeuroModulators};
+use neuromod::{SpikingNetwork, NeuroModulators, MiningReward, HftReward};
 
-// Create network
 let mut network = SpikingNetwork::new();
 
-// Create input stimuli (16 channels)
-let stimuli = [0.5, 0.3, 0.8, 0.2, 0.1, 0.9, 0.4, 0.7,
-               0.6, 0.2, 0.8, 0.3, 0.5, 0.1, 0.9, 0.4];
+// 16-channel telemetry stimuli
+let stimuli = [0.5f32; 16];
 
-// Create neuromodulators from telemetry
-let modulators = NeuroModulators::from_telemetry(
-    75.0,  // GPU temp
-    300.0, // Power (W)
-    0.05,  // Hashrate (MH/s)
-    2640.0 // GPU clock (MHz)
-);
+// Create modulators + mining reward
+let mut reward = MiningReward::new();
+let mining_dopamine = reward.compute(hashrate, power_draw, gpu_temp);
 
-// Step the network
+let modulators = NeuroModulators {
+    dopamine: 0.7,
+    cortisol: 0.3,
+    acetylcholine: 0.6,
+    tempo: 1.0,
+    mining_dopamine,  // ← new in v0.2.1
+};
+
 let spikes = network.step(&stimuli, &modulators);
-println!("Neurons that spiked: {:?}", spikes);
-
-// Get membrane potentials
-let potentials = network.get_membrane_potentials();
-println!("Membrane potentials: {:?}", potentials);
 ```
 
 ## Architecture
 
-### Neuron Banks
-
-1. **LIF Neurons (Bank 1)**: 16 fast, reactive neurons organized as 8 bear/bull pairs
-   - N0-N1: Asset pair 0 (DNX)
-   - N2-N3: Asset pair 1 (QUAI)
-   - N4-N5: Asset pair 2 (QUBIC)
-   - N6-N7: Asset pair 3 (KASPA)
-   - N8-N9: Asset pair 4 (XMR)
-   - N10-N11: Asset pair 5 (OCEAN)
-   - N12-N13: Asset pair 6 (VERUS)
-   - N14: Coincidence detector (fires when ≥3 pairs spike together)
-   - N15: Global inhibitory interneuron
-
-2. **Izhikevich Neurons (Bank 2)**: 5 complex adaptive neurons for hardware telemetry
+### Neuron Banks (16 channels)
+- 8 bear/bull asset pairs (DNX, QUAI, QUBIC, KASPA, XMR, OCEAN, VERUS + thermal)
+- Coincidence detector + global inhibitor
 
 ### Neuromodulator System
-
-- **Dopamine**: Reward signal based on hashrate performance
-- **Cortisol**: Stress signal from temperature and power
-- **Acetylcholine**: Focus signal from voltage stability
-- **Tempo**: Timing scale based on GPU clock speed
-
-### Learning Mechanisms
-
-- **STDP**: Spike-timing-dependent plasticity with exponential learning windows
-- **Reward Modulation**: Dopamine scales learning rate
-- **Synaptic Scaling**: L1 weight normalization prevents runaway excitation
-- **Competitive Inhibition**: Bear/bull pairs compete for activation
-
-## Use Cases
+- **Dopamine** – market/sync reward
+- **Cortisol** – stress/inhibition
+- **Acetylcholine** – focus/SNR
+- **Tempo** – clock scaling
+- **mining_dopamine** (v0.2.1) – EMA-smoothed mining efficiency reward
 
 ### High-Frequency Trading
 ```rust

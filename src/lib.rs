@@ -4,6 +4,13 @@
 //! reward-modulated spiking neural networks. Designed for high-frequency
 //! trading (HFT) applications and FPGA deployment.
 //!
+//! ## Provenance
+//!
+//! Extracted from Eagle-Lander, the author's own private neuromorphic GPU supervisor
+//! repository (closed-source). The LIF/Izhikevich network, STDP, and neuromodulator
+//! system ran in production for Dynex/Quai/Qubic mining optimization before being
+//! published as a standalone crate on crates.io.
+//!
 //! ## Features
 //!
 //! - **LIF Neurons**: Fast, reactive leaky integrate-and-fire neurons

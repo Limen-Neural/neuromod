@@ -185,7 +185,7 @@ let new_w = apply_classical_stdp(pre_spike_time, post_spike_time, current_weight
 ### Beyond
 - [ ] PyO3 Python bindings for notebook-driven experimentation
 - [ ] WASM target for browser-based neural simulation demos
-- [ ] Integration with the [SpiNNaker2](https://www.humanbrainproject.eu/en/silicon-brains/spinnaker-2/) platform
+- [ ] Integration with the [SpiNNaker 2](https://www.humanbrainproject.eu/en/silicon-brains/spinnaker-2/) platform
 
 ---
 

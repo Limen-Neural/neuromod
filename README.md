@@ -175,7 +175,6 @@ let new_w = apply_classical_stdp(pre_spike_time, post_spike_time, current_weight
 
 ### v0.4.0 — Hardware Integration
 - [ ] **Intel Lava Framework integration** — Python/Rust bridge for execution on Intel Loihi 2 neuromorphic chips via the Lava runtime
-- [ ] **Bare-metal deployment for Digilent Artix-7 FPGAs** — synthesis-ready HDL generation from Q8.8 `.mem` exports; verified on the Digilent Nexys A7-100T board
 
 ### v0.5.0 — Neural Bridge & BCI Research
 - [ ] **Neural Bridge** — a low-latency, closed-loop interface layer for Brain-Computer Interface (BCI) research; targets real-time bidirectional communication between decoded neural spike trains and SNN actuator networks

@@ -1,6 +1,7 @@
+//! Basic example of using the neuromod library
 use neuromod::{SpikingNetwork, NeuroModulators};
 
-fn main() {
+fn main() {  
     println!("=== Neuromod Basic Example ===");
     
     // Create network

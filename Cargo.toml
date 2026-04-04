@@ -23,6 +23,22 @@ rand = "0.8"
 [dev-dependencies]
 criterion = "0.5"
 
+[[bench]]
+name = "neuron_bench"
+harness = false
+
+[[bench]]
+name = "stdp_bench"
+harness = false
+
+[[bench]]
+name = "memory_bench"
+harness = false
+
+[[bench]]
+name = "modulation_bench"
+harness = false
+
 
 [profile.release]
 opt-level = 3

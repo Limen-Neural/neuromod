@@ -30,9 +30,6 @@ This library is intended as a research-grade foundation for the EE and biomedica
 - Classical Hebbian STDP (unmodulated, honouring Hebb 1949)
 - Full neuromodulator system (dopamine, cortisol, acetylcholine, tempo)
 - Sub-1 µs modulator updates
-- ~1.6 KB memory footprint for the full 16-channel network
-- `no_std` + Q8.8 fixed-point `.mem` export for FPGA synthesis
-- `jlrs` zero-copy interop for Julia-based offline training pipelines
 
 ---
 
@@ -153,9 +150,7 @@ let new_w = apply_classical_stdp(pre_spike_time, post_spike_time, current_weight
 | Metric | Value |
 |---|---|
 | Step latency | **< 1 µs** per network step |
-| Memory footprint | **~1.6 KB** (full 16-channel network) |
 | Throughput | **> 1 M steps/sec** on a single core |
-| FPGA export | Q8.8 fixed-point `.mem` (Xilinx-compatible) |
 | Build target | Fedora 43 (Ship of Theseus) · `x86_64` & `armv7` cross-compilation |
 
 ---
@@ -164,7 +159,7 @@ let new_w = apply_classical_stdp(pre_spike_time, post_spike_time, current_weight
 
 | Crate | Focus | Neuromodulators | Hardware / FPGA | Biological Models | Plasticity |
 |---|---|---|---|---|---|
-| **neuromod** | Pure neuromorphic research | Dopamine, Cortisol, ACh, Tempo | Q8.8 `.mem` export, `no_std`, Artix-7 ready | 5 canonical models | Hebbian + R-STDP |
+| **neuromod** | Pure neuromorphic research | Dopamine, Cortisol, ACh, Tempo | None | 5 canonical models | Hebbian + R-STDP |
 | `spiking_neural_networks` | General biophysical simulation | Basic reward only | None | High-fidelity | Limited |
 | `omega-snn` | Cognitive SNN architecture | Dopamine + NE + Serotonin + ACh | None | Population coding | Sparse |
 | `neuburn` | GPU training (Burn framework) | None | GPU training only | Spiking LSTM | Surrogate gradients |

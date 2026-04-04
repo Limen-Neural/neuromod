@@ -40,21 +40,26 @@
 //! ```
 pub mod lif;
 pub mod izhikevich;
-pub mod rm_stdp;  // change from 'stdp' to 'rm_stdp' to reflect reward modulation
+pub mod rm_stdp;
 pub mod modulators;
 pub mod engine;
-// Deleting the mining module as per the new plan
 pub mod traits;
+// Godfathers of Neuroscience
+pub mod lapicque;
+pub mod hebbian;
+pub mod hodgkin_huxley;
+pub mod fitzhugh_nagumo;
 
 // Re-export main types for convenience
 pub use lif::LifNeuron;
 pub use izhikevich::IzhikevichNeuron;
 pub use modulators::NeuroModulators;
-pub use engine::{SpikingNetwork}; // Re-exporting the SpikingNetwork struct for external use
-// Deleting the mining reward struct from this repo as well.  So I am deleting the
-// Deleting this line as well since we are removing mining related code from this repo
-// Deleting HFT trait to make this crate more focused on neuromodulated spiking networks and less on specific applications like HFT
-pub use rm_stdp::{EligibilityTrace, RmStdpConfig}; // Re-exporting the RmStdpConfig struct for external use
+pub use engine::SpikingNetwork;
+pub use rm_stdp::{EligibilityTrace, RmStdpConfig};
+pub use lapicque::LapicqueNeuron;
+pub use hebbian::{apply_classical_stdp, HebbianIzhikevichNetwork, StdpParams};
+pub use hodgkin_huxley::HodgkinHuxleyNeuron;
+pub use fitzhugh_nagumo::FitzHughNagumoNeuron;
 
 /// Number of input channels supported by default
 pub const NUM_INPUT_CHANNELS: usize = 16;

@@ -1,14 +1,16 @@
-use rand::Rng;
-use serde::{Deserialize, Serialize};
+// Credit: Majority edited by author in newest version.  Grok 4.20 Expert with the help of researching and tutor by Qwen Coder 3.6 on fixing bugs and Gemini 3.1 for fixing the last bit of bug.
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct PoissonEncoder {
-    pub num_steps: usize,
+use rand::Rng; // For stochastic spike generation in PoissonEncoder
+use serde::{Deserialize, Serialize}; // For serialization of neuron states, useful for saving/loading models and debugging
+
+#[derive(Clone, Debug, Serialize, Deserialize)] // A simple fixed-point representation for synaptic weights (stub for demonstration)
+pub struct PoissonEncoder { // This struct encodes continuous input values into temporal spike trains using a Poisson process, which is a common method for simulating the stochastic nature of neuronal firing. The `num_steps` field determines how many time steps the encoder will produce for each input value, allowing for temporal encoding of information.
+    pub num_steps: usize,// Number of time steps to encode the input into a spike train
 }
 
-impl PoissonEncoder {
-    pub fn new(steps: usize) -> Self {
-        Self { num_steps: steps }
+impl PoissonEncoder { // Constructor for creating a new PoissonEncoder with a specified number of steps
+    pub fn new(steps: usize) -> Self {  // Constructor for creating a new PoissonEncoder with a specified number of steps
+        Self { num_steps: steps } // Constructor for creating a new PoissonEncoder with a specified number of steps
     }
 
     /// Encodes a normalized value (0.0 - 1.0) into a temporal spike train.
@@ -16,21 +18,21 @@ impl PoissonEncoder {
     /// PHYSICS ANALOGY:
     /// This acts like a "Geiger Counter" for your data.
     /// High Intensity (Molarity/Voltage) = High Click Rate (Spikes).
-    pub fn encode(&self, input: f32) -> Vec<u8> {
-        let mut rng = rand::thread_rng();
-        let mut spikes = Vec::with_capacity(self.num_steps);
+    pub fn encode(&self, input: f32) -> Vec<u8> { // Encodes a normalized value (0.0 - 1.0) into a temporal spike train, where the number of spikes is proportional to the input intensity. This simulates how biological neurons convert continuous stimuli into discrete spikes, with higher input values leading to more frequent firing. The output is a vector of binary values (0s and 1s) representing the presence or absence of a spike at each time step.
+        let mut rng = rand::thread_rng(); // Create a random number generator for stochastic spike generation
+        let mut spikes = Vec::with_capacity(self.num_steps); // Pre-allocate a vector to hold the spike train, improving performance by avoiding dynamic resizing during encoding
         
         // Clamp input to ensure probability is valid (0% to 100%)
-        let probability = input.clamp(0.0, 1.0);
+        let probability = input.clamp(0.0, 1.0); // Clamp input to ensure probability is valid (0% to 100%), preventing invalid probabilities that could arise from out-of-range inputs. This ensures that the encoding process remains stable and produces meaningful spike trains even if the input is not perfectly normalized.
 
-        for _ in 0..self.num_steps {
+        for _ in 0..self.num_steps { // For each time step, generate a random number and compare it to the input intensity to decide whether to emit a spike. This simulates the inherent noise in biological systems, where even a constant stimulus can lead to variable firing patterns due to stochastic processes at the molecular level.
             // Stochastic firing: 
             // If the random number (0.0-1.0) is LESS than our intensity, we spike.
             // This mimics the noise inherent in quantum/chemical systems.
-            if rng.r#gen::<f32>() < probability {
-                spikes.push(1);
-            } else {
-                spikes.push(0);
+            if rng.r#gen::<f32>() < probability { // Stochastic firing: If the random number (0.0-1.0) is LESS than our intensity, we spike. This mimics the noise inherent in quantum/chemical systems, where the exact timing of spikes can vary even for the same input due to underlying stochastic processes.
+                spikes.push(1); // Emit a spike (1) if the random number is less than the input intensity, indicating that the neuron has fired in this time step. The use of `rng.gen::<f32>()` generates a random floating-point number between 0.0 and 1.0, which is then compared to the clamped input value to determine whether a spike occurs.
+            } else { // Otherwise, emit no spike (0)
+                spikes.push(0); // Emit no spike (0) if the random number is greater than or equal to the input intensity, indicating that the neuron did not fire in this time step. This allows for a probabilistic encoding of the input, where higher input values lead to more frequent spikes, but there is still variability in the exact timing of those spikes due to the stochastic nature of the encoding process.
             }
         }
         spikes

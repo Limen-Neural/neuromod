@@ -11,14 +11,80 @@ A lightweight, zero-unsafe Rust crate for neuromorphic computing. Designed as th
 
 ## Features
 
-- LIF + Izhikevich neurons
+- **Six neuron models**: Lapicque (1907), LIF, Hodgkin-Huxley (1952), FitzHugh-Nagumo (1961), Izhikevich (2003)
 - Reward-modulated STDP learning
-- Full neuromodulator system (dopamine, cortisol, acetylcholine, tempo, **mining_dopamine**)
-- Lean MiningReward EMA calculation (no heavy dependencies)
+- Full neuromodulator system (dopamine, cortisol, acetylcholine, tempo)
+- Classical Hebbian STDP (unmodulated)
 - Sub-1 µs modulator updates
 - ~1.6 KB memory footprint
 - no_std + Q8.8 fixed-point FPGA .mem export ready
 - jlrs zero-copy interop for Julia training
+
+## Legends of Neuromorphic Computing
+
+This crate explicitly honors the foundational scientists whose work spans over a century of neuroscience:
+
+- **Louis Lapicque (1907)** — `lapicque.rs` — the original Integrate-and-Fire model
+  > Lapicque, L. (1907). Recherches quantitatives sur l'excitation électrique des nerfs traitée comme une polarisation. *J. Physiol. Pathol. Gén.*, 9, 620–635.
+
+- **Alan Hodgkin & Andrew Huxley (1952)** — `hodgkin_huxley.rs` — the biophysical gold standard; explicit Na⁺, K⁺, and leak ion channels with voltage-gated kinetics
+  > Hodgkin, A.L. & Huxley, A.F. (1952). A quantitative description of membrane current and its application to conduction and excitation in nerve. *J. Physiol.*, 117(4), 500–544. doi:10.1113/jphysiol.1952.sp004764
+
+- **Richard FitzHugh (1961) & Jin-ichi Nagumo (1962)** — `fitzhugh_nagumo.rs` — the classic 2D relaxation oscillator that distills excitable dynamics to two variables
+  > FitzHugh, R. (1961). Impulses and physiological states in theoretical models of nerve membrane. *Biophys. J.*, 1(6), 445–466.
+  >
+  > Nagumo, J., Arimoto, S., & Yoshizawa, S. (1962). An active pulse transmission line simulating nerve axon. *Proc. IRE*, 50(10), 2061–2070.
+
+- **Donald O. Hebb (1949)** — `hebbian/classical.rs` — "neurons that fire together wire together"
+  > Hebb, D.O. (1949). *The Organization of Behavior*. Wiley.
+
+- **Eugene Izhikevich (2003)** — `izhikevich.rs` — the programmable spiking neuron that reproduces cortical firing patterns with just four parameters
+  > Izhikevich, E.M. (2003). Simple model of spiking neurons. *IEEE Trans. Neural Networks*, 14(6), 1569–1572.
+
+- **LIF (Leaky Integrate-and-Fire)** — `lif.rs` — the workhorse neuron for large-scale neuromorphic systems
+
+Reward-modulated STDP in the rest of the crate is the 21st-century evolution for real HFT + telemetry.
+
+
+## Neuron Model Catalog
+
+| Model | Year | Dimensions | Speed | Biological Realism | Best For |
+|---|---|---|---|---|---|
+| [`LapicqueNeuron`](src/lapicque.rs) | 1907 | 1 | ⚡⚡⚡⚡⚡ | Low | Baseline, educational, massive-scale SNNs |
+| [`LifNeuron`](src/lif.rs) | — | 1 | ⚡⚡⚡⚡⚡ | Low-Medium | Hardware-friendly, low-power deployments |
+| [`FitzHughNagumoNeuron`](src/fitzhugh_nagumo.rs) | 1961 | 2 | ⚡⚡⚡⚡ | Medium | Phase-plane analysis, oscillatory circuits |
+| [`IzhikevichNeuron`](src/izhikevich.rs) | 2003 | 2 | ⚡⚡⚡⚡ | Medium-High | Cortical pattern matching, burst detection |
+| [`HodgkinHuxleyNeuron`](src/hodgkin_huxley.rs) | 1952 | 4 | ⚡⚡ | High | Biophysical simulation, ion-channel studies |
+
+### Hodgkin-Huxley (1952) — The Biophysical Gold Standard
+
+```rust
+use neuromod::HodgkinHuxleyNeuron;
+
+let mut hh = HodgkinHuxleyNeuron::new();       // squid giant axon (6.3 °C)
+let mut cortical = HodgkinHuxleyNeuron::new_cortical(); // mammalian (37 °C)
+
+// Simulate with 10 µA/cm² sustained current
+let fired = hh.step(10.0, 0.05);  // dt = 50 µs
+```
+
+Four state variables (V, m, h, n) with explicit Na⁺/K⁺/leak ion channels. RK4 integration,
+Q₁₀ temperature scaling, and analytically-solved resting potential.
+
+### FitzHugh-Nagumo (1961) — The Classic 2D Oscillator
+
+```rust
+use neuromod::FitzHughNagumoNeuron;
+
+let mut excitable = FitzHughNagumoNeuron::new();           // needs input to fire
+let mut oscillator = FitzHughNagumoNeuron::new_oscillatory(); // fires spontaneously
+
+let fired = excitable.step(0.7, 0.5);
+```
+
+Two variables (v, w) capture the essence of excitability: threshold behavior, refractoriness,
+and limit-cycle oscillations. Ideal for phase-plane analysis and bifurcation studies.
+
 
 ## Quick Start
 
@@ -95,3 +161,18 @@ pub trait HftReward {
 ---
 
 *Built for Spikenaut-v2 — the lean neuromorphic lion for sovereign crypto nodes and HFT.*
+
+---
+
+### References
+
+Historical neuron models implemented in this crate:
+
+1. Lapicque, L. (1907). Recherches quantitatives sur l'excitation électrique des nerfs traitée comme une polarisation. *J. Physiol. Pathol. Gén.*, 9, 620–635.
+2. Hodgkin, A.L. & Huxley, A.F. (1952). A quantitative description of membrane current and its application to conduction and excitation in nerve. *J. Physiol.*, 117(4), 500–544.
+3. FitzHugh, R. (1961). Impulses and physiological states in theoretical models of nerve membrane. *Biophys. J.*, 1(6), 445–466.
+4. Nagumo, J., Arimoto, S., & Yoshizawa, S. (1962). An active pulse transmission line simulating nerve axon. *Proc. IRE*, 50(10), 2061–2070.
+5. Hebb, D.O. (1949). *The Organization of Behavior: A Neuropsychological Theory*. Wiley.
+6. Izhikevich, E.M. (2003). Simple model of spiking neurons. *IEEE Trans. Neural Networks*, 14(6), 1569–1572.
+
+README.md updated 2026-04-04. Author: Raul Montoya Cardenas, Texas State student, San Marcos, Texas.

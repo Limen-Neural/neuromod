@@ -30,7 +30,7 @@ pub struct SpikingNetwork {
     pub predictive_state: [f32; crate::NUM_INPUT_CHANNELS],
 }
 
-impl SpikingNetwork {
+impl SpikingNetwork { // Constructor for creating a new SpikingNetwork instance with default parameters and initializations
     /// Create a new spiking network with default configuration
     pub fn new() -> Self {
         let mut neurons: Vec<LifNeuron> = (0..16).map(|_| {

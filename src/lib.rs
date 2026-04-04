@@ -27,7 +27,7 @@
 //! -- I am also deleting the 'pub use mining::MiningReward;' line from this file as well.  So I am also deleting the 'use mining::MiningReward;' line from engine.rs as well.  
 //! -- So I am also deleting any references to 'MiningReward' in engine.rs as well.  So I am also deleting any references to 'mining' in engine.rs as well.  So I am also deleting any references to 'mining' in traits.rs as well.  
 //! -- So I am also deleting any references to 'HftReward' in traits.rs as well.  So I am also deleting the 'pub use traits::HftReward;' line from this file as well.
-//!
+//! Editing Credit: Majority edited by author in newest version.
 //! ```rust
 //! use neuromod::{SpikingNetwork, NeuroModulators};
 //!
@@ -45,6 +45,14 @@ pub mod modulators;
 pub mod engine;
 // Deleting the mining module as per the new plan
 pub mod traits;
+// Added to honor Donald O. Hebb and the biological roots of our learning rules
+pub mod hebbian;
+// The true OG of Spiking Neural Networks
+pub mod lapicque; // Added to include the original LIF neuron model proposed by Louis Lapicque in 1907, which is the foundational model for spiking neurons and serves as a key building block for understanding neuronal dynamics and synaptic plasticity in a biologically-inspired context. The Lapicque neuron model is defined by the following equations: dv/dt = -(v - v_rest) / tau + I(t) / C, where v is the membrane potential, v_rest is the resting potential, tau is the membrane time constant, I(t) is the input current, and C is the membrane capacitance. When v reaches a threshold value (v_threshold), the neuron fires a spike and resets its potential to a reset value (v_reset), simulating the refractory period observed in biological neurons. By including the Lapicque neuron model in this crate, we provide a simple and efficient tool for simulating spiking neural networks and exploring the principles of neuronal dynamics and synaptic plasticity in a biologically-inspired context, while also laying the groundwork for more complex models and learning rules that can be built on top of this foundational neuron model.
+// The biophysical gold standard — Hodgkin-Huxley (1952) with explicit ion channels
+pub mod hodgkin_huxley;
+// The classic 2D relaxation oscillator — FitzHugh-Nagumo (1961)
+pub mod fitzhugh_nagumo;
 
 // Re-export main types for convenience
 pub use lif::LifNeuron;
@@ -55,6 +63,9 @@ pub use engine::{SpikingNetwork}; // Re-exporting the SpikingNetwork struct for 
 // Deleting this line as well since we are removing mining related code from this repo
 // Deleting HFT trait to make this crate more focused on neuromodulated spiking networks and less on specific applications like HFT
 pub use rm_stdp::{EligibilityTrace, RmStdpConfig}; // Re-exporting the RmStdpConfig struct for external use
+pub use hebbian::{apply_classical_stdp, HebbianIzhikevichNetwork, StdpParams}; // Re-exporting the classical Hebbian learning types
+pub use hodgkin_huxley::HodgkinHuxleyNeuron;
+pub use fitzhugh_nagumo::FitzHughNagumoNeuron;
 
 /// Number of input channels supported by default
 pub const NUM_INPUT_CHANNELS: usize = 16;

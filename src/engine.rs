@@ -1,48 +1,19 @@
-use rand::Rng;
-use serde::{Deserialize, Serialize};
+// Deleting mining/HFT scripts and reward struct from this repo. I am moving all mining related code to the mining repo. 
+// Taking out references to 'mining' in this file as well.  So I am deleting any references to 'mining' in engine.rs as well. 
+// Removing any references to 'HftReward' in traits.rs as well. The 'pub use traits::HftReward;' line from this file as well. 
 
-use super::lif::LifNeuron;
-use super::izhikevich::IzhikevichNeuron;
-use super::stdp::*;
-use super::modulators::NeuroModulators;
+use rand::Rng; // For stochastic encoding and initialization
+use serde::{Deserialize, Serialize}; // For easy serialization of network state (weights, modulators, etc.) for checkpointing and analysis
+
+use super::lif::LifNeuron; // Importing the LIF neuron struct to use in the SpikingNetwork
+use super::izhikevich::IzhikevichNeuron; // Importing the Izhikevich neuron struct to use in the SpikingNetwork
+use super::rm_stdp::*; // Importing R-STDP related structs and constants
+use super::modulators::NeuroModulators; // Importing the neuromodulator struct to use in the SpikingNetwork
 
 /// L1 synaptic weight budget per neuron (total weight sum target).
-const WEIGHT_BUDGET: f32 = 2.0;
+const WEIGHT_BUDGET: f32 = 2.0; // This encourages competition among synapses and prevents runaway excitation
 
-/// Aggregated bear/bull decision from the 7 channel pairs (N0–N13).
-///
-/// Each channel pair has one bear neuron (even index, conservative threshold)
-/// and one bull neuron (odd index, sensitive threshold). This struct summarises
-/// what the network "thinks" about the current input — useful for downstream
-/// trading or control logic without inspecting raw spike indices.
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
-pub struct BearBullSignal {
-    /// Number of bear neurons that fired this step (0–7)
-    pub bear_count: u8,
-    /// Number of bull neurons that fired this step (0–7)
-    pub bull_count: u8,
-    /// Number of Izhikevich adaptive neurons that fired (0–5)
-    pub iz_count: u8,
-}
-
-impl BearBullSignal {
-    /// Net sentiment: positive = bullish, negative = bearish, zero = neutral.
-    pub fn net(&self) -> i8 {
-        self.bull_count as i8 - self.bear_count as i8
-    }
-
-    /// True when bulls dominate and at least one Izhikevich burst confirms.
-    pub fn is_confirmed_bull(&self) -> bool {
-        self.bull_count > self.bear_count && self.iz_count > 0
-    }
-
-    /// True when bears dominate and at least one Izhikevich burst confirms.
-    pub fn is_confirmed_bear(&self) -> bool {
-        self.bear_count > self.bull_count && self.iz_count > 0
-    }
-}
-
-/// Main spiking neural network engine
+// This is the core of the system, integrating LIF neurons, Izhikevich neurons
 #[derive(Default, Serialize, Deserialize)]
 pub struct SpikingNetwork {
     // Bank 1: LIF Neurons (Fast, Reactive)
@@ -77,15 +48,15 @@ impl SpikingNetwork {
             let neuron = &mut neurons[i];
 
             // Set primary channel weight
-            neuron.weights[ch] = 0.8 + (rng.gen::<f32>() * 0.4);
+            neuron.weights[ch] = 0.8 + (rng.r#gen::<f32>() * 0.4);
 
             // Differentiated thresholds
             if i % 2 == 0 {
                 // Bear neurons: conservative threshold
-                neuron.threshold = 0.10 + (rng.gen::<f32>() * 0.04);
+                neuron.threshold = 0.10 + (rng.r#gen::<f32>() * 0.04);
             } else {
                 // Bull neurons: sensitive threshold
-                neuron.threshold = 0.06 + (rng.gen::<f32>() * 0.04);
+                neuron.threshold = 0.06 + (rng.r#gen::<f32>() * 0.04);
             }
             neuron.base_threshold = neuron.threshold;
         }
@@ -148,7 +119,7 @@ impl SpikingNetwork {
         let mut rng = rand::thread_rng();
         for (ch, &s) in stimuli.iter().enumerate() {
             let abs_s = s.abs().clamp(0.0, 1.0);
-            if abs_s > 0.01 && rng.gen::<f32>() < abs_s {
+            if abs_s > 0.01 && rng.r#gen::<f32>() < abs_s {
                 self.input_spike_times[ch] = self.global_step;
             }
         }
@@ -191,25 +162,7 @@ impl SpikingNetwork {
                 }
             }
 
-            // Competitive inhibition for bear/bull pairs
-            const COMPETITIVE_INHIBITION: f32 = 0.15;
-            for pair in 0..7 {
-                let bear_idx = pair * 2;
-                let bull_idx = pair * 2 + 1;
-                let bear_spiked = spike_ids.contains(&bear_idx);
-                let bull_spiked = spike_ids.contains(&bull_idx);
-                
-                if bear_spiked && !bull_spiked {
-                    self.neurons[bull_idx].membrane_potential = 
-                        (self.neurons[bull_idx].membrane_potential - COMPETITIVE_INHIBITION).max(0.0);
-                } else if bull_spiked && !bear_spiked {
-                    self.neurons[bear_idx].membrane_potential =
-                        (self.neurons[bear_idx].membrane_potential - COMPETITIVE_INHIBITION).max(0.0);
-                } else if bear_spiked && bull_spiked {
-                    self.neurons[bear_idx].membrane_potential = 0.0;
-                    self.neurons[bull_idx].membrane_potential = 0.0;
-                }
-            }
+// Removed this block of code since we are removing mining related code from this repo.  So I am deleting any references to 'mining' in engine.rs as well.
         }
 
         // STDP learning
@@ -223,7 +176,7 @@ impl SpikingNetwork {
                 let scale = WEIGHT_BUDGET / total;
                 for w in &mut neuron.weights {
                     *w *= scale;
-                    *w = w.clamp(STDP_W_MIN, STDP_W_MAX);
+                    *w = w.clamp(RM_STDP_W_MIN, RM_STDP_W_MAX);
                 }
             }
         }
@@ -244,25 +197,6 @@ impl SpikingNetwork {
         }
 
         spike_ids
-    }
-
-    /// Returns aggregated bear/bull signal for the current step.
-    ///
-    /// Call immediately after `step()` to get directional sentiment without
-    /// inspecting raw spike index vectors.
-    pub fn bear_bull_signal(&self) -> BearBullSignal {
-        let mut bear_count = 0u8;
-        let mut bull_count = 0u8;
-        for pair in 0..7 {
-            if self.neurons[pair * 2].last_spike     { bear_count += 1; }
-            if self.neurons[pair * 2 + 1].last_spike { bull_count += 1; }
-        }
-        // Count Izhikevich spikes: neuron fired if v was reset this step
-        // (v == c indicates a just-reset state)
-        let iz_count = self.iz_neurons.iter()
-            .filter(|n| (n.v - n.c).abs() < 1e-3)
-            .count() as u8;
-        BearBullSignal { bear_count, bull_count, iz_count }
     }
 
     /// Apply STDP learning rule
@@ -291,13 +225,13 @@ impl SpikingNetwork {
                 let delta_t = (post_time - pre_time) as f32;
 
                 let dw = if delta_t >= 0.0 {
-                    STDP_A_PLUS * (-delta_t / STDP_TAU_PLUS).exp()
+                    RM_STDP_A_PLUS * (-delta_t / RM_STDP_TAU_PLUS).exp()
                 } else {
-                    -STDP_A_MINUS * (delta_t / STDP_TAU_MINUS).exp()
+                    -RM_STDP_A_MINUS * (delta_t / RM_STDP_TAU_MINUS).exp()
                 };
 
                 neuron.weights[ch] = (neuron.weights[ch] + dw * dopamine_lr)
-                    .clamp(STDP_W_MIN, STDP_W_MAX);
+                    .clamp(RM_STDP_W_MIN, RM_STDP_W_MAX);
             }
         }
     }

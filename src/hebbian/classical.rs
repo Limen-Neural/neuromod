@@ -74,7 +74,7 @@ pub fn apply_classical_stdp(
 /// where pre/post spike times are tracked per synapse.
 pub struct HebbianIzhikevichNetwork {
     pub neurons: Vec<IzhikevichNeuron>,
-    /// Flat synaptic weight matrix: `weights[pre * N + post]`.
+    /// Flat synaptic weight matrix indexed as `weights[pre_index * num_neurons + post_index]`.
     pub weights: Vec<f32>,
     pub stdp_params: StdpParams,
 }

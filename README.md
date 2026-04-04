@@ -11,7 +11,7 @@ A lightweight, zero-unsafe Rust crate for neuromorphic computing. Designed as th
 
 ## Features
 
-- **Six neuron models**: Lapicque (1907), LIF, Hodgkin-Huxley (1952), FitzHugh-Nagumo (1961), Izhikevich (2003)
+- **Five neuron models**: Lapicque (1907), LIF, Hodgkin-Huxley (1952), FitzHugh-Nagumo (1961), Izhikevich (2003)
 - Reward-modulated STDP learning
 - Classical Hebbian STDP (unmodulated, honoring Hebb 1949)
 - Full neuromodulator system (dopamine, cortisol, acetylcholine, tempo, **mining_dopamine**)

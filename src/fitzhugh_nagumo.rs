@@ -155,11 +155,11 @@ impl FitzHughNagumoNeuron {
 
     /// Returns `true` if the neuron is in the excitable (stable fixed-point) regime.
     ///
-    /// Stability is determined by the Hopf bifurcation condition: the fixed point
-    /// is stable when |v*| > √(1 − ε).
+    /// Stability is determined by the Hopf bifurcation condition: the trace of the
+    /// Jacobian at the fixed point must be negative, i.e. `v*² > 1 − ε·b`.
     pub fn is_excitable(&self) -> bool {
         let (v_fp, _) = Self::resting_state(self.a, self.b, 0.0);
-        v_fp.abs() > (1.0 - self.epsilon).sqrt()
+        v_fp * v_fp > 1.0 - self.epsilon * self.b
     }
 
     /// Approximate firing frequency under constant input (spikes per unit time).

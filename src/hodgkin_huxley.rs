@@ -102,6 +102,9 @@ impl HodgkinHuxleyNeuron {
     // --- Gating variable rate functions (Hodgkin-Huxley 1952) ---
 
     /// Q₁₀ temperature scaling factor (φ = 3^((T − 6.3) / 10)).
+    ///
+    /// The original HH model used Q₁₀ = 3: gating kinetics roughly triple
+    /// for every 10 °C rise in temperature above the reference (6.3 °C).
     fn phi(&self) -> f32 {
         3.0f32.powf((self.temperature - 6.3) / 10.0)
     }

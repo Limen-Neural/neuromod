@@ -5,43 +5,80 @@
 [![License: GPL-3.0](https://img.shields.io/badge/License-GPL_3.0-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
 [![GitHub](https://img.shields.io/badge/GitHub-rmems/neuromod-black.svg)](https://github.com/rmems/neuromod)
 
-**v0.2.2** — Now with lean **mining_dopamine** reward signal.
+**v0.2.2** — Now with the four Godfathers of Neuroscience.
 
 A lightweight, zero-unsafe Rust crate for neuromorphic computing. Designed as the official Rust backend for **Spikenaut-v2** — the 16-channel neuromorphic HFT + FPGA system.
 
 ## Features
 
-- LIF + Izhikevich neurons
+- **Five neuron models**: Lapicque (1907), LIF, Hodgkin-Huxley (1952), FitzHugh-Nagumo (1961), Izhikevich (2003)
 - Reward-modulated STDP learning
+- Classical Hebbian STDP (unmodulated, honoring Hebb 1949)
 - Full neuromodulator system (dopamine, cortisol, acetylcholine, tempo, **mining_dopamine**)
-- Lean MiningReward EMA calculation (no heavy dependencies)
 - Sub-1 µs modulator updates
 - ~1.6 KB memory footprint
 - no_std + Q8.8 fixed-point FPGA .mem export ready
 - jlrs zero-copy interop for Julia training
 
+## Legends of Neuromorphic Computing
+
+This crate explicitly honours the foundational scientists whose work spans over a century of neuroscience:
+
+| Scientist | Year | Module | Contribution |
+|---|---|---|---|
+| **Louis Lapicque** | 1907 | `lapicque` | Original Integrate-and-Fire model |
+| **Alan Hodgkin & Andrew Huxley** | 1952 | `hodgkin_huxley` | Biophysical gold standard with explicit ion channels |
+| **Richard FitzHugh & Jin-ichi Nagumo** | 1961/1962 | `fitzhugh_nagumo` | Classic 2D relaxation oscillator |
+| **Donald O. Hebb** | 1949 | `hebbian` | "Neurons that fire together wire together" |
+| **Eugene Izhikevich** | 2003 | `izhikevich` | Programmable spiking neuron; reproduces cortical patterns |
+
+## Neuron Model Catalog
+
+| Model | Year | Variables | Speed | Biological Realism | Best For |
+|---|---|---|---|---|---|
+| [`LapicqueNeuron`](src/lapicque.rs) | 1907 | 1 | ⚡⚡⚡⚡⚡ | Low | Baseline, educational, massive-scale SNNs |
+| [`LifNeuron`](src/lif.rs) | — | 1 | ⚡⚡⚡⚡⚡ | Low-Medium | Hardware-friendly, low-power deployments |
+| [`FitzHughNagumoNeuron`](src/fitzhugh_nagumo.rs) | 1961 | 2 | ⚡⚡⚡⚡ | Medium | Phase-plane analysis, oscillatory circuits |
+| [`IzhikevichNeuron`](src/izhikevich.rs) | 2003 | 2 | ⚡⚡⚡⚡ | Medium-High | Cortical pattern matching, burst detection |
+| [`HodgkinHuxleyNeuron`](src/hodgkin_huxley.rs) | 1952 | 4 | ⚡⚡ | High | Biophysical simulation, ion-channel studies |
+
+### Hodgkin-Huxley (1952)
+
+```rust
+use neuromod::HodgkinHuxleyNeuron;
+
+let mut hh = HodgkinHuxleyNeuron::new();              // squid giant axon (6.3 °C)
+let mut cortical = HodgkinHuxleyNeuron::new_cortical(); // mammalian (37 °C)
+let fired = hh.step(10.0, 0.05);  // 10 µA/cm², dt = 50 µs
+```
+
+### FitzHugh-Nagumo (1961)
+
+```rust
+use neuromod::FitzHughNagumoNeuron;
+
+let mut excitable  = FitzHughNagumoNeuron::new();            // needs input to fire
+let mut oscillator = FitzHughNagumoNeuron::new_oscillatory(); // fires spontaneously
+let fired = excitable.step(0.7, 0.5);
+```
+
+### Classical Hebbian STDP
+
+```rust
+use neuromod::{apply_classical_stdp, StdpParams};
+
+let params = StdpParams::default();
+let new_w = apply_classical_stdp(pre_spike_time, post_spike_time, current_weight, &params);
+```
+
 ## Quick Start
 
 ```rust
-use neuromod::{SpikingNetwork, NeuroModulators, MiningReward, HftReward};
+use neuromod::{SpikingNetwork, NeuroModulators};
 
 let mut network = SpikingNetwork::new();
-
-// 16-channel telemetry stimuli
-let stimuli = [0.5f32; 16];
-
-// Create modulators + mining reward
-let mut reward = MiningReward::new();
-let mining_dopamine = reward.compute(hashrate, power_draw, gpu_temp);
-
-let modulators = NeuroModulators {
-    dopamine: 0.7,
-    cortisol: 0.3,
-    acetylcholine: 0.6,
-    tempo: 1.0,
-    mining_dopamine,  // ← new in v0.2.1
-};
-
+let stimuli = [0.5f32; 16]; // 16-channel input
+let modulators = NeuroModulators::default();
 let spikes = network.step(&stimuli, &modulators);
 ```
 

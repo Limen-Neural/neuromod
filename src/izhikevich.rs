@@ -14,6 +14,8 @@ pub struct IzhikevichNeuron {
     // State variables
     pub v: f32, // Membrane potential (mV)
     pub u: f32, // Membrane recovery variable
+    /// Timestep of the most recent spike (used by Hebbian STDP).
+    pub last_spike_time: i64,
 
     // Parameters that define firing patterns
     pub a: f32, // Timescale of the recovery variable `u`
@@ -29,7 +31,7 @@ impl IzhikevichNeuron {
         let a = 0.02;
         let b = 0.2;
         let c = -65.0;
-        Self { v: c, u: b * c, a, b, c, d: 8.0 }
+        Self { v: c, u: b * c, last_spike_time: -1, a, b, c, d: 8.0 }
     }
 
     /// Intrinsically bursting (IB) — fires a burst then switches to tonic spiking.
@@ -38,7 +40,7 @@ impl IzhikevichNeuron {
         let a = 0.02;
         let b = 0.2;
         let c = -55.0;
-        Self { v: c, u: b * c, a, b, c, d: 4.0 }
+        Self { v: c, u: b * c, last_spike_time: -1, a, b, c, d: 4.0 }
     }
 
     /// Fast-spiking (FS) interneuron — high-frequency, no adaptation.
@@ -47,7 +49,7 @@ impl IzhikevichNeuron {
         let a = 0.1;
         let b = 0.2;
         let c = -65.0;
-        Self { v: c, u: b * c, a, b, c, d: 2.0 }
+        Self { v: c, u: b * c, last_spike_time: -1, a, b, c, d: 2.0 }
     }
 
     /// Chattering (CH) neuron — rhythmic high-frequency bursts.
@@ -56,7 +58,7 @@ impl IzhikevichNeuron {
         let a = 0.02;
         let b = 0.2;
         let c = -50.0;
-        Self { v: c, u: b * c, a, b, c, d: 2.0 }
+        Self { v: c, u: b * c, last_spike_time: -1, a, b, c, d: 2.0 }
     }
 
     /// Low-threshold spiking (LTS) interneuron — fires on weak inputs, strong adaptation.
@@ -65,7 +67,7 @@ impl IzhikevichNeuron {
         let a = 0.02;
         let b = 0.25;
         let c = -65.0;
-        Self { v: c, u: b * c, a, b, c, d: 2.0 }
+        Self { v: c, u: b * c, last_spike_time: -1, a, b, c, d: 2.0 }
     }
 
     /// Simulates one timestep (1 ms) of the neuron's dynamics.
@@ -74,6 +76,11 @@ impl IzhikevichNeuron {
     /// Uses the half-step Euler method (two sub-steps per ms) for numerical stability,
     /// as recommended in the original Izhikevich (2003) paper.
     pub fn step(&mut self, i: f32) -> bool {
+        self.step_with_time(i, 0)
+    }
+
+    /// Simulates one timestep (1 ms) with explicit time tracking for STDP.
+    pub fn step_with_time(&mut self, i: f32, current_time: i64) -> bool {
         for _ in 0..2 {
             self.v += 0.04 * self.v * self.v + 5.0 * self.v + 140.0 - self.u + i;
         }
@@ -82,6 +89,7 @@ impl IzhikevichNeuron {
         if self.v >= 30.0 {
             self.v = self.c;
             self.u += self.d;
+            self.last_spike_time = current_time;
             true
         } else {
             false

@@ -2,12 +2,14 @@
 name = "neuromod"
 version = "0.3.0"
 edition = "2024"
-license = "GPL-3.0-or-later"
-description = "A pure spiking neural network library featuring LIF, Izhikevich, and Hodgkin-Huxley dynamics."
+license = "GPL-3.0"
+authors = ["Raul Montoya Cardneas <montoyaraul34@gmail.com>"]
+description = "A high-performance Rust SNN library for neuroscience research and pure spiking neural network library featuring LIF, Izhikevich, Hebbian, Nagumo, Lapicque and Hodgkin-Huxley dynamics."
 exclude = ["docs/"]
-repository = "https://github.com/rmems/neuromod"
-keywords = ["snn", "neuromorphic", "stdp", "spiking", "fpga"]
-categories = ["science", "algorithms", "hardware-support"]
+repository = "https://github.com/Spikenaut/neuromod"
+readme = "README.md"
+keywords = ["snn", "neuromorphic", "stdp", "spiking", "rust", "spikenaut"]
+categories = ["science", "algorithms", "simulation"]
 
 [lib]
 name = "neuromod"

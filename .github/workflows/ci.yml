@@ -4,12 +4,34 @@ on:
     branches: [ "main", "master" ]
   pull_request:
     branches: [ "main", "master" ]
+
 jobs:
   test:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      # 1. Recreate your local Spikenaut directory structure
+      - name: Sync Spikenaut Ecosystem
+        run: |
+          # Shallow clone all other public repos so local paths (../) resolve instantly
+          gh repo list Spikenaut --visibility=public --limit 50 --json name -q '.[].name' | while read repo; do
+            if [ "$repo" != "${{ github.event.repository.name }}" ]; then
+              git clone --depth 1 https://github.com/Spikenaut/$repo.git || true
+            fi
+          done
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+      # 2. Check out the actual code that triggered this pipeline
+      - name: Checkout Triggering Repo
+        uses: actions/checkout@v4
+        with:
+          path: ${{ github.event.repository.name }}
+
+      # 3. Setup the Rust toolchain
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-      - run: cargo check
-      - run: cargo test
+
+      # 4. Compile and test from inside the triggering repo's folder
+      - name: Cargo Check
+        run: cargo check --verbose
+        working-directory: ${{ github.event.repository.name }}

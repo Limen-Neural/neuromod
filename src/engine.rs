@@ -40,7 +40,7 @@ impl SpikingNetwork {
             n
         }).collect();
 
-        let mut rng = rand::thread_rng();
+        let mut rng = rand::rng();
 
         // Initialize neurons with bear/bull pairs
         for i in 0..14 {
@@ -48,15 +48,15 @@ impl SpikingNetwork {
             let neuron = &mut neurons[i];
 
             // Set primary channel weight
-            neuron.weights[ch] = 0.8 + (rng.r#gen::<f32>() * 0.4);
+            neuron.weights[ch] = 0.8 + (rng.random::<f32>() * 0.4);
 
             // Differentiated thresholds
             if i % 2 == 0 {
                 // Bear neurons: conservative threshold
-                neuron.threshold = 0.10 + (rng.r#gen::<f32>() * 0.04);
+                neuron.threshold = 0.10 + (rng.random::<f32>() * 0.04);
             } else {
                 // Bull neurons: sensitive threshold
-                neuron.threshold = 0.06 + (rng.r#gen::<f32>() * 0.04);
+                neuron.threshold = 0.06 + (rng.random::<f32>() * 0.04);
             }
             neuron.base_threshold = neuron.threshold;
         }
@@ -116,10 +116,10 @@ impl SpikingNetwork {
         }
 
         // Record input spike times
-        let mut rng = rand::thread_rng();
+        let mut rng = rand::rng();
         for (ch, &s) in stimuli.iter().enumerate() {
             let abs_s = s.abs().clamp(0.0, 1.0);
-            if abs_s > 0.01 && rng.r#gen::<f32>() < abs_s {
+            if abs_s > 0.01 && rng.random::<f32>() < abs_s {
                 self.input_spike_times[ch] = self.global_step;
             }
         }

@@ -11,6 +11,8 @@ readme = "README.md"
 keywords = ["snn", "neuromorphic", "stdp", "spiking", "spikenaut"]
 categories = ["science", "algorithms", "simulation"]
 
+[workspace]
+
 [lib]
 name = "neuromod"
 path = "src/lib.rs"
@@ -18,7 +20,7 @@ path = "src/lib.rs"
 [dependencies]
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-rand = "0.8"
+rand = "0.9.3"
 
 [dev-dependencies]
 criterion = "0.5"

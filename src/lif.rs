@@ -17,7 +17,7 @@ impl PoissonEncoder {
     /// This acts like a "Geiger Counter" for your data.
     /// High Intensity (Molarity/Voltage) = High Click Rate (Spikes).
     pub fn encode(&self, input: f32) -> Vec<u8> {
-        let mut rng = rand::thread_rng();
+        let mut rng = rand::rng();
         let mut spikes = Vec::with_capacity(self.num_steps);
         
         // Clamp input to ensure probability is valid (0% to 100%)
@@ -27,7 +27,7 @@ impl PoissonEncoder {
             // Stochastic firing: 
             // If the random number (0.0-1.0) is LESS than our intensity, we spike.
             // This mimics the noise inherent in quantum/chemical systems.
-            if rng.r#gen::<f32>() < probability {
+            if rng.random::<f32>() < probability {
                 spikes.push(1);
             } else {
                 spikes.push(0);

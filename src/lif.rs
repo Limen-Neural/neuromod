@@ -49,9 +49,8 @@ pub struct LifNeuron {
     pub membrane_potential: f32, // Current charge state
     pub decay_rate: f32,         // How fast it "forgets" (Leak)
     pub threshold: f32,          // Limit to trigger an action potential
-    /// Resting threshold — stored so N15 (global inhibitory interneuron) can
-    /// modulate `threshold` dynamically via Vth(t) = base_threshold + w_inhib·S15(t)
-    /// and decay back without losing the original calibrated value.
+    /// Resting threshold baseline used for dynamic threshold modulation
+    /// without losing the original calibrated value.
     #[serde(default)]
     pub base_threshold: f32,
     pub last_spike: bool,        // Tracks if it fired in the last step

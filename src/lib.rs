@@ -40,6 +40,7 @@ pub mod lapicque;
 pub mod hebbian;
 pub mod hodgkin_huxley;
 pub mod fitzhugh_nagumo;
+pub mod gif;
 
 // Re-export main types for convenience
 pub use lif::LifNeuron;
@@ -51,6 +52,7 @@ pub use lapicque::LapicqueNeuron;
 pub use hebbian::{apply_classical_stdp, HebbianIzhikevichNetwork, StdpParams};
 pub use hodgkin_huxley::HodgkinHuxleyNeuron;
 pub use fitzhugh_nagumo::FitzHughNagumoNeuron;
+pub use gif::GifNeuron;
 
 /// Number of input channels supported by default
 pub const NUM_INPUT_CHANNELS: usize = 16;

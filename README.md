@@ -23,7 +23,7 @@ A generalized Rust library for spiking neural networks (SNNs), centered on biolo
 
 ```toml
 [dependencies]
-neuromod = "0.4.0"
+neuromod = "0.3"
 ```
 
 ## Quick Start

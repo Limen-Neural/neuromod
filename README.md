@@ -1,4 +1,4 @@
-# Neuromod — Pure Neuromorphic Research Library
+# Neuromod — General-Purpose Spiking Neural Network Library
 
 [![Crates.io](https://img.shields.io/crates/v/neuromod.svg)](https://crates.io/crates/neuromod)
 [![Docs.rs](https://img.shields.io/badge/docs.rs-neuromod-blue.svg)](https://docs.rs/neuromod)
@@ -7,7 +7,7 @@
 
 **v0.3.0 — Neuroscience Foundation**
 
-A lightweight, zero-unsafe Rust crate for neuromorphic computing, focused on **Med-Tech research** and **hardware-aware AI**. `neuromod` provides a biologically grounded Spiking Neural Network (SNN) engine designed for rigorous scientific experimentation, embedded deployment on reconfigurable hardware, and future Brain-Computer Interface (BCI) research.
+A lightweight, zero-unsafe Rust crate for **general-purpose Spiking Neural Network (SNN)** research and engineering. `neuromod` provides a biologically grounded SNN engine designed for rigorous scientific experimentation, embedded deployment on reconfigurable hardware, and exploratory neuromorphic applications.
 
 Optimised for high-performance execution on **Fedora 43 (Ship of Theseus)** workstations and bare-metal FPGA targets.
 
@@ -19,7 +19,7 @@ Optimised for high-performance execution on **Fedora 43 (Ship of Theseus)** work
 
 `neuromod` is built on a philosophy of **sovereign, high-fidelity engineering** — every neuron model, every plasticity rule, and every hardware export honours the precision demanded by both neuroscience and systems engineering. There are no shortcuts: the mathematics are correct, the memory footprint is minimal, and the abstractions are thin enough to run on bare metal.
 
-This library is intended as a research-grade foundation for the EE and biomedical engineering community — from cortical dynamics simulation to closed-loop neuroprosthetic control.
+This library is intended as a research-grade foundation for the scientific and engineering community — from cortical dynamics simulation to neuromorphic hardware experiments.
 
 ---
 
@@ -101,9 +101,9 @@ let fired = hh.step(10.0, 0.05);  // 10 µA/cm², dt = 50 µs
 ```rust
 use neuromod::IzhikevichNeuron;
 
-let mut rs = IzhikevichNeuron::regular_spiking();     // RS cortical excitatory
-let mut ib = IzhikevichNeuron::intrinsically_bursting();
-let fired = rs.step(10.0, 0.25);
+let mut rs = IzhikevichNeuron::new_regular_spiking();  // RS cortical excitatory
+let mut ib = IzhikevichNeuron::new_bursting();
+let fired = rs.step(10.0);
 ```
 
 ### FitzHugh-Nagumo (1961) — Non-linear Oscillators
@@ -119,20 +119,22 @@ let fired = excitable.step(0.7, 0.5);
 ### Reward-Modulated STDP (R-STDP)
 
 ```rust
-use neuromod::{apply_rstdp, StdpParams};
+use neuromod::{SpikingNetwork, NeuroModulators, StdpParams};
 
+let mut network = SpikingNetwork::new();
 let params = StdpParams::default();
-// dopamine_signal gates the Hebbian update
-let new_w = apply_rstdp(pre_spike_time, post_spike_time, current_weight, dopamine_signal, &params);
+// dopamine signal in NeuroModulators gates the Hebbian weight update
+network.apply_stdp(&params);
 ```
 
 ### Classical Hebbian STDP
 
 ```rust
-use neuromod::{apply_classical_stdp, StdpParams};
+use neuromod::{SpikingNetwork, StdpParams};
 
+let mut network = SpikingNetwork::new();
 let params = StdpParams::default();
-let new_w = apply_classical_stdp(pre_spike_time, post_spike_time, current_weight, &params);
+network.apply_stdp(&params);
 ```
 
 ---
@@ -164,7 +166,7 @@ let new_w = apply_classical_stdp(pre_spike_time, post_spike_time, current_weight
 
 | Crate | Focus | Neuromodulators | Hardware / FPGA | Biological Models | Plasticity |
 |---|---|---|---|---|---|
-| **neuromod** | Pure neuromorphic research | Dopamine, Cortisol, ACh, Tempo | Q8.8 `.mem` export, `no_std`, Artix-7 ready | 5 canonical models | Hebbian + R-STDP |
+| **neuromod** | General-purpose SNN research | Dopamine, Cortisol, ACh, Tempo | Q8.8 `.mem` export, `no_std`, Artix-7 ready | 5 canonical models | Hebbian + R-STDP |
 | `spiking_neural_networks` | General biophysical simulation | Basic reward only | None | High-fidelity | Limited |
 | `omega-snn` | Cognitive SNN architecture | Dopamine + NE + Serotonin + ACh | None | Population coding | Sparse |
 | `neuburn` | GPU training (Burn framework) | None | GPU training only | Spiking LSTM | Surrogate gradients |
@@ -176,8 +178,8 @@ let new_w = apply_classical_stdp(pre_spike_time, post_spike_time, current_weight
 ### v0.4.0 — Hardware Integration
 - [ ] **Intel Lava Framework integration** — Python/Rust bridge for execution on Intel Loihi 2 neuromorphic chips via the Lava runtime
 
-### v0.5.0 — Neural Bridge & BCI Research
-- [ ] **Neural Bridge** — a low-latency, closed-loop interface layer for Brain-Computer Interface (BCI) research; targets real-time bidirectional communication between decoded neural spike trains and SNN actuator networks
+### v0.5.0 — Exploratory Extensions
+- [ ] **Neural Bridge** *(exploratory)* — a low-latency, closed-loop interface layer for Brain-Computer Interface (BCI) research; targets real-time bidirectional communication between decoded neural spike trains and SNN actuator networks
 - [ ] Spike sorting pre-processing pipeline for Utah Array / Neuropixels data ingestion
 - [ ] Hardware-in-the-loop (HIL) validation against recorded cortical datasets
 

@@ -1,9 +1,9 @@
 [package]
 name = "neuromod"
-version = "0.3.0"
+version = "0.4.0"
 edition = "2024"
 license = "GPL-3.0"
-authors = ["Raul Montoya Cardneas <montoyaraul34@gmail.com>"]
+authors = ["Raul Montoya Cardenas <montoyaraul34@gmail.com>"]
 description = "A high-performance Rust SNN library for neuroscience research and pure spiking neural network library featuring LIF, Izhikevich, Hebbian, Nagumo, Lapicque and Hodgkin-Huxley dynamics."
 exclude = ["docs/"]
 repository = "https://github.com/Limen-Neural/neuromod"

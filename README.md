@@ -38,9 +38,9 @@ This library is intended as a research-grade foundation for the EE and biomedica
 
 ## Core Components
 
-### 16-Channel SNN Bank
+### Configurable SNN Bank
 
-The engine operates a **16-channel spiking neuron bank** structured around a coincidence detector and a global inhibitory interneuron. Each channel is independently configurable with any supported neuron model, enabling heterogeneous network topologies for multi-modal sensory encoding, population coding, and closed-loop feedback experiments.
+The engine supports a default **16-channel** bank via `SpikingNetwork::new()` and dynamic sizing via `SpikingNetwork::with_dimensions(...)`. Topology is intentionally neutral at initialization so external systems can define channel wiring and roles.
 
 ```rust
 use neuromod::{SpikingNetwork, NeuroModulators};
@@ -48,7 +48,11 @@ use neuromod::{SpikingNetwork, NeuroModulators};
 let mut network = SpikingNetwork::new();
 let stimuli = [0.5f32; 16]; // 16-channel sensory input
 let modulators = NeuroModulators::default();
-let spikes = network.step(&stimuli, &modulators);
+let spikes = network.step(&stimuli, &modulators).unwrap();
+
+let mut large = SpikingNetwork::with_dimensions(518, 5, 518);
+let large_stimuli = vec![0.25f32; 518];
+let _ = large.step(&large_stimuli, &modulators).unwrap();
 ```
 
 ### Integrated Neuron Models

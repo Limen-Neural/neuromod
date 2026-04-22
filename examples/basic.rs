@@ -20,7 +20,9 @@ fn main() {
              modulators.dopamine, modulators.cortisol, modulators.acetylcholine, modulators.tempo);
     
     // Step the network
-    let spikes = network.step(&stimuli, &modulators);
+    let spikes = network
+        .step(&stimuli, &modulators)
+        .expect("stimuli length must match network channels");
     println!("✓ Network step completed");
     println!("  Neurons that spiked: {:?}", spikes);
     

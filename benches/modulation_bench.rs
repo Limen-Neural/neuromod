@@ -8,7 +8,9 @@ fn bench_network_step_baseline(c: &mut Criterion) {
     
     c.bench_function("network_step_baseline", |b| {
         b.iter(|| {
-            network.step(black_box(&stimuli), black_box(&modulators));
+            network
+                .step(black_box(&stimuli), black_box(&modulators))
+                .expect("stimuli length must match network channels");
         });
     });
 }
@@ -21,7 +23,9 @@ fn bench_network_step_with_dopamine(c: &mut Criterion) {
     
     c.bench_function("network_step_with_dopamine", |b| {
         b.iter(|| {
-            network.step(black_box(&stimuli), black_box(&modulators));
+            network
+                .step(black_box(&stimuli), black_box(&modulators))
+                .expect("stimuli length must match network channels");
         });
     });
 }
@@ -34,7 +38,9 @@ fn bench_network_step_with_cortisol(c: &mut Criterion) {
     
     c.bench_function("network_step_with_cortisol", |b| {
         b.iter(|| {
-            network.step(black_box(&stimuli), black_box(&modulators));
+            network
+                .step(black_box(&stimuli), black_box(&modulators))
+                .expect("stimuli length must match network channels");
         });
     });
 }
@@ -47,7 +53,9 @@ fn bench_network_step_with_acetylcholine(c: &mut Criterion) {
     
     c.bench_function("network_step_with_acetylcholine", |b| {
         b.iter(|| {
-            network.step(black_box(&stimuli), black_box(&modulators));
+            network
+                .step(black_box(&stimuli), black_box(&modulators))
+                .expect("stimuli length must match network channels");
         });
     });
 }
@@ -63,7 +71,9 @@ fn bench_network_step_with_all_modulators(c: &mut Criterion) {
     
     c.bench_function("network_step_with_all_modulators", |b| {
         b.iter(|| {
-            network.step(black_box(&stimuli), black_box(&modulators));
+            network
+                .step(black_box(&stimuli), black_box(&modulators))
+                .expect("stimuli length must match network channels");
         });
     });
 }
@@ -76,7 +86,11 @@ fn bench_modulator_comparison(c: &mut Criterion) {
         let mut network = SpikingNetwork::new();
         let stimuli = [0.5f32; 16];
         let modulators = NeuroModulators::default();
-        b.iter(|| network.step(black_box(&stimuli), black_box(&modulators)));
+        b.iter(|| {
+            network
+                .step(black_box(&stimuli), black_box(&modulators))
+                .expect("stimuli length must match network channels")
+        });
     });
     
     // High dopamine (reward state)
@@ -85,7 +99,11 @@ fn bench_modulator_comparison(c: &mut Criterion) {
         let stimuli = [0.5f32; 16];
         let mut modulators = NeuroModulators::default();
         modulators.dopamine = 0.9;
-        b.iter(|| network.step(black_box(&stimuli), black_box(&modulators)));
+        b.iter(|| {
+            network
+                .step(black_box(&stimuli), black_box(&modulators))
+                .expect("stimuli length must match network channels")
+        });
     });
     
     // High cortisol (stress state)
@@ -94,7 +112,11 @@ fn bench_modulator_comparison(c: &mut Criterion) {
         let stimuli = [0.5f32; 16];
         let mut modulators = NeuroModulators::default();
         modulators.cortisol = 0.9;
-        b.iter(|| network.step(black_box(&stimuli), black_box(&modulators)));
+        b.iter(|| {
+            network
+                .step(black_box(&stimuli), black_box(&modulators))
+                .expect("stimuli length must match network channels")
+        });
     });
     
     // High acetylcholine (focus state)
@@ -103,7 +125,11 @@ fn bench_modulator_comparison(c: &mut Criterion) {
         let stimuli = [0.5f32; 16];
         let mut modulators = NeuroModulators::default();
         modulators.acetylcholine = 0.9;
-        b.iter(|| network.step(black_box(&stimuli), black_box(&modulators)));
+        b.iter(|| {
+            network
+                .step(black_box(&stimuli), black_box(&modulators))
+                .expect("stimuli length must match network channels")
+        });
     });
     
     // All modulators active
@@ -115,7 +141,11 @@ fn bench_modulator_comparison(c: &mut Criterion) {
         modulators.cortisol = 0.3;
         modulators.acetylcholine = 0.7;
         modulators.tempo = 1.2;
-        b.iter(|| network.step(black_box(&stimuli), black_box(&modulators)));
+        b.iter(|| {
+            network
+                .step(black_box(&stimuli), black_box(&modulators))
+                .expect("stimuli length must match network channels")
+        });
     });
     
     group.finish();
@@ -130,7 +160,11 @@ fn bench_dopamine_scaling(c: &mut Criterion) {
             let stimuli = [0.5f32; 16];
             let mut modulators = NeuroModulators::default();
             modulators.dopamine = dopamine;
-            b.iter(|| network.step(black_box(&stimuli), black_box(&modulators)));
+            b.iter(|| {
+                network
+                    .step(black_box(&stimuli), black_box(&modulators))
+                    .expect("stimuli length must match network channels")
+            });
         });
     }
     

@@ -13,7 +13,8 @@ pub struct NeuroModulators {
     pub cortisol: f32,
     pub acetylcholine: f32,
     pub tempo: f32,
-    pub mining_dopamine: f32,   // NEW
+    /// Auxiliary dopamine-like channel for external reward shaping.
+    pub aux_dopamine: f32,
 }
 
 impl Default for NeuroModulators {
@@ -23,45 +24,50 @@ impl Default for NeuroModulators {
             cortisol: 0.0,
             acetylcholine: 0.0,
             tempo: 0.0,
-            mining_dopamine: 0.0,   // NEW
+            aux_dopamine: 0.0,
         }
     }
 }
 
 impl NeuroModulators {
-    /// Create neuromodulators from hardware telemetry
+    /// Create neuromodulators from generic external signals.
     /// 
     /// # Arguments
-    /// * `gpu_temp` - GPU temperature in Celsius
-    /// * `power_w` - Power draw in watts
-    /// * `hashrate_mh` - Hashrate in MH/s
-    /// * `gpu_clock_mhz` - GPU clock speed in MHz
-    pub fn from_telemetry(gpu_temp: f32, power_w: f32, hashrate_mh: f32, gpu_clock_mhz: f32) -> Self {
-        // DOPAMINE: Proportional to hashrate (Reward for doing work)
-        let dopamine = (hashrate_mh / 0.0105).clamp(0.3, 1.0);
+    /// * `thermal_signal` - Thermal stress proxy
+    /// * `power_signal` - Power/load stress proxy
+    /// * `throughput_signal` - Throughput-like signal (generic performance proxy)
+    /// * `timing_signal` - Timing/frequency proxy
+    pub fn from_signals(
+        thermal_signal: f32,
+        power_signal: f32,
+        throughput_signal: f32,
+        timing_signal: f32,
+    ) -> Self {
+        // DOPAMINE: Proportional to throughput-like signal.
+        let dopamine = (throughput_signal / 0.0105).clamp(0.3, 1.0);
 
-        // CORTISOL: Stress from heat or power spikes
-        let heat_stress: f32 = if gpu_temp > 1.0 {
-            ((gpu_temp - 83.0) / 10.0).clamp(0.0, 1.0)
+        // CORTISOL: Stress from thermal or load spikes.
+        let thermal_stress: f32 = if thermal_signal > 1.0 {
+            ((thermal_signal - 83.0) / 10.0).clamp(0.0, 1.0)
         } else {
             0.0
         };
-        let power_stress = ((power_w - 400.0) / 50.0).clamp(0.0, 1.0);
-        let cortisol = heat_stress.max(power_stress).max(0.0);
+        let power_stress = ((power_signal - 400.0) / 50.0).clamp(0.0, 1.0);
+        let cortisol = thermal_stress.max(power_stress).max(0.0);
 
-        // ACETYLCHOLINE: Stability of Vcore (Focus)
-        let vddcr_dev = (1.05_f32 - 1.0_f32).abs(); // Simplified - would use actual Vcore
-        let acetylcholine = (1.0_f32 - vddcr_dev * 2.0_f32).clamp(0.4_f32, 1.0_f32);
+        // ACETYLCHOLINE: Signal stability proxy (focus-like state).
+        let stability_dev = (1.05_f32 - 1.0_f32).abs();
+        let acetylcholine = (1.0_f32 - stability_dev * 2.0_f32).clamp(0.4_f32, 1.0_f32);
 
-        // TEMPO: Clock-driven temporal scaling
-        let tempo = (gpu_clock_mhz / 2640.0).clamp(0.5, 2.0);
+        // TEMPO: Timing-driven temporal scaling.
+        let tempo = (timing_signal / 2640.0).clamp(0.5, 2.0);
 
         Self {
             dopamine,
             cortisol,
             acetylcholine,
             tempo,
-            mining_dopamine: 0.0, // Default to no mining reward
+            aux_dopamine: 0.0,
         }
     }
 
@@ -70,7 +76,7 @@ impl NeuroModulators {
         self.dopamine = (self.dopamine * DOPAMINE_DECAY).max(0.0);
         self.cortisol = (self.cortisol * CORTISOL_DECAY).max(0.0);
         self.acetylcholine = (self.acetylcholine * ACETYLCHOLINE_DECAY).max(0.0);
-        self.mining_dopamine = (self.mining_dopamine * DOPAMINE_DECAY).max(0.0);
+        self.aux_dopamine = (self.aux_dopamine * DOPAMINE_DECAY).max(0.0);
     }
 
     /// Add dopamine reward
@@ -93,9 +99,9 @@ impl NeuroModulators {
         self.tempo = tempo.clamp(0.0, 2.0);
     }
 
-    /// Add mining dopamine reward
-    pub fn add_mining_reward(&mut self, amount: f32) {
-        self.mining_dopamine = (self.mining_dopamine + amount).min(1.0);
+    /// Add reward to the auxiliary dopamine channel.
+    pub fn add_aux_reward(&mut self, amount: f32) {
+        self.aux_dopamine = (self.aux_dopamine + amount).min(1.0);
     }
 
     /// Check if system is under high stress
@@ -113,9 +119,9 @@ impl NeuroModulators {
         self.acetylcholine > 0.6
     }
 
-    /// Check if mining is rewarding
-    pub fn is_mining_rewarded(&self) -> bool {
-        self.mining_dopamine > 0.3
+    /// Check if the auxiliary reward channel is active.
+    pub fn is_aux_rewarded(&self) -> bool {
+        self.aux_dopamine > 0.3
     }
 }
 
@@ -133,8 +139,8 @@ mod tests {
     }
 
     #[test]
-    fn test_from_telemetry() {
-        let mods = NeuroModulators::from_telemetry(75.0, 300.0, 0.05, 2640.0);
+    fn test_from_signals() {
+        let mods = NeuroModulators::from_signals(75.0, 300.0, 0.05, 2640.0);
         assert!(mods.dopamine > 0.0);
         assert!(mods.acetylcholine > 0.0);
         assert_eq!(mods.tempo, 1.0);

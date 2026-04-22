@@ -39,7 +39,9 @@ fn main() {
     // Scenario 1: No reward (baseline)
     println!("--- Scenario 1: No Reward (Baseline) ---");
     modulators = NeuroModulators::default();
-    let spikes = network.step(&stimuli, &modulators);
+    let spikes = network
+        .step(&stimuli, &modulators)
+        .expect("stimuli length must match network channels");
     println!("  Modulators: dopamine={:.2}, cortisol={:.2}", 
              modulators.dopamine, modulators.cortisol);
     println!("  Neurons spiked: {}", spikes.len());
@@ -50,7 +52,9 @@ fn main() {
     modulators.dopamine = 0.9;
     modulators.cortisol = 0.1;
     modulators.acetylcholine = 0.7;
-    let spikes = network.step(&stimuli, &modulators);
+    let spikes = network
+        .step(&stimuli, &modulators)
+        .expect("stimuli length must match network channels");
     println!("  Modulators: dopamine={:.2}, cortisol={:.2}, ach={:.2}", 
              modulators.dopamine, modulators.cortisol, modulators.acetylcholine);
     println!("  Neurons spiked: {}", spikes.len());
@@ -70,7 +74,9 @@ fn main() {
     modulators.dopamine = 0.2;
     modulators.cortisol = 0.8;
     modulators.acetylcholine = 0.3;
-    let spikes = network.step(&stimuli, &modulators);
+    let spikes = network
+        .step(&stimuli, &modulators)
+        .expect("stimuli length must match network channels");
     println!("  Modulators: dopamine={:.2}, cortisol={:.2}, ach={:.2}", 
              modulators.dopamine, modulators.cortisol, modulators.acetylcholine);
     println!("  Neurons spiked: {}", spikes.len());
@@ -85,7 +91,9 @@ fn main() {
     modulators.dopamine = 0.6;
     modulators.cortisol = 0.1;
     modulators.acetylcholine = 0.9;
-    let spikes = network.step(&stimuli, &modulators);
+    let spikes = network
+        .step(&stimuli, &modulators)
+        .expect("stimuli length must match network channels");
     println!("  Modulators: dopamine={:.2}, cortisol={:.2}, ach={:.2}", 
              modulators.dopamine, modulators.cortisol, modulators.acetylcholine);
     println!("  Neurons spiked: {}", spikes.len());
@@ -125,6 +133,6 @@ fn main() {
     println!("  • Dopamine enables STDP learning (credit assignment)");
     println!("  • Cortisol reduces network sensitivity (stress response)");
     println!("  • Acetylcholine adjusts decay rates (focus/memory)");
-    println!("  • Modulators can be computed from environment/telemetry");
+    println!("  • Modulators can be computed from environment signals");
     println!("  • Decay provides homeostasis (modulators return to baseline)");
 }

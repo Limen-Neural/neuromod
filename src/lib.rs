@@ -5,7 +5,7 @@
 //!
 //! ## Provenance
 //!
-//! Extracted from Eagle-Lander, the author's own private neuromorphic GPU supervisor
+//! Extracted from Eagle-Lander, the author's own private neuromorphic supervisor
 //! repository (closed-source). The LIF/Izhikevich network, STDP, and neuromodulator
 //! system ran in production before being published as a standalone crate on crates.io.
 //!
@@ -16,34 +16,25 @@
 //! - **Reward STDP Learning**: Spike-timing-dependent plasticity with reward modulation
 //! - **Neuromodulators**: Dopamine, cortisol, acetylcholine, and tempo control
 //!
-//! ## For Rust new comers think of lib.rs as like a house.  libs.rs is like a front door - it tells Rust which rooms (modules) are in the house and which furniture (types/functions) to make available to visitors.  
-//! ## So when you import the crate, you can access the furniture that lib.rs has chosen to show you.  The modules are like different rooms in the house where the actual work happens.  
-//! ## If you want to change how a specific piece of furniture works, you go into the room (module) where it's made and change it there.  
-//! ## But if you want to add a new piece of furniture or a new room, you also go into lib.rs and tell it about your new creation so that visitors can see it when they come in.  
-//! ## So lib.rs is like the blueprint and directory for the whole crate, while the modules are where the actual code lives and does its thing.
-//!
-//! Note: I already made my own mining repo so I am deleting any mining related code from this repo.  So the mining reward struct and algorithm will be deleted from this repo.  
-//! -- I am keeping it in the mining repo.  So I am deleting the mining module from this repo as well.  So I am deleting the 'mod mining;' line from this file as well.  
-//! -- I am also deleting the 'pub use mining::MiningReward;' line from this file as well.  So I am also deleting the 'use mining::MiningReward;' line from engine.rs as well.  
-//! -- So I am also deleting any references to 'MiningReward' in engine.rs as well.  So I am also deleting any references to 'mining' in engine.rs as well.  So I am also deleting any references to 'mining' in traits.rs as well.  
-//! -- So I am also deleting any references to 'HftReward' in traits.rs as well.  So I am also deleting the 'pub use traits::HftReward;' line from this file as well.
-//!
 //! ```rust
-//! use neuromod::{SpikingNetwork, NeuroModulators};
+//! use neuromod::{NeuroModulators, SpikingNetwork};
 //!
 //! let mut network = SpikingNetwork::new();
-//! let stimuli = [0.5f32; 16]; // 16-channel input
+//! let stimuli = [0.5f32; 16];
 //! let modulators = NeuroModulators::default();
-//! // Simulate one step of the network with the given stimuli and modulators
-//! let output = network.step(&stimuli, &modulators);
-//! println!("Neurons that fired: {:?}", output);
+//! let output = network.step(&stimuli, &modulators).unwrap();
+//! println!("Neurons that fired: {output:?}");
+//!
+//! // Or build dynamically for larger architectures.
+//! let mut large = SpikingNetwork::with_dimensions(518, 5, 518);
+//! let large_input = vec![0.25f32; 518];
+//! let _ = large.step(&large_input, &modulators).unwrap();
 //! ```
 pub mod lif;
 pub mod izhikevich;
 pub mod rm_stdp;
 pub mod modulators;
 pub mod engine;
-pub mod traits;
 // Godfathers of Neuroscience
 pub mod lapicque;
 pub mod hebbian;
@@ -54,7 +45,7 @@ pub mod fitzhugh_nagumo;
 pub use lif::LifNeuron;
 pub use izhikevich::IzhikevichNeuron;
 pub use modulators::NeuroModulators;
-pub use engine::SpikingNetwork;
+pub use engine::{SpikingNetwork, StepError};
 pub use rm_stdp::{EligibilityTrace, RmStdpConfig};
 pub use lapicque::LapicqueNeuron;
 pub use hebbian::{apply_classical_stdp, HebbianIzhikevichNetwork, StdpParams};
@@ -63,4 +54,3 @@ pub use fitzhugh_nagumo::FitzHughNagumoNeuron;
 
 /// Number of input channels supported by default
 pub const NUM_INPUT_CHANNELS: usize = 16;
-

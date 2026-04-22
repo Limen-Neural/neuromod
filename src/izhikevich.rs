@@ -44,7 +44,7 @@ impl IzhikevichNeuron {
     }
 
     /// Fast-spiking (FS) interneuron — high-frequency, no adaptation.
-    /// Models inhibitory interneurons; ideal for global inhibition and bear/bull gating.
+    /// Models inhibitory interneurons; useful for global inhibition.
     pub fn new_fast_spiking() -> Self {
         let a = 0.1;
         let b = 0.2;

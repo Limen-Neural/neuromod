@@ -30,8 +30,11 @@ jobs:
       - name: Generate coverage (lcov)
         run: cargo llvm-cov --all-features --lcov --output-path lcov.info
 
+      - name: Install nextest
+        uses: taiki-e/install-action@nextest
+
       - name: Run tests (JUnit)
-        run: cargo test --all-features -- --format junit > junit.xml
+        run: cargo nextest run --all-features --junit junit.xml
 
       - name: Upload test results to Codecov
         if: ${{ !cancelled() }}

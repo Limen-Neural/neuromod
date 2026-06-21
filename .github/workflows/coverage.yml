@@ -37,5 +37,5 @@ jobs:
         with:
           files: lcov.info
           slug: Limen-Neural/neuromod
-          fail_ci_if_error: true
+          fail_ci_if_error: false
           verbose: true

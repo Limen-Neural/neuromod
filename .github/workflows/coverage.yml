@@ -30,16 +30,8 @@ jobs:
       - name: Generate coverage (lcov)
         run: cargo llvm-cov --all-features --lcov --output-path lcov.info
 
-      - name: Setup Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-
-      - name: Install pytest
-        run: pip install pytest
-
       - name: Run tests (JUnit)
-        run: pytest --junitxml=junit.xml -o junit_family=legacy
+        run: cargo test --all-features -- --format junit > junit.xml
 
       - name: Upload test results to Codecov
         if: ${{ !cancelled() }}

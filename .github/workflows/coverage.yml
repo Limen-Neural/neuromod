@@ -32,6 +32,5 @@ jobs:
         uses: codecov/codecov-action@13ce06bf5ae3c25224734f0e794c2e7df17b0911 # v5.3.1
         with:
           files: lcov.info
-          owner: Limen-Neural
-          slug: Limen-Neural/neuromod
+          token: ${{ secrets.CODECOV_TOKEN }}
           fail_ci_if_error: false

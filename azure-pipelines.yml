@@ -44,7 +44,8 @@ jobs:
     displayName: 'Test'
 
   - script: |
-      cargo install cargo-llvm-cov
-      cargo llvm-cov --all-features --lcov --output-path lcov.info || true
+      cargo install cargo-llvm-cov@0.6.10
+      cargo llvm-cov --all-features --lcov --output-path lcov.info
     displayName: 'Coverage (optional)'
+    continueOnError: true
     condition: eq(variables['imageName'], 'ubuntu-latest')

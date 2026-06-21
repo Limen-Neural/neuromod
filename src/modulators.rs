@@ -111,22 +111,33 @@ impl NeuroModulators {
         throughput_signal: f32,
         timing_signal: f32,
     ) -> Self {
-        let dopamine = (throughput_signal / profile.throughput_scale).clamp(0.0, 1.0);
+        let safe_div = |num: f32, den: f32| -> f32 {
+            if den.abs() > f32::EPSILON {
+                num / den
+            } else {
+                0.0
+            }
+        };
+
+        let dopamine = safe_div(throughput_signal, profile.throughput_scale).clamp(0.0, 1.0);
 
         let thermal_stress = if thermal_signal > profile.thermal_threshold {
-            ((thermal_signal - profile.thermal_threshold) / profile.thermal_threshold)
-                .clamp(0.0, 1.0)
+            safe_div(
+                thermal_signal - profile.thermal_threshold,
+                profile.thermal_threshold,
+            )
+            .clamp(0.0, 1.0)
         } else {
             0.0
         };
         let power_stress =
-            ((power_signal - profile.power_baseline) / profile.power_scale).clamp(0.0, 1.0);
+            safe_div(power_signal - profile.power_baseline, profile.power_scale).clamp(0.0, 1.0);
         let norepinephrine = thermal_stress.max(power_stress);
 
         let stability_dev = (throughput_signal - profile.stability_target).abs();
         let serotonin = (1.0 - stability_dev * 2.0).clamp(0.0, 1.0);
 
-        let acetylcholine = (timing_signal / profile.timing_scale).clamp(0.0, 1.0);
+        let acetylcholine = safe_div(timing_signal, profile.timing_scale).clamp(0.0, 1.0);
 
         Self {
             dopamine,

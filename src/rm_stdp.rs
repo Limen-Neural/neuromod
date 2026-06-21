@@ -38,7 +38,10 @@ pub struct RmStdpConfig {
 impl EligibilityTrace {
     // Call this method each time step to decay the eligibility trace
     pub fn decay(&mut self) {
+        // Guard against non-positive tau which would cause division by zero or
+        // exponential growth instead of decay.
+        let tau = self.tau.max(f32::EPSILON);
         // Exponential decay of the eligibility trace over time
-        self.value *= (-1.0 / self.tau).exp(); // Exponential decay based on tau
+        self.value *= (-1.0 / tau).exp(); // Exponential decay based on tau
     }
 }

@@ -148,11 +148,25 @@ cargo test
 cargo clippy --all-targets --all-features -- -D warnings
 cargo fmt --check
 cargo bench --no-run
+
+# Coverage (matches CI)
+cargo install cargo-llvm-cov
+cargo llvm-cov --all-features --lcov --output-path lcov.info
+# HTML report: cargo llvm-cov --all-features --html
 ```
 
 ## License
 
-GPL-3.0
+This project is licensed under either of
+
+- Apache License, Version 2.0, ([LICENSE-APACHE-2.0](LICENSE-APACHE-2.0) or [http://www.apache.org/licenses/LICENSE-2.0])
+- MIT license ([LICENSE-MIT](LICENSE-MIT) or [http://opensource.org/licenses/MIT])
+
+at your option.
+
+## Coverage
+
+[![codecov](https://codecov.io/gh/Limen-Neural/neuromod/branch/main/graph/badge.svg)](https://codecov.io/gh/Limen-Neural/neuromod)
 
 ## Links
 

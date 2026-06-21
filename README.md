@@ -154,6 +154,10 @@ cargo bench --no-run
 
 GPL-3.0
 
+## Coverage
+
+[![codecov](https://codecov.io/gh/Limen-Neural/neuromod/branch/main/graph/badge.svg)](https://codecov.io/gh/Limen-Neural/neuromod)
+
 ## Links
 
 - Crates.io: https://crates.io/crates/neuromod

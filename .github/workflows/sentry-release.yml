@@ -1,0 +1,31 @@
+# Sentry release creation workflow (separate from main CI and coverage per observability split).
+# Third-party Actions are pinned to immutable commit SHAs (Aikido supply-chain policy).
+name: Sentry Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  release:
+    name: Create Sentry Release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: Install sentry-cli
+        uses: taiki-e/install-action@sentry-cli
+
+      - name: Create Sentry release
+        env:
+          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+          SENTRY_ORG: ${{ secrets.SENTRY_ORG }}
+          SENTRY_PROJECT: neuromod
+        run: |
+          sentry-cli releases new ${{ github.ref_name }}
+          sentry-cli releases set-commits ${{ github.ref_name }} --auto
+          sentry-cli releases finalize ${{ github.ref_name }}

@@ -35,6 +35,7 @@ jobs:
               - 'src/**'
               - 'examples/**'
               - 'benches/**'
+              - 'tests/**'
 
       - name: Check formatting
         run: cargo fmt --check
@@ -55,9 +56,13 @@ jobs:
         if: steps.changes.outputs.rust == 'true'
         run: |
           cargo install cargo-hack --locked
-          cargo hack check --feature-powerset --exclude-no-default-features --keep-going || true
+          cargo hack check --feature-powerset --exclude-no-default-features --keep-going
 
       - name: Verify docs are domain-agnostic
         run: |
           cargo doc --no-deps
           ! grep -riE 'spikenaut|\bhft\b|\bmining\b|\bcrypto\b|eagle-lander' target/doc/neuromod/
+
+      - name: Verify optional sentry feature compiles
+        if: steps.changes.outputs.rust == 'true'
+        run: cargo check --features sentry

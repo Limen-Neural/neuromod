@@ -26,10 +26,13 @@ jobs:
   - checkout: self
     persistCredentials: false
 
-  - task: UseRust@1
-    inputs:
-      toolchain: stable
-      components: 'rustfmt,clippy'
+  - script: |
+      curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable
+      echo "##vso[task.prependpath]$HOME/.cargo/bin"
+    displayName: 'Install Rust (rustup)'
+
+  - script: rustup component add rustfmt clippy
+    displayName: 'Install rustfmt + clippy'
 
   - script: cargo fmt -- --check
     displayName: 'Check formatting'

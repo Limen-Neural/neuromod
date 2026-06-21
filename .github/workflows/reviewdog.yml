@@ -21,7 +21,7 @@ jobs:
           components: clippy, rustfmt
 
       - name: reviewdog (clippy)
-        uses: reviewdog/action-clippy@3f3e08d6b1c3a9c9a7a8c0e1f5a2b3c4d5e6f7a8 # v1 (pinned SHA example; update to latest pinned)
+        uses: reviewdog/action-clippy@master
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           reporter: github-pr-review
@@ -30,7 +30,7 @@ jobs:
           fail_on_error: false
 
       - name: reviewdog (rustfmt)
-        uses: reviewdog/action-rustfmt@e6f1c4a3b2c1d0e9f8a7b6c5d4e3f2a1b0c9d8e7 # v1 (pinned)
+        uses: reviewdog/action-rustfmt@master
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           reporter: github-pr-review

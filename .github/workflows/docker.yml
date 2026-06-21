@@ -30,4 +30,4 @@ jobs:
 
       - name: Run tests inside container (example)
         run: |
-          docker run --rm neuromod:test cargo test --all-features --quiet || echo "Docker test step placeholder (add full test when Dockerfile ready)"
+          docker run --rm neuromod:test cargo test --all-features --quiet

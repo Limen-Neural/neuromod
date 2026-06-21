@@ -1,6 +1,6 @@
 # Codecov coverage workflow (separate from main CI per observability split).
 # Third-party Actions are pinned to immutable commit SHAs (Aikido supply-chain policy).
-name: Coverage
+name: Codecov
 
 on:
   push:
@@ -9,8 +9,8 @@ on:
     branches: [main]
 
 jobs:
-  coverage:
-    name: Coverage
+  codecov:
+    name: Codecov
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
@@ -30,10 +30,12 @@ jobs:
       - name: Generate coverage (lcov)
         run: cargo llvm-cov --all-features --lcov --output-path lcov.info
 
-      - name: Upload to Codecov
+      - name: Codecov
         uses: codecov/codecov-action@04b047e8bb82a0c002c8312c1c880fbc6a999d45 # v5
+        env:
+          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
         with:
           files: lcov.info
-          token: ${{ secrets.CODECOV_TOKEN }}
           slug: Limen-Neural/neuromod
-          fail_ci_if_error: false
+          fail_ci_if_error: true
+          verbose: true

@@ -23,7 +23,7 @@ jobs:
           components: clippy, rustfmt
 
       - name: Install cargo-llvm-cov
-        uses: taiki-e/install-action@cargo-llvm-cov
+        uses: taiki-e/install-action@8b3c737da4b541bf0fb5a3e0488ff20535badac9 # latest
 
       - name: Generate coverage (lcov)
         run: cargo llvm-cov --all-features --lcov --output-path lcov.info
@@ -32,5 +32,6 @@ jobs:
         uses: codecov/codecov-action@13ce06bf5ae3c25224734f0e794c2e7df17b0911 # v5.3.1
         with:
           files: lcov.info
-          token: ${{ secrets.CODECOV_TOKEN }}
+          owner: Limen-Neural
+          slug: Limen-Neural/neuromod
           fail_ci_if_error: false

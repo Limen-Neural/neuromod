@@ -148,6 +148,11 @@ cargo test
 cargo clippy --all-targets --all-features -- -D warnings
 cargo fmt --check
 cargo bench --no-run
+
+# Coverage (matches CI)
+cargo install cargo-llvm-cov
+cargo llvm-cov --all-features --lcov --output-path lcov.info
+# HTML report: cargo llvm-cov --all-features --html
 ```
 
 ## License

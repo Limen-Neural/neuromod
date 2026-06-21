@@ -18,14 +18,16 @@ jobs:
           fetch-depth: 0
 
       - name: Install sentry-cli
-        uses: taiki-e/install-action@sentry-cli
+        uses: taiki-e/install-action@8b3c737da4b541bf0fb5a3e0488ff20535badac9 # latest
 
       - name: Create Sentry release
         env:
           SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
           SENTRY_ORG: ${{ secrets.SENTRY_ORG }}
           SENTRY_PROJECT: neuromod
+          RELEASE: ${{ github.ref_name }}
         run: |
-          sentry-cli releases new ${{ github.ref_name }}
-          sentry-cli releases set-commits ${{ github.ref_name }} --auto
-          sentry-cli releases finalize ${{ github.ref_name }}
+          [[ "$RELEASE" =~ ^v[0-9]+(\.[0-9]+){1,2}([-.][0-9A-Za-z]+)?$ ]] || { echo "Invalid tag: $RELEASE"; exit 1; }
+          sentry-cli releases new "$RELEASE"
+          sentry-cli releases set-commits "$RELEASE" --auto
+          sentry-cli releases finalize "$RELEASE"

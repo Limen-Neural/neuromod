@@ -108,7 +108,10 @@ mod tests {
                 break;
             }
         }
-        assert!(fired, "Lapicque neuron should fire with sustained suprathreshold input");
+        assert!(
+            fired,
+            "Lapicque neuron should fire with sustained suprathreshold input"
+        );
     }
 
     #[test]
@@ -116,7 +119,10 @@ mod tests {
         let mut n = LapicqueNeuron::new();
         n.membrane_potential = 1.0; // force above threshold
         n.check_for_spike(0);
-        assert_eq!(n.membrane_potential, 0.0, "potential should reset to 0 after spike");
+        assert_eq!(
+            n.membrane_potential, 0.0,
+            "potential should reset to 0 after spike"
+        );
     }
 
     #[test]
@@ -132,6 +138,9 @@ mod tests {
         let mut n = LapicqueNeuron::new();
         n.membrane_potential = 1.0;
         n.integrate(0.0);
-        assert!(n.membrane_potential < 1.0, "leak should reduce membrane potential");
+        assert!(
+            n.membrane_potential < 1.0,
+            "leak should reduce membrane potential"
+        );
     }
 }

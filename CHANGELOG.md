@@ -1,50 +1,47 @@
 # Changelog
 
-## [0.2.1] - 2026-03-23
+All notable changes to this project are documented in this file.
+
+## [0.5.0] - 2026-06-20
 
 ### Added
-- **Mining dopamine reward** - New `mining_dopamine` field in NeuroModulators for mining efficiency signals
-- **MiningReward struct** - Simple EMA-based mining reward calculation with thermal penalties
-- **Extended HftReward trait** - Added `mining_efficiency_bonus()` method for mining-specific rewards
-- **Lean mining integration** - Mining reward signals without bloating the core crate
+
+- **Generic neuromodulator API** — `NeuroModulators` now exposes `dopamine`, `serotonin`, `acetylcholine`, and `norepinephrine`
+- **`SignalProfile`** — configurable mapping from external signals to modulator levels (neutral defaults; optional `hardware_calibrated()` for legacy callers)
+- **`GenericReward` trait** and **`Observation`** — domain-agnostic reward shaping interface for downstream crates
+- **`UnitReward`** — simple mean-signal reward implementation for tests and demos
+- **`apply_neuromodulation`** — standalone function to apply modulator effects to weight and threshold slices
+- **GitHub Actions CI** — `fmt`, `clippy`, `build`, and `test` on push/PR to `main`
 
 ### Changed
-- **NeuroModulators structure** - Added mining_dopamine field while maintaining backward compatibility
-- **Default values** - Updated NeuroModulators::default() to include mining_dopamine: 0.0
-- **Decay method** - Extended natural decay to include mining_dopamine
 
-### Fixed
-- **Clean architecture** - Removed heavy mining telemetry dependencies that would bloat the crate
-- **Performance preservation** - Maintained sub-1 µs modulator updates and < 2k SLoC footprint
+- **Breaking:** removed `cortisol`, `tempo`, and `aux_dopamine` fields from `NeuroModulators`
+- **Breaking:** `from_signals` now requires a `&SignalProfile` as its first argument
+- **Breaking:** `add_stress` renamed to `add_norepinephrine`; `is_stressed` renamed to `is_aroused`
+- Replaced `"spikenaut"` crates.io keyword with `"neuromodulation"`
+- Documentation and crate-level docs are now domain-agnostic
 
-### Performance
-- **Zero bloat** - Mining integration adds minimal overhead (no new dependencies)
-- **Sub-1 µs updates** - Mining reward computation maintains real-time performance
-- **no_std compatible** - Core engine remains suitable for FPGA deployment
+### Removed
 
----
+- Domain-specific mining/HFT metadata from changelog and public documentation
+- Eagle-Lander provenance from crate docs
 
-## [0.2.0] - 2026-03-23
+## [0.4.0] - 2026-05-01
+
+### Changed
+
+- Topology-neutral network initialization with dynamic sizing via `SpikingNetwork::with_dimensions`
+- Strict input validation via `StepError::InputLenMismatch`
+
+## [0.3.0] - 2026-04-01
 
 ### Added
-- Full `HftReward` trait (`sync_bonus`, `price_reflex`, `thermal_pain`)
-- jlrs zero-copy interop examples (Spikenaut HFT pipeline)
-- `no_std` + FPGA `.mem` export utilities (Q8.8 fixed-point)
-- Spikenaut-specific 16-channel neuron map + thermal LTD safeguard
-- Proper GitHub repository link (rmems/neuromod)
-- Modulator profiles (`profile_hft()`, `profile_fpga()`)
 
-### Changed
-- License to GPL-3.0-or-later (matches Spikenaut HF model)
-- Keywords and categories for better crates.io discoverability
+- Extended neuron model library (Lapicque, GIF, Hodgkin-Huxley, FitzHugh-Nagumo)
+- Classical Hebbian STDP utilities
 
-### Fixed
-- Dead repo link from v0.1.0
+## [0.1.0] - 2026-02-01
 
-### Performance
-- <1 µs modulator update
-- 1.6 KB footprint in HFT mode
+### Added
 
----
-
-*Built for Spikenaut-v2 — the only neuromorphic crypto HFT crate on crates.io*
+- Initial release: LIF/Izhikevich network, reward-modulated STDP, neuromodulator system

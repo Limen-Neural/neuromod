@@ -86,13 +86,17 @@ impl HebbianIzhikevichNetwork {
             .map(|_| IzhikevichNeuron::new_regular_spiking())
             .collect();
         let weights = vec![0.5f32; num_neurons * num_neurons];
-        Self { neurons, weights, stdp_params: StdpParams::default() }
+        Self {
+            neurons,
+            weights,
+            stdp_params: StdpParams::default(),
+        }
     }
 
     /// Update the synapse from `pre_index` → `post_index` using classical STDP.
     pub fn update_weights(&mut self, pre_index: usize, post_index: usize) {
         let n = self.neurons.len();
-        let pre_t  = self.neurons[pre_index].last_spike_time;
+        let pre_t = self.neurons[pre_index].last_spike_time;
         let post_t = self.neurons[post_index].last_spike_time;
         let w = self.weights[pre_index * n + post_index];
         self.weights[pre_index * n + post_index] =
@@ -125,7 +129,10 @@ mod tests {
         let params = StdpParams::default();
         let w0 = 0.5;
         let w1 = apply_classical_stdp(3, 3, w0, &params);
-        assert_eq!(w1, w0, "Simultaneous spikes should produce no weight change");
+        assert_eq!(
+            w1, w0,
+            "Simultaneous spikes should produce no weight change"
+        );
     }
 
     #[test]
@@ -133,11 +140,15 @@ mod tests {
         let params = StdpParams::default();
         // Drive weight toward max
         let mut w = 1.99;
-        for _ in 0..100 { w = apply_classical_stdp(0, 1, w, &params); }
+        for _ in 0..100 {
+            w = apply_classical_stdp(0, 1, w, &params);
+        }
         assert!(w <= params.w_max, "Weight should not exceed w_max");
         // Drive weight toward min
         let mut w = 0.01;
-        for _ in 0..100 { w = apply_classical_stdp(1, 0, w, &params); }
+        for _ in 0..100 {
+            w = apply_classical_stdp(1, 0, w, &params);
+        }
         assert!(w >= params.w_min, "Weight should not go below w_min");
     }
 
@@ -145,12 +156,19 @@ mod tests {
     fn test_hebbian_network_update() {
         let mut net = HebbianIzhikevichNetwork::new(3);
         // Step neurons to produce spike times
-        for t in 0..50i64 { net.neurons[0].step_with_time(10.0, t); }
-        for t in 0..50i64 { net.neurons[1].step_with_time(10.0, t + 5); }
-        let w_before = net.weights[0 * 3 + 1];
+        for t in 0..50i64 {
+            net.neurons[0].step_with_time(10.0, t);
+        }
+        for t in 0..50i64 {
+            net.neurons[1].step_with_time(10.0, t + 5);
+        }
+        let w_before = net.weights[1];
         net.update_weights(0, 1);
         // Weight should change if both neurons have fired
-        let w_after = net.weights[0 * 3 + 1];
-        assert_ne!(w_before, w_after, "Weight should update after neurons have spiked");
+        let w_after = net.weights[1];
+        assert_ne!(
+            w_before, w_after,
+            "Weight should update after neurons have spiked"
+        );
     }
 }

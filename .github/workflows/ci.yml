@@ -1,3 +1,4 @@
+# Third-party Actions are pinned to immutable commit SHAs (Aikido supply-chain policy).
 name: CI
 
 on:

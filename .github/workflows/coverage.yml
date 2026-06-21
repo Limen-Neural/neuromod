@@ -29,7 +29,7 @@ jobs:
         run: cargo llvm-cov --all-features --lcov --output-path lcov.info
 
       - name: Upload to Codecov
-        uses: codecov/codecov-action@13ce06bf5ae3c25224734f0e794c2e7df17b0911 # v5.3.1
+        uses: codecov/codecov-action@04b047e8bb82a0c002c8312c1c880fbc6a999d45 # v5
         with:
           files: lcov.info
           token: ${{ secrets.CODECOV_TOKEN }}

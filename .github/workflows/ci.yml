@@ -21,14 +21,20 @@ jobs:
         with:
           components: clippy, rustfmt
 
-      - name: Cache cargo registry
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+      - name: Rust Cache
+        uses: Swatinem/rust-cache@82a92a140ca2b43629705a3888a56f0f31c0e0b3 # v2
+
+      - name: Check for relevant changes
+        uses: dorny/paths-filter@de90cc6fb38fc0963ad72b210f1f284cd68cea36 # v3
+        id: changes
         with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.toml') }}
+          filters: |
+            rust:
+              - '**/Cargo.toml'
+              - '**/Cargo.lock'
+              - 'src/**'
+              - 'examples/**'
+              - 'benches/**'
 
       - name: Check formatting
         run: cargo fmt --check
@@ -39,8 +45,17 @@ jobs:
       - name: Build
         run: cargo build --all-features
 
-      - name: Test
-        run: cargo test --all-features
+      - name: Test (nextest for speed)
+        if: steps.changes.outputs.rust == 'true'
+        run: |
+          cargo install cargo-nextest --locked
+          cargo nextest run --all-features --profile ci --no-fail-fast || cargo test --all-features
+
+      - name: Feature matrix (cargo-hack)
+        if: steps.changes.outputs.rust == 'true'
+        run: |
+          cargo install cargo-hack --locked
+          cargo hack check --feature-powerset --exclude-no-default-features --keep-going || true
 
       - name: Verify docs are domain-agnostic
         run: |

@@ -1,0 +1,50 @@
+# Azure Pipelines for cross-platform parity (Linux/Windows/macOS)
+# Runs on PRs and main. Uses Microsoft-hosted agents.
+trigger:
+  branches:
+    include:
+      - main
+pr:
+  branches:
+    include:
+      - main
+
+jobs:
+- job: BuildTest
+  strategy:
+    matrix:
+      linux:
+        imageName: 'ubuntu-latest'
+      windows:
+        imageName: 'windows-latest'
+      mac:
+        imageName: 'macos-latest'
+  pool:
+    vmImage: $(imageName)
+
+  steps:
+  - checkout: self
+    persistCredentials: false
+
+  - task: UseRust@1
+    inputs:
+      toolchain: stable
+      components: 'rustfmt,clippy'
+
+  - script: cargo fmt -- --check
+    displayName: 'Check formatting'
+
+  - script: cargo clippy --all-targets --all-features -- -D warnings
+    displayName: 'Clippy'
+
+  - script: cargo build --all-features
+    displayName: 'Build'
+
+  - script: cargo test --all-features
+    displayName: 'Test'
+
+  - script: |
+      cargo install cargo-llvm-cov
+      cargo llvm-cov --all-features --lcov --output-path lcov.info || true
+    displayName: 'Coverage (optional)'
+    condition: eq(variables['imageName'], 'ubuntu-latest')

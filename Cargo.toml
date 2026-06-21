@@ -21,6 +21,8 @@ path = "src/lib.rs"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 rand = "0.9.3"
+sentry = { version = "0.34", optional = true, default-features = false, features = ["backtrace", "contexts", "panic", "rustls"] }
+sentry-tracing = { version = "0.34", optional = true }
 
 [dev-dependencies]
 criterion = "0.5"
@@ -41,6 +43,10 @@ harness = false
 name = "modulation_bench"
 harness = false
 
+
+[features]
+default = []
+sentry = ["dep:sentry", "dep:sentry-tracing"]
 
 [profile.release]
 opt-level = 3

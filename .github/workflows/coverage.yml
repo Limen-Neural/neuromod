@@ -30,6 +30,9 @@ jobs:
       - name: Generate coverage (lcov)
         run: cargo llvm-cov --all-features --lcov --output-path lcov.info
 
+      # JUnit output requires nightly + -Z unstable-options.
+      # We only use nightly for this one step so the rest of the
+      # workflow stays on stable.
       - name: Generate JUnit report (nightly)
         run: |
           rustup toolchain install nightly

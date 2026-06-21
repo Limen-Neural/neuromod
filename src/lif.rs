@@ -12,19 +12,19 @@ impl PoissonEncoder {
     }
 
     /// Encodes a normalized value (0.0 - 1.0) into a temporal spike train.
-    /// 
+    ///
     /// PHYSICS ANALOGY:
     /// This acts like a "Geiger Counter" for your data.
     /// High Intensity (Molarity/Voltage) = High Click Rate (Spikes).
     pub fn encode(&self, input: f32) -> Vec<u8> {
         let mut rng = rand::rng();
         let mut spikes = Vec::with_capacity(self.num_steps);
-        
+
         // Clamp input to ensure probability is valid (0% to 100%)
         let probability = input.clamp(0.0, 1.0);
 
         for _ in 0..self.num_steps {
-            // Stochastic firing: 
+            // Stochastic firing:
             // If the random number (0.0-1.0) is LESS than our intensity, we spike.
             // This mimics the noise inherent in quantum/chemical systems.
             if rng.random::<f32>() < probability {
@@ -38,7 +38,7 @@ impl PoissonEncoder {
 }
 
 /// This struct simulates the physical properties of a biological neuron.
-/// 
+///
 /// CIRCUIT ANALOGY (RC Circuit):
 /// - Membrane Potential = Voltage across a Capacitor.
 /// - Decay Rate = Current leakage through a Resistor.
@@ -53,7 +53,7 @@ pub struct LifNeuron {
     /// without losing the original calibrated value.
     #[serde(default)]
     pub base_threshold: f32,
-    pub last_spike: bool,        // Tracks if it fired in the last step
+    pub last_spike: bool, // Tracks if it fired in the last step
     /// Synaptic weights — one per input channel.
     /// These are learned via STDP during training.
     #[serde(default)]
@@ -69,7 +69,7 @@ impl Default for LifNeuron {
         Self {
             membrane_potential: 0.0,
             decay_rate: 0.15,
-            threshold: 0.02,  // Aggressively lowered threshold
+            threshold: 0.02, // Aggressively lowered threshold
             base_threshold: 0.02,
             last_spike: false,
             weights: Vec::new(),
@@ -89,7 +89,7 @@ impl LifNeuron {
     pub fn integrate(&mut self, stimulus: f32) {
         // CHARGE: Add input stimulus to current state
         self.membrane_potential += stimulus;
-        
+
         // LEAK: Passive decay over time (Simulates real-world signal loss)
         self.membrane_potential -= self.membrane_potential * self.decay_rate;
     }
@@ -101,7 +101,7 @@ impl LifNeuron {
     pub fn check_fire(&mut self) -> Option<f32> {
         if self.membrane_potential >= self.threshold {
             let peak = self.membrane_potential; // Capture BEFORE reset
-            self.membrane_potential = 0.0;       // Hard reset after spike
+            self.membrane_potential = 0.0; // Hard reset after spike
             return Some(peak);
         }
         None

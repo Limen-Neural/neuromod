@@ -10,6 +10,8 @@ A generalized Rust library for spiking neural networks (SNNs), centered on biolo
 - Backward-compatible default constructor: `SpikingNetwork::new()`
 - Strict step contract: `Result<Vec<usize>, StepError>`
 - Neutral initialization (blank synaptic weights; no hardcoded domain topology)
+- Generic neuromodulators: dopamine, serotonin, acetylcholine, norepinephrine
+- `GenericReward` trait for domain-specific reward shaping in downstream crates
 - Canonical neuron models included:
   - Lapicque
   - LIF
@@ -23,7 +25,7 @@ A generalized Rust library for spiking neural networks (SNNs), centered on biolo
 
 ```toml
 [dependencies]
-neuromod = "0.4.0"
+neuromod = "0.5.0"
 ```
 
 ## Quick Start
@@ -79,29 +81,45 @@ fn main() {
 
 ## Neuromodulators
 
-`NeuroModulators` supports both direct control and signal-derived initialization.
+`NeuroModulators` supports direct control, signal-derived initialization via `SignalProfile`, and generic reward shaping.
 
 ```rust
-use neuromod::NeuroModulators;
+use neuromod::{
+    apply_neuromodulation, GenericReward, NeuroModulators, Observation, SignalProfile, UnitReward,
+};
 
 fn main() {
-    // (thermal_signal, power_signal, throughput_signal, timing_signal)
-    let mut mods = NeuroModulators::from_signals(75.0, 300.0, 0.05, 2640.0);
+    let profile = SignalProfile::default();
+    let mut mods = NeuroModulators::from_signals(&profile, 0.2, 0.1, 0.8, 0.9);
 
     mods.add_reward(0.2);
-    mods.add_stress(0.1);
+    mods.add_norepinephrine(0.1);
     mods.boost_focus(0.3);
-    mods.add_aux_reward(0.4);
+    mods.add_serotonin(0.4);
     mods.decay();
 
-    println!("dopamine={:.3}, aux={:.3}", mods.dopamine, mods.aux_dopamine);
+    let reward = UnitReward;
+    let obs = Observation::from_slice(&[0.5, 0.7]);
+    mods.apply_reward(&reward, &obs);
+
+    let mut weights = vec![1.0, 0.8];
+    let mut thresholds = vec![0.20, 0.25];
+    apply_neuromodulation(&mods, &mut weights, &mut thresholds);
+
+    println!(
+        "dopamine={:.3}, serotonin={:.3}, ne={:.3}",
+        mods.dopamine, mods.serotonin, mods.norepinephrine
+    );
 }
 ```
+
+For legacy hardware-calibrated signal mapping, use `SignalProfile::hardware_calibrated()`.
 
 ## Included Components
 
 - `SpikingNetwork`, `StepError`
-- `NeuroModulators`
+- `NeuroModulators`, `SignalProfile`, `Observation`, `GenericReward`, `UnitReward`
+- `apply_neuromodulation`
 - Neuron models:
   - `LifNeuron`
   - `GifNeuron`
@@ -127,6 +145,8 @@ cargo run --example rstdp_demo
 ```bash
 cargo check
 cargo test
+cargo clippy --all-targets --all-features -- -D warnings
+cargo fmt --check
 cargo bench --no-run
 ```
 

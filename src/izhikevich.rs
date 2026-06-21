@@ -31,7 +31,15 @@ impl IzhikevichNeuron {
         let a = 0.02;
         let b = 0.2;
         let c = -65.0;
-        Self { v: c, u: b * c, last_spike_time: -1, a, b, c, d: 8.0 }
+        Self {
+            v: c,
+            u: b * c,
+            last_spike_time: -1,
+            a,
+            b,
+            c,
+            d: 8.0,
+        }
     }
 
     /// Intrinsically bursting (IB) — fires a burst then switches to tonic spiking.
@@ -40,7 +48,15 @@ impl IzhikevichNeuron {
         let a = 0.02;
         let b = 0.2;
         let c = -55.0;
-        Self { v: c, u: b * c, last_spike_time: -1, a, b, c, d: 4.0 }
+        Self {
+            v: c,
+            u: b * c,
+            last_spike_time: -1,
+            a,
+            b,
+            c,
+            d: 4.0,
+        }
     }
 
     /// Fast-spiking (FS) interneuron — high-frequency, no adaptation.
@@ -49,7 +65,15 @@ impl IzhikevichNeuron {
         let a = 0.1;
         let b = 0.2;
         let c = -65.0;
-        Self { v: c, u: b * c, last_spike_time: -1, a, b, c, d: 2.0 }
+        Self {
+            v: c,
+            u: b * c,
+            last_spike_time: -1,
+            a,
+            b,
+            c,
+            d: 2.0,
+        }
     }
 
     /// Chattering (CH) neuron — rhythmic high-frequency bursts.
@@ -58,7 +82,15 @@ impl IzhikevichNeuron {
         let a = 0.02;
         let b = 0.2;
         let c = -50.0;
-        Self { v: c, u: b * c, last_spike_time: -1, a, b, c, d: 2.0 }
+        Self {
+            v: c,
+            u: b * c,
+            last_spike_time: -1,
+            a,
+            b,
+            c,
+            d: 2.0,
+        }
     }
 
     /// Low-threshold spiking (LTS) interneuron — fires on weak inputs, strong adaptation.
@@ -67,7 +99,15 @@ impl IzhikevichNeuron {
         let a = 0.02;
         let b = 0.25;
         let c = -65.0;
-        Self { v: c, u: b * c, last_spike_time: -1, a, b, c, d: 2.0 }
+        Self {
+            v: c,
+            u: b * c,
+            last_spike_time: -1,
+            a,
+            b,
+            c,
+            d: 2.0,
+        }
     }
 
     /// Simulates one timestep (1 ms) of the neuron's dynamics.
@@ -111,7 +151,10 @@ mod tests {
     fn test_regular_spiking_fires_under_sustained_input() {
         let mut n = IzhikevichNeuron::new_regular_spiking();
         let spikes: usize = (0..100).filter(|_| n.step(10.0)).count();
-        assert!(spikes > 0, "RS neuron should fire under sustained 10 pA input");
+        assert!(
+            spikes > 0,
+            "RS neuron should fire under sustained 10 pA input"
+        );
     }
 
     #[test]
@@ -120,13 +163,18 @@ mod tests {
         let mut fs = IzhikevichNeuron::new_fast_spiking();
         let rs_spikes: usize = (0..200).filter(|_| rs.step(10.0)).count();
         let fs_spikes: usize = (0..200).filter(|_| fs.step(10.0)).count();
-        assert!(fs_spikes >= rs_spikes, "FS should fire at least as fast as RS");
+        assert!(
+            fs_spikes >= rs_spikes,
+            "FS should fire at least as fast as RS"
+        );
     }
 
     #[test]
     fn test_reset_restores_resting_state() {
         let mut n = IzhikevichNeuron::new_regular_spiking();
-        for _ in 0..50 { n.step(10.0); }
+        for _ in 0..50 {
+            n.step(10.0);
+        }
         n.reset();
         assert_eq!(n.v, n.c);
         assert!((n.u - n.b * n.c).abs() < 1e-6);

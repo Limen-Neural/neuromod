@@ -1,6 +1,6 @@
 [package]
 name = "neuromod"
-version = "0.4.0"
+version = "0.5.0"
 edition = "2024"
 license = "GPL-3.0"
 authors = ["Raul Montoya Cardenas <montoyaraul34@gmail.com>"]
@@ -8,7 +8,7 @@ description = "A high-performance Rust SNN library for neuroscience research and
 exclude = ["docs/"]
 repository = "https://github.com/Limen-Neural/neuromod"
 readme = "README.md"
-keywords = ["snn", "neuromorphic", "stdp", "spiking", "spikenaut"]
+keywords = ["snn", "neuromorphic", "stdp", "spiking", "neuromodulation"]
 categories = ["science", "algorithms", "simulation"]
 
 [workspace]

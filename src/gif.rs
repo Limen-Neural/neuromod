@@ -106,8 +106,7 @@ impl GifNeuron {
     /// leak, scaled drive, and adaptation-current coupling.
     pub fn integrate(&mut self, stimulus: f32) {
         self.adaptation *= self.adaptation_decay;
-        self.membrane_potential = self.membrane_potential * self.leak
-            + stimulus * self.drive_scale
+        self.membrane_potential = self.membrane_potential * self.leak + stimulus * self.drive_scale
             - self.adaptation * self.adaptation_coupling;
     }
 

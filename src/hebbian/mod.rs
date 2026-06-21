@@ -7,4 +7,4 @@
 
 pub mod classical;
 
-pub use classical::{apply_classical_stdp, HebbianIzhikevichNetwork, StdpParams};
+pub use classical::{HebbianIzhikevichNetwork, StdpParams, apply_classical_stdp};

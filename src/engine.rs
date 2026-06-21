@@ -77,15 +77,16 @@ impl SpikingNetwork {
         self.global_step += 1;
         self.modulators = *modulators;
 
-        let stress_multiplier = (1.0 - self.modulators.cortisol).max(0.1);
+        let stress_multiplier = (1.0 - self.modulators.norepinephrine).max(0.1);
         let learning_rate = 0.5 * self.modulators.dopamine;
 
         for neuron in &mut self.neurons {
             let target_decay = 0.15 - (0.05 * self.modulators.acetylcholine);
             neuron.decay_rate = target_decay;
 
-            let global_target =
-                0.20 - (0.05 * self.modulators.dopamine) + (0.15 * self.modulators.cortisol);
+            let global_target = 0.20 - (0.05 * self.modulators.dopamine)
+                + (0.15 * self.modulators.norepinephrine)
+                - (0.05 * self.modulators.serotonin);
             let target_threshold =
                 (global_target + if neuron.last_spike { 0.005 } else { -0.001 }).clamp(0.05, 0.50);
             neuron.threshold += (target_threshold - neuron.threshold) * learning_rate;
@@ -99,7 +100,8 @@ impl SpikingNetwork {
         for ch in 0..self.num_channels {
             let s = stimuli[ch].abs().clamp(0.0, 1.0);
             pred_errors[ch] = (s - self.predictive_state[ch]).abs();
-            self.predictive_state[ch] = PRED_ALPHA * s + (1.0 - PRED_ALPHA) * self.predictive_state[ch];
+            self.predictive_state[ch] =
+                PRED_ALPHA * s + (1.0 - PRED_ALPHA) * self.predictive_state[ch];
         }
 
         let mut rng = rand::rng();
@@ -279,7 +281,9 @@ mod tests {
         let stimuli = vec![0.5; network.num_channels];
         let modulators = NeuroModulators::default();
 
-        let spikes = network.step(&stimuli, &modulators).expect("valid input length should pass");
+        let spikes = network
+            .step(&stimuli, &modulators)
+            .expect("valid input length should pass");
         assert_eq!(network.global_step, 1);
         assert!(spikes.len() <= network.neurons.len());
     }

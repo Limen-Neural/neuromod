@@ -75,13 +75,13 @@ Benchmarks memory usage and allocation:
 Benchmarks neuromodulator impact on network performance:
 - `network_step_baseline` - Network step without modulators
 - `network_step_with_dopamine` - Network step with high dopamine (reward)
-- `network_step_with_cortisol` - Network step with high cortisol (stress)
+- `network_step_with_norepinephrine` - Network step with high norepinephrine (stress/arousal)
 - `network_step_with_acetylcholine` - Network step with high acetylcholine (focus)
 - `network_step_with_all_modulators` - Network step with all modulators active
 - `modulator_comparison` - Direct comparison of modulator states
 - `dopamine_scaling` - Performance scaling with dopamine levels (0.0 to 1.0)
 - `modulator_decay` - Modulator decay operation
-- `modulator_operations` - Individual modulator operations (add_reward, add_stress, boost_focus)
+- `modulator_operations` - Individual modulator operations (add_reward, add_norepinephrine, boost_focus)
 
 ## Interpreting Results
 
@@ -105,7 +105,7 @@ Benchmarks neuromodulator impact on network performance:
 ### Modulation Impact
 - Baseline performance: reference point
 - Dopamine: enables learning (may add small overhead)
-- Cortisol: stress modulation (minimal overhead)
+- Norepinephrine: stress/arousal modulation (minimal overhead)
 - Acetylcholine: affects decay rates (minimal overhead)
 - Combined modulators: should show minimal cumulative overhead
 

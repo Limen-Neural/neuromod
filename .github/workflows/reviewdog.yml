@@ -1,10 +1,14 @@
-# reviewdog for inline PR comments (clippy, rustfmt, etc.)
-# Third-party Actions are pinned to immutable commit SHAs (Aikido supply-chain policy).
+# reviewdog for inline PR comments (clippy, rustfmt)
+# Uses reviewdog/action-setup + direct invocation (the dedicated action-* repos for clippy/rustfmt no longer exist under those names).
 name: reviewdog
 
 on:
   pull_request:
     branches: [main]
+
+permissions:
+  contents: read
+  pull-requests: write
 
 jobs:
   reviewdog:
@@ -20,19 +24,16 @@ jobs:
         with:
           components: clippy, rustfmt
 
+      - uses: reviewdog/action-setup@e04ffabe3898a0af8d0fb2171f01e1b2e1401e2b # v1
+
       - name: reviewdog (clippy)
-        uses: reviewdog/action-clippy@master
-        with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          reporter: github-pr-review
-          level: warning
-          filter_mode: added
-          fail_on_error: false
+        env:
+          REVIEWDOG_GITHUB_API_TOKEN: ${{ secrets.LIMEN_NEURAL_GITHUB_TOKEN }}
+        run: |
+          cargo clippy --all-targets --all-features --message-format=short -- -D warnings 2>&1 | reviewdog -f=clippy -reporter=github-pr-review -level=warning -filter-mode=added
 
       - name: reviewdog (rustfmt)
-        uses: reviewdog/action-rustfmt@master
-        with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          reporter: github-pr-review
-          level: warning
-          fail_on_error: false
+        env:
+          REVIEWDOG_GITHUB_API_TOKEN: ${{ secrets.LIMEN_NEURAL_GITHUB_TOKEN }}
+        run: |
+          cargo fmt -- --check 2>&1 | reviewdog -f=diff -reporter=github-pr-review -level=warning -filter-mode=added

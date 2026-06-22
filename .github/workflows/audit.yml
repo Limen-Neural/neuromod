@@ -28,13 +28,13 @@ jobs:
         with:
           persist-credentials: false
       - name: Run Trivy vulnerability scanner
-        uses: aquasecurity/trivy-action@0.30.0
+        uses: aquasecurity/trivy-action@6c175e9c4083a92bbca2f9724c8a5e33bc2d97a5 # v0.30.0
         with:
           scan-type: 'fs'
           format: 'sarif'
           output: 'trivy-results.sarif'
           severity: 'CRITICAL,HIGH'
       - name: Upload Trivy scan results
-        uses: github/codeql-action/upload-sarif@1b1aada4649486c92b3268c2f1b0b5e2e9e9f0a1 # v3
+        uses: github/codeql-action/upload-sarif@b0c4fd77f6c559021d78430ec4d0d169ae74a4eb # v3
         with:
           sarif_file: 'trivy-results.sarif'

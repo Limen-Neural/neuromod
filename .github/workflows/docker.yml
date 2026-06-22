@@ -1,12 +1,13 @@
 # Docker build + push (updated per request)
 # Uses Docker Buildx Cloud + Docker Hub login
-name: ci
+name: Docker Build & Push
 
 on:
   push:
     branches: [main]
   pull_request:
     branches: [main]
+    types: [opened, synchronize, reopened]
 
 jobs:
   docker:

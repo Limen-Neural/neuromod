@@ -92,13 +92,3 @@ jobs:
     displayName: 'Coverage (optional)'
     continueOnError: "true"
     condition: eq(variables['imageName'], 'ubuntu-latest')
-<<<<<<< HEAD
-
-  - task: PublishCodeCoverageResults@2
-    displayName: 'Publish Coverage'
-    inputs:
-      codeCoverageTool: 'LCOV'
-      summaryFileLocation: 'lcov.info'
-    condition: and(succeededOrFailed(), eq(variables['Agent.OS'], 'Linux'))
-=======
->>>>>>> dc9d412 (fix(sentry): In order to prevent data races I added env_lock() so that the tests wait till it's their turn. All SENTRY_DSN environment varibles now follow strict static mutex. fix(azure): Remove the specific paths for Linux container in place for a more universial cache path fully cross-platform. fix(Dockerfile): Long-term maintainability was ensure by ditching the older package version.)

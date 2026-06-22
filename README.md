@@ -187,6 +187,11 @@ This repository uses a comprehensive CI setup for speed, quality, security, and 
   - `rustsec/audit-check` + Trivy (`.github/workflows/audit.yml`)
 - **Dependencies**: Dependabot (`.github/dependabot.yml`) for Cargo, GitHub Actions, Docker.
 - **Docker** (`.github/workflows/docker.yml`, `Dockerfile`): Reproducible builds.
+  Local usage:
+  ```bash
+  docker build -t neuromod:test .
+  docker run --rm neuromod:test cargo test --all-features --quiet
+  ```
 - **Azure Pipelines** (`azure-pipelines.yml`): Cross-platform (Linux / Windows / macOS) parity.
 
 ### Error monitoring (optional `sentry` feature)

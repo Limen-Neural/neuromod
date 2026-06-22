@@ -26,6 +26,17 @@ jobs:
   - checkout: self
     persistCredentials: false
 
+  - task: Cache@2
+    displayName: 'Rust Cache'
+    inputs:
+      key: 'cargo | "$(Agent.OS)" | Cargo.lock'
+      restoreKeys: |
+        cargo | "$(Agent.OS)"
+      path: |
+        $(Build.SourcesDirectory)/target
+        /usr/local/cargo/registry
+        /usr/local/cargo/git
+
   - bash: |
       curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable
       echo "##vso[task.prependpath]$HOME/.cargo/bin"
@@ -51,8 +62,17 @@ jobs:
   - script: cargo build --all-features
     displayName: 'Build'
 
-  - script: cargo test --all-features
+  - script: cargo test --all-features -- --test-threads=1
     displayName: 'Test'
+
+  - task: PublishTestResults@2
+    displayName: 'Publish Test Results'
+    inputs:
+      testResultsFormat: 'JUnit'
+      testResultsFiles: '**/junit.xml'
+      mergeTestResults: true
+      testRunTitle: 'Azure Tests'
+    condition: succeededOrFailed()
 
   - script: |
       cargo install cargo-llvm-cov@0.6.10
@@ -60,3 +80,10 @@ jobs:
     displayName: 'Coverage (optional)'
     continueOnError: true
     condition: eq(variables['imageName'], 'ubuntu-latest')
+
+  - task: PublishCodeCoverageResults@2
+    displayName: 'Publish Coverage'
+    inputs:
+      codeCoverageTool: 'JaCoCo'
+      summaryFileLocation: 'lcov.info'
+    condition: succeededOrFailed()

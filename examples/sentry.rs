@@ -18,6 +18,7 @@ fn main() {
                 },
             ));
             println!("Sentry initialized for error monitoring (feature enabled)");
+            sentry::capture_message("Sentry integration active in neuromod example", sentry::Level::Info);
             Some(guard)
         } else {
             println!("SENTRY_DSN not set; Sentry feature enabled but not reporting.");

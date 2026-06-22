@@ -62,7 +62,18 @@ jobs:
   - script: cargo build --all-features
     displayName: 'Build'
 
-  - script: cargo test --all-features -- --test-threads=1
+  - bash: |
+      curl -LsSf https://get.nexte.st/latest/linux | tar zxf - -C ${CARGO_HOME:-~/.cargo}/bin
+    displayName: 'Install nextest - Unix'
+    condition: ne(variables['Agent.OS'], 'Windows_NT')
+
+  - script: |
+      curl -LsSf https://get.nexte.st/latest/windows-tar -o nextest.tar.gz
+      tar zxf nextest.tar.gz -C %USERPROFILE%\.cargo\bin
+    displayName: 'Install nextest - Windows'
+    condition: eq(variables['Agent.OS'], 'Windows_NT')
+
+  - script: cargo nextest run --all-features
     displayName: 'Test'
 
   - task: PublishTestResults@2
@@ -84,6 +95,6 @@ jobs:
   - task: PublishCodeCoverageResults@2
     displayName: 'Publish Coverage'
     inputs:
-      codeCoverageTool: 'JaCoCo'
+      codeCoverageTool: 'LCOV'
       summaryFileLocation: 'lcov.info'
-    condition: succeededOrFailed()
+    condition: and(succeededOrFailed(), eq(variables['Agent.OS'], 'Linux'))

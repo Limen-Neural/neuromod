@@ -8,7 +8,8 @@ pr:
   branches:
     include:
       - main
-
+variables:
+  CARGO_HOME: $(Pipeline.workspace)/.cargo
 jobs:
 - job: BuildTest
   strategy:
@@ -24,7 +25,7 @@ jobs:
 
   steps:
   - checkout: self
-    persistCredentials: false
+    persistCredentials: 'false'
 
   - task: Cache@2
     displayName: 'Rust Cache'
@@ -34,8 +35,8 @@ jobs:
         cargo | "$(Agent.OS)"
       path: |
         $(Build.SourcesDirectory)/target
-        /usr/local/cargo/registry
-        /usr/local/cargo/git
+        $(CARGO_HOME)/registry
+        $(CARGO_HOME)/git
 
   - bash: |
       curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable
@@ -89,8 +90,9 @@ jobs:
       cargo install cargo-llvm-cov@0.6.10
       cargo llvm-cov --all-features --lcov --output-path lcov.info
     displayName: 'Coverage (optional)'
-    continueOnError: true
+    continueOnError: "true"
     condition: eq(variables['imageName'], 'ubuntu-latest')
+<<<<<<< HEAD
 
   - task: PublishCodeCoverageResults@2
     displayName: 'Publish Coverage'
@@ -98,3 +100,5 @@ jobs:
       codeCoverageTool: 'LCOV'
       summaryFileLocation: 'lcov.info'
     condition: and(succeededOrFailed(), eq(variables['Agent.OS'], 'Linux'))
+=======
+>>>>>>> dc9d412 (fix(sentry): In order to prevent data races I added env_lock() so that the tests wait till it's their turn. All SENTRY_DSN environment varibles now follow strict static mutex. fix(azure): Remove the specific paths for Linux container in place for a more universial cache path fully cross-platform. fix(Dockerfile): Long-term maintainability was ensure by ditching the older package version.)

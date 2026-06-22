@@ -1,11 +1,11 @@
-//! Integration tests for the sentry example and the optional `sentry` feature
-//! introduced in this PR (Cargo.toml + examples/sentry.rs).
-//!
-//! These tests exercise:
-//! - The exact neuromod API used in examples/sentry.rs
-//! - The `sentry` feature-flag conditional compilation paths
-//! - The SENTRY_DSN environment-variable lookup logic
-//! - Edge cases: zero stimuli, all-ones stimuli, multiple successive steps
+// env_lock()  is key to preventing data races in the tests.  Calls the test to stop and wait.
+#![allow(clippy::assertions_on_result_states)]
+use std::sync::{Mutex, OnceLock};
+
+fn env_lock() -> std::sync::MutexGuard<'static, ()> {
+    static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+    LOCK.get_or_init(|| Mutex::new(())).lock().unwrap()
+}
 
 use neuromod::{NeuroModulators, SpikingNetwork};
 
@@ -158,7 +158,7 @@ fn step_wrong_input_length_returns_error() {
 /// checks `.is_empty()`. These tests validate that exact lookup pattern.
 #[test]
 fn sentry_dsn_absent_resolves_to_empty() {
-    // Temporarily unset the variable so the lookup mirrors the example.
+    let _lock = env_lock();
     let original = std::env::var("SENTRY_DSN").ok();
     // Safety: this test is single-threaded; other tests that touch this var
     // are separated by the same save/restore pattern.
@@ -198,8 +198,8 @@ fn sentry_dsn_present_is_non_empty() {
 /// An explicitly empty SENTRY_DSN ("") also triggers the "not reporting" branch.
 #[test]
 fn sentry_dsn_explicit_empty_resolves_to_empty() {
+    let _lock = env_lock();
     let original = std::env::var("SENTRY_DSN").ok();
-    unsafe { std::env::set_var("SENTRY_DSN", "") };
 
     let dsn = std::env::var("SENTRY_DSN").unwrap_or_default();
     assert!(
@@ -255,8 +255,8 @@ fn neuromod_usable_with_sentry_feature_enabled() {
 #[cfg(feature = "sentry")]
 #[test]
 fn sentry_feature_empty_dsn_uses_fallback_path() {
+    let _lock = env_lock();
     let original = std::env::var("SENTRY_DSN").ok();
-    unsafe { std::env::remove_var("SENTRY_DSN") };
 
     let dsn = std::env::var("SENTRY_DSN").unwrap_or_default();
     // The example checks `!dsn.is_empty()` before calling sentry::init.

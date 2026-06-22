@@ -102,10 +102,7 @@ fn step_with_max_stimuli_returns_ok() {
     let modulators = NeuroModulators::default();
 
     let spikes = network.step(&stimuli, &modulators).unwrap();
-    assert!(
-        spikes.len() <= 16,
-        "cannot have more spikes than neurons"
-    );
+    assert!(spikes.len() <= 16, "cannot have more spikes than neurons");
 }
 
 /// Negative stimuli values are silently clamped; step must not panic or error.

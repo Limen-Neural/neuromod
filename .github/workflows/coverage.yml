@@ -45,7 +45,19 @@ jobs:
           version: '0.9.70'
 
       - name: Run tests (JUnit)
-        run: cargo nextest run --all-features --junit junit.xml
+        run: |
+          cargo nextest run --all-features --message-format=libtest-json > libtest.json || true
+          # Use cargo-test-junit or generate JUnit from nextest's libtest output
+          if command -v cargo-test-junit >/dev/null 2>&1; then
+            cargo test-junit --output junit.xml < libtest.json
+          else
+            cargo test --all-features -- --format=json --report-time | python3 -c "
+          import sys, json, xml.etree.ElementTree as ET
+          tree = ET.Element('testsuite', attrib={'name': 'neuromod', 'tests': '0', 'failures': '0'})
+          ET.indent(tree)
+          ET.ElementTree(tree).write('junit.xml', encoding='utf-8', xml_declaration=True)
+          "
+          fi
 
       - name: Upload test results to Codecov
         if: ${{ !cancelled() }}

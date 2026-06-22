@@ -4,6 +4,7 @@ FROM rust:1.85-slim AS builder
 WORKDIR /app
 COPY . .
 RUN apt-get update && apt-get install -y --no-install-recommends pkg-config=1.8.1-1
+RUN cargo build --release --examples
 
 # Runtime example (minimal)
 FROM debian:bookworm-slim

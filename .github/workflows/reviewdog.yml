@@ -24,7 +24,7 @@ jobs:
         with:
           components: clippy, rustfmt
 
-      - uses: reviewdog/action-setup@e04ffabe3898a0af8d0fb2171f01e1b2e1401e2b # v1
+      - uses: reviewdog/action-setup@19ad6fc8b7358ccdc9fd4a25c75dd93eeb097e1e # v1
 
       - name: reviewdog (clippy)
         env:

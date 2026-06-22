@@ -158,7 +158,7 @@ cargo llvm-cov --all-features --lcov --output-path lcov.info
 cargo fmt --check
 cargo clippy --all-targets --all-features -- -D warnings
 cargo test --all-features
-cargo hack check --feature-powerset --exclude-no-default-features --keep-going || true
+cargo hack check --feature-powerset --exclude-no-default-features --keep-going
 ```
 
 ## License

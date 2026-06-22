@@ -26,10 +26,18 @@ jobs:
   - checkout: self
     persistCredentials: false
 
-  - script: |
+  - bash: |
       curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable
       echo "##vso[task.prependpath]$HOME/.cargo/bin"
-    displayName: 'Install Rust (rustup)'
+    displayName: 'Install Rust (rustup) - Unix'
+    condition: ne(variables['Agent.OS'], 'Windows_NT')
+
+  - script: |
+      curl -sSfL -o rustup-init.exe https://win.rustup.rs/
+      rustup-init.exe -y --default-toolchain stable
+      echo ##vso[task.prependpath]%USERPROFILE%\.cargo\bin
+    displayName: 'Install Rust (rustup) - Windows'
+    condition: eq(variables['Agent.OS'], 'Windows_NT')
 
   - script: rustup component add rustfmt clippy
     displayName: 'Install rustfmt + clippy'

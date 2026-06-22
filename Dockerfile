@@ -1,6 +1,6 @@
 # Multi-stage Docker for neuromod (library + examples/tests)
 # Builder
-FROM rust:1.80-slim AS builder
+FROM rust:1.85-slim AS builder
 WORKDIR /app
 COPY . .
 RUN apt-get update && apt-get install -y pkg-config libssl-dev && rm -rf /var/lib/apt/lists/*

@@ -1,4 +1,5 @@
 # Docker build + push (updated per request)
+# Third-party Actions are pinned to immutable commit SHAs (Aikido supply-chain policy).
 # Uses Docker Buildx Cloud + Docker Hub login
 name: Docker Build & Push
 

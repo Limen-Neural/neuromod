@@ -51,7 +51,7 @@ jobs:
         if: steps.changes.outputs.rust == 'true'
         run: |
           cargo install cargo-nextest --locked
-          cargo nextest run --all-features --profile ci --no-fail-fast || cargo test --all-features
+          cargo nextest run --all-features --no-fail-fast || cargo test --all-features
 
       - name: Feature matrix (cargo-hack)
         if: steps.changes.outputs.rust == 'true'

@@ -33,11 +33,7 @@ jobs:
       - name: Generate coverage (lcov)
         run: cargo llvm-cov --all-features --lcov --output-path lcov.info
 
-      # JUnit output requires nightly + -Z unstable-options.
-      # We only use nightly for this one step so the rest of the
-      # workflow stays on stable.
-      # Use a recent nextest that supports --junit on stable Rust.
-      # The --junit flag was stabilized in nextest >= 0.9.50.
+      # Generate JUnit XML via nextest's native --junit support (>= 0.9.50).
       - name: Install nextest
         uses: taiki-e/install-action@9e1e5806d4a4822de933115878265be9aaa786d9 # v2
         with:
@@ -46,8 +42,9 @@ jobs:
 
       - name: Run tests (JUnit)
         run: |
-          cargo nextest run --all-features --profile default 2>&1 || true
-          cargo nextest run --all-features --profile default -E 'all()' --message-format libtest-json 2>/dev/null | python3 -c "
+          mkdir -p target/nextest/default
+          cargo nextest run --all-features -E 'all()' --no-fail-fast \
+            --message-format libtest-json 2>/dev/null | python3 -c "
           import sys, json, xml.etree.ElementTree as ET
           suite = ET.Element('testsuite', attrib={'name': 'neuromod', 'tests': '0', 'failures': '0'})
           tests = 0; failures = 0
@@ -66,7 +63,7 @@ jobs:
           suite.set('failures', str(failures))
           ET.indent(suite)
           ET.ElementTree(suite).write('junit.xml', encoding='utf-8', xml_declaration=True)
-          "
+          " || true
 
       - name: Upload test results to Codecov
         if: ${{ !cancelled() }}

@@ -259,6 +259,7 @@ fn neuromod_usable_with_sentry_feature_enabled() {
 fn sentry_feature_empty_dsn_uses_fallback_path() {
     let _lock = env_lock();
     let original = std::env::var("SENTRY_DSN").ok();
+    unsafe { std::env::remove_var("SENTRY_DSN") };
 
     let dsn = std::env::var("SENTRY_DSN").unwrap_or_default();
     // The example checks `!dsn.is_empty()` before calling sentry::init.

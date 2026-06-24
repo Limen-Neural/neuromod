@@ -31,7 +31,7 @@ jobs:
       - name: Build and push
         uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
         with:
-          tags: "${{ vars.DOCKER_USER }}/docker-build-cloud-demo:latest"
+          tags: "${{ vars.DOCKER_USER }}/neuromod:${{ github.sha }}"
           # For pull requests, export results to the build cache.
           # Otherwise, push to a registry.
           outputs: ${{ github.event_name == 'pull_request' && 'type=cacheonly' || 'type=registry' }}

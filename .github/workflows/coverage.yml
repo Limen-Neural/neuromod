@@ -59,6 +59,8 @@ jobs:
                   if obj['event'] == 'failed':
                       failures += 1
                       ET.SubElement(tc, 'failure', attrib={'message': obj.get('stdout', 'test failed')})
+                  elif obj['event'] == 'ignored':
+                      ET.SubElement(tc, 'skipped')
           suite.set('tests', str(tests))
           suite.set('failures', str(failures))
           ET.indent(suite)

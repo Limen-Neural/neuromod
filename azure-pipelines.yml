@@ -33,10 +33,7 @@ jobs:
       key: 'cargo | "$(Agent.OS)" | Cargo.lock'
       restoreKeys: |
         cargo | "$(Agent.OS)"
-      path: |
-        $(Build.SourcesDirectory)/target
-        $(CARGO_HOME)/registry
-        $(CARGO_HOME)/git
+      path: $(CARGO_HOME)
 
   - bash: |
       curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable
@@ -65,8 +62,13 @@ jobs:
 
   - bash: |
       curl -LsSf https://get.nexte.st/latest/linux | tar zxf - -C ${CARGO_HOME:-~/.cargo}/bin
-    displayName: 'Install nextest - Unix'
-    condition: ne(variables['Agent.OS'], 'Windows_NT')
+    displayName: 'Install nextest - Linux'
+    condition: eq(variables['Agent.OS'], 'Linux')
+
+  - bash: |
+      curl -LsSf https://get.nexte.st/latest/mac | tar zxf - -C ${CARGO_HOME:-~/.cargo}/bin
+    displayName: 'Install nextest - macOS'
+    condition: eq(variables['Agent.OS'], 'Darwin')
 
   - script: |
       curl -LsSf https://get.nexte.st/latest/windows-tar -o nextest.tar.gz

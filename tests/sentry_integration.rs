@@ -179,6 +179,7 @@ fn sentry_dsn_absent_resolves_to_empty() {
 /// A non-empty SENTRY_DSN is detected by the example's guard condition.
 #[test]
 fn sentry_dsn_present_is_non_empty() {
+    let _lock = env_lock();
     let original = std::env::var("SENTRY_DSN").ok();
     unsafe { std::env::set_var("SENTRY_DSN", "https://example@sentry.example.com/1") };
 
@@ -200,6 +201,7 @@ fn sentry_dsn_present_is_non_empty() {
 fn sentry_dsn_explicit_empty_resolves_to_empty() {
     let _lock = env_lock();
     let original = std::env::var("SENTRY_DSN").ok();
+    unsafe { std::env::set_var("SENTRY_DSN", "") };
 
     let dsn = std::env::var("SENTRY_DSN").unwrap_or_default();
     assert!(

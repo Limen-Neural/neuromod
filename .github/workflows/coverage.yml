@@ -46,22 +46,31 @@ jobs:
 
       - name: Run tests (JUnit)
         run: |
-          cargo nextest run --all-features --message-format=libtest-json > libtest.json || true
-          # Use cargo-test-junit or generate JUnit from nextest's libtest output
-          if command -v cargo-test-junit >/dev/null 2>&1; then
-            cargo test-junit --output junit.xml < libtest.json
-          else
-            cargo test --all-features -- --format=json --report-time | python3 -c "
+          cargo nextest run --all-features --profile default 2>&1 || true
+          cargo nextest run --all-features --profile default -E 'all()' --message-format libtest-json 2>/dev/null | python3 -c "
           import sys, json, xml.etree.ElementTree as ET
-          tree = ET.Element('testsuite', attrib={'name': 'neuromod', 'tests': '0', 'failures': '0'})
-          ET.indent(tree)
-          ET.ElementTree(tree).write('junit.xml', encoding='utf-8', xml_declaration=True)
+          suite = ET.Element('testsuite', attrib={'name': 'neuromod', 'tests': '0', 'failures': '0'})
+          tests = 0; failures = 0
+          for line in sys.stdin:
+              try:
+                  obj = json.loads(line)
+              except json.JSONDecodeError:
+                  continue
+              if obj.get('type') == 'test' and obj.get('event') in ('ok', 'failed', 'ignored'):
+                  tests += 1
+                  tc = ET.SubElement(suite, 'testcase', attrib={'name': obj.get('name', ''), 'time': str(obj.get('exec_time', 0))})
+                  if obj['event'] == 'failed':
+                      failures += 1
+                      ET.SubElement(tc, 'failure', attrib={'message': obj.get('stdout', 'test failed')})
+          suite.set('tests', str(tests))
+          suite.set('failures', str(failures))
+          ET.indent(suite)
+          ET.ElementTree(suite).write('junit.xml', encoding='utf-8', xml_declaration=True)
           "
-          fi
 
       - name: Upload test results to Codecov
         if: ${{ !cancelled() }}
-        uses: codecov/test-results-action@v1
+        uses: codecov/test-results-action@0fa95f0e1eeaafde2c782583b36b28ad0d8c77d3 # v1
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           fail_ci_if_error: false

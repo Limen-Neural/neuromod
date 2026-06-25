@@ -1,5 +1,4 @@
 /target
-Cargo.lock
 *.crate
 
 # Rust build

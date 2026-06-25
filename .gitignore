@@ -4,3 +4,6 @@ Cargo.lock
 
 # Rust build
 /target/
+.idea/
+.kilo/
+.kilocode/

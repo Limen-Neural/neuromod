@@ -155,6 +155,7 @@ cargo llvm-cov --all-features --lcov --output-path lcov.info
 # HTML report: cargo llvm-cov --all-features --html
 
 # Full CI-like validation
+cargo install cargo-hack --locked
 cargo fmt --check
 cargo clippy --all-targets --all-features -- -D warnings
 cargo test --all-features

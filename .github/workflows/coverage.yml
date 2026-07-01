@@ -33,7 +33,7 @@ jobs:
       - name: Generate coverage (lcov)
         run: cargo llvm-cov --all-features --lcov --output-path lcov.info
 
-      # Generate JUnit XML by parsing nextest's libtest-json output.
+      # Generate JUnit XML via nextest ci profile (.config/nextest.toml).
       - name: Install nextest
         uses: taiki-e/install-action@9e1e5806d4a4822de933115878265be9aaa786d9 # v2
         with:

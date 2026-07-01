@@ -18,4 +18,4 @@ COPY --from=builder /out/ /usr/local/bin/
 USER neuromod
 # For library usage, typically users depend on the crate, not the image.
 # This image is useful for CI reproducibility and example runs.
-CMD ["bash"]
+CMD ["ls", "/usr/local/bin"]

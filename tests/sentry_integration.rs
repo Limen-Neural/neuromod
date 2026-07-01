@@ -304,6 +304,6 @@ fn sentry_is_not_a_default_feature() {
     // feature set does not pull in sentry.
     //
     // We also assert the neuromod crate still exposes its full public API.
-    assert_eq!(std::mem::size_of::<SpikingNetwork>() > 0, true);
-    assert_eq!(std::mem::size_of::<NeuroModulators>() > 0, true);
+    assert!(std::mem::size_of::<SpikingNetwork>() > 0);
+    assert!(std::mem::size_of::<NeuroModulators>() > 0);
 }

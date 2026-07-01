@@ -2,6 +2,11 @@
 # Third-party Actions are pinned to immutable commit SHAs (Aikido supply-chain policy).
 name: Audit
 
+permissions:
+  contents: read
+  security-events: write
+  actions: read
+
 on:
   push:
     branches: [main]

@@ -20,6 +20,15 @@ impl EnvGuard {
         let original = std::env::var(key).ok();
         Self { key, original }
     }
+
+    fn set(&self, value: &str) {
+        // Serialized by env_lock(); unsafe required until set_var is stabilized.
+        unsafe { std::env::set_var(self.key, value) };
+    }
+
+    fn remove(&self) {
+        unsafe { std::env::remove_var(self.key) };
+    }
 }
 
 impl Drop for EnvGuard {
@@ -183,10 +192,8 @@ fn step_wrong_input_length_returns_error() {
 #[test]
 fn sentry_dsn_absent_resolves_to_empty() {
     let _lock = env_lock();
-    let _guard = EnvGuard::new("SENTRY_DSN");
-    // Safety: this test is single-threaded; other tests that touch this var
-    // are separated by the same save/restore pattern.
-    unsafe { std::env::remove_var("SENTRY_DSN") };
+    let guard = EnvGuard::new("SENTRY_DSN");
+    guard.remove();
 
     let dsn = std::env::var("SENTRY_DSN").unwrap_or_default();
     assert!(
@@ -201,39 +208,28 @@ fn sentry_dsn_absent_resolves_to_empty() {
 #[test]
 fn sentry_dsn_present_is_non_empty() {
     let _lock = env_lock();
-    let original = std::env::var("SENTRY_DSN").ok();
-    unsafe { std::env::set_var("SENTRY_DSN", "https://example@sentry.example.com/1") };
+    let _guard = EnvGuard::new("SENTRY_DSN");
+    _guard.set("https://example@sentry.example.com/1");
 
     let dsn = std::env::var("SENTRY_DSN").unwrap_or_default();
     assert!(
         !dsn.is_empty(),
         "set SENTRY_DSN must produce non-empty string"
     );
-
-    // Restore
-    match original {
-        Some(val) => unsafe { std::env::set_var("SENTRY_DSN", val) },
-        None => unsafe { std::env::remove_var("SENTRY_DSN") },
-    }
 }
 
 /// An explicitly empty SENTRY_DSN ("") also triggers the "not reporting" branch.
 #[test]
 fn sentry_dsn_explicit_empty_resolves_to_empty() {
     let _lock = env_lock();
-    let original = std::env::var("SENTRY_DSN").ok();
-    unsafe { std::env::set_var("SENTRY_DSN", "") };
+    let _guard = EnvGuard::new("SENTRY_DSN");
+    _guard.set("");
 
     let dsn = std::env::var("SENTRY_DSN").unwrap_or_default();
     assert!(
         dsn.is_empty(),
         "explicitly empty SENTRY_DSN must still be empty"
     );
-
-    match original {
-        Some(val) => unsafe { std::env::set_var("SENTRY_DSN", val) },
-        None => unsafe { std::env::remove_var("SENTRY_DSN") },
-    }
 }
 
 // ---------------------------------------------------------------------------
@@ -279,8 +275,8 @@ fn neuromod_usable_with_sentry_feature_enabled() {
 #[test]
 fn sentry_feature_empty_dsn_uses_fallback_path() {
     let _lock = env_lock();
-    let original = std::env::var("SENTRY_DSN").ok();
-    unsafe { std::env::remove_var("SENTRY_DSN") };
+    let _guard = EnvGuard::new("SENTRY_DSN");
+    _guard.remove();
 
     let dsn = std::env::var("SENTRY_DSN").unwrap_or_default();
     // The example checks `!dsn.is_empty()` before calling sentry::init.
@@ -290,10 +286,6 @@ fn sentry_feature_empty_dsn_uses_fallback_path() {
         !would_init,
         "should NOT attempt sentry::init when DSN is absent"
     );
-
-    if let Some(val) = original {
-        unsafe { std::env::set_var("SENTRY_DSN", val) };
-    }
 }
 
 // ---------------------------------------------------------------------------

@@ -10,6 +10,7 @@ pr:
       - main
 variables:
   CARGO_HOME: $(Pipeline.workspace)/.cargo
+  RUSTUP_HOME: $(Pipeline.workspace)/.rustup
 jobs:
 - job: BuildTest
   strategy:
@@ -36,15 +37,21 @@ jobs:
       path: $(CARGO_HOME)
 
   - bash: |
+      export CARGO_HOME="$(CARGO_HOME)"
+      export RUSTUP_HOME="$(RUSTUP_HOME)"
+      mkdir -p "$CARGO_HOME/bin"
       curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable
-      echo "##vso[task.prependpath]$(CARGO_HOME)/bin"
+      echo "##vso[task.prependpath]$CARGO_HOME/bin"
     displayName: 'Install Rust (rustup) - Unix'
     condition: ne(variables['Agent.OS'], 'Windows_NT')
 
   - bash: |
+      export CARGO_HOME="$(CARGO_HOME)"
+      export RUSTUP_HOME="$(RUSTUP_HOME)"
+      mkdir -p "$CARGO_HOME/bin"
       curl -sSfL -o rustup-init.exe https://win.rustup.rs/
-      ./rustup-init.exe -y --default-toolchain stable
-      echo "##vso[task.prependpath]$(CARGO_HOME)/bin"
+      ./rustup-init.exe -y --default-toolchain stable --no-modify-path
+      echo "##vso[task.prependpath]$CARGO_HOME/bin"
     displayName: 'Install Rust (rustup) - Windows'
     condition: eq(variables['Agent.OS'], 'Windows_NT')
 
@@ -61,18 +68,24 @@ jobs:
     displayName: 'Build'
 
   - bash: |
-      curl -LsSf https://get.nexte.st/0.9.70/linux | tar zxf - -C "$(CARGO_HOME)/bin"
+      export CARGO_HOME="$(CARGO_HOME)"
+      mkdir -p "$CARGO_HOME/bin"
+      curl -LsSf https://get.nexte.st/0.9.70/linux | tar zxf - -C "$CARGO_HOME/bin"
     displayName: 'Install nextest - Linux'
     condition: eq(variables['Agent.OS'], 'Linux')
 
   - bash: |
-      curl -LsSf https://get.nexte.st/0.9.70/mac | tar zxf - -C "$(CARGO_HOME)/bin"
+      export CARGO_HOME="$(CARGO_HOME)"
+      mkdir -p "$CARGO_HOME/bin"
+      curl -LsSf https://get.nexte.st/0.9.70/mac | tar zxf - -C "$CARGO_HOME/bin"
     displayName: 'Install nextest - macOS'
     condition: eq(variables['Agent.OS'], 'Darwin')
 
   - bash: |
+      export CARGO_HOME="$(CARGO_HOME)"
+      mkdir -p "$CARGO_HOME/bin"
       curl -LsSf https://get.nexte.st/0.9.70/windows-tar -o nextest.tar.gz
-      tar zxf nextest.tar.gz -C "$(CARGO_HOME)/bin"
+      tar zxf nextest.tar.gz -C "$CARGO_HOME/bin"
     displayName: 'Install nextest - Windows'
     condition: eq(variables['Agent.OS'], 'Windows_NT')
 

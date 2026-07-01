@@ -45,13 +45,13 @@ jobs:
     displayName: 'Install Rust (rustup) - Unix'
     condition: ne(variables['Agent.OS'], 'Windows_NT')
 
-  - bash: |
-      export CARGO_HOME="$(CARGO_HOME)"
-      export RUSTUP_HOME="$(RUSTUP_HOME)"
-      mkdir -p "$CARGO_HOME/bin"
-      curl -sSfL -o rustup-init.exe https://win.rustup.rs/
-      ./rustup-init.exe -y --default-toolchain stable --no-modify-path
-      echo "##vso[task.prependpath]$CARGO_HOME/bin"
+  - powershell: |
+      $env:CARGO_HOME = "$(CARGO_HOME)"
+      $env:RUSTUP_HOME = "$(RUSTUP_HOME)"
+      New-Item -ItemType Directory -Force -Path "$env:CARGO_HOME\bin" | Out-Null
+      Invoke-WebRequest -Uri https://win.rustup.rs/ -OutFile rustup-init.exe
+      .\rustup-init.exe -y --default-toolchain stable --no-modify-path
+      Write-Host "##vso[task.prependpath]$env:CARGO_HOME\bin"
     displayName: 'Install Rust (rustup) - Windows'
     condition: eq(variables['Agent.OS'], 'Windows_NT')
 
@@ -81,11 +81,11 @@ jobs:
     displayName: 'Install nextest - macOS'
     condition: eq(variables['Agent.OS'], 'Darwin')
 
-  - bash: |
-      export CARGO_HOME="$(CARGO_HOME)"
-      mkdir -p "$CARGO_HOME/bin"
-      curl -LsSf https://get.nexte.st/0.9.70/windows-tar -o nextest.tar.gz
-      tar zxf nextest.tar.gz -C "$CARGO_HOME/bin"
+  - powershell: |
+      $env:CARGO_HOME = "$(CARGO_HOME)"
+      New-Item -ItemType Directory -Force -Path "$env:CARGO_HOME\bin" | Out-Null
+      Invoke-WebRequest -Uri https://get.nexte.st/0.9.70/windows-tar -OutFile nextest.tar.gz
+      tar -xzf nextest.tar.gz -C "$env:CARGO_HOME\bin"
     displayName: 'Install nextest - Windows'
     condition: eq(variables['Agent.OS'], 'Windows_NT')
 

@@ -21,9 +21,11 @@ path = "src/lib.rs"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 rand = "0.9.3"
+sentry = { version = "0.48", optional = true, default-features = false, features = ["backtrace", "contexts", "panic", "rustls", "transport"] }
 
 [dev-dependencies]
 criterion = "0.5"
+temp-env = "0.3"
 
 [[bench]]
 name = "neuron_bench"
@@ -41,6 +43,10 @@ harness = false
 name = "modulation_bench"
 harness = false
 
+
+[features]
+default = []
+sentry = ["dep:sentry"]
 
 [profile.release]
 opt-level = 3

@@ -22,6 +22,9 @@ jobs:
         with:
           components: clippy, rustfmt, llvm-tools-preview
 
+      - name: Rust Cache
+        uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae # v2
+
       - name: Install cargo-llvm-cov
         uses: taiki-e/install-action@8b3c737da4b541bf0fb5a3e0488ff20535badac9 # latest
         with:
@@ -30,17 +33,22 @@ jobs:
       - name: Generate coverage (lcov)
         run: cargo llvm-cov --all-features --lcov --output-path lcov.info
 
-      # JUnit output requires nightly + -Z unstable-options.
-      # We only use nightly for this one step so the rest of the
-      # workflow stays on stable.
-      - name: Generate JUnit report (nightly)
+      # Generate JUnit XML via nextest ci profile (.config/nextest.toml).
+      - name: Install nextest
+        uses: taiki-e/install-action@9e1e5806d4a4822de933115878265be9aaa786d9 # v2
+        with:
+          tool: nextest
+          version: '0.9.70'
+
+      # JUnit output via nextest profile (see .config/nextest.toml).
+      - name: Run tests (JUnit)
         run: |
-          rustup toolchain install nightly
-          cargo +nightly test --all-features -- -Z unstable-options --format junit > junit.xml
+          cargo nextest run --all-features --profile ci
+          cp target/nextest/ci/junit.xml junit.xml
 
       - name: Upload test results to Codecov
         if: ${{ !cancelled() }}
-        uses: codecov/test-results-action@v1
+        uses: codecov/test-results-action@0fa95f0e1eeaafde2c782583b36b28ad0d8c77d3 # v1
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           fail_ci_if_error: false

@@ -153,6 +153,13 @@ cargo bench --no-run
 cargo install cargo-llvm-cov
 cargo llvm-cov --all-features --lcov --output-path lcov.info
 # HTML report: cargo llvm-cov --all-features --html
+
+# Full CI-like validation
+cargo install cargo-hack --locked
+cargo fmt --check
+cargo clippy --all-targets --all-features -- -D warnings
+cargo test --all-features
+cargo hack check --feature-powerset --exclude-no-default-features --keep-going
 ```
 
 ## License
@@ -167,6 +174,46 @@ at your option.
 ## Coverage
 
 [![codecov](https://codecov.io/gh/Limen-Neural/neuromod/branch/main/graph/badge.svg)](https://codecov.io/gh/Limen-Neural/neuromod)
+
+## CI & Automation
+
+This repository uses a comprehensive CI setup for speed, quality, security, and observability:
+
+- **Core CI** (`.github/workflows/ci.yml`): `fmt`, `clippy`, build, tests (via `cargo-nextest`), feature-matrix testing (`cargo-hack`), domain-agnostic docs check. Uses `Swatinem/rust-cache` and `dorny/paths-filter` to keep most PR feedback fast.
+- **Codecov** (`.github/workflows/coverage.yml`): `cargo-llvm-cov` + Test Analytics (stable JUnit via pinned nextest).
+- **Sentry Releases** (`.github/workflows/sentry-release.yml`): Automatic releases on `v*` tags + manual `workflow_dispatch` trigger.
+- **reviewdog** (`.github/workflows/reviewdog.yml`): Inline PR comments for clippy and rustfmt.
+- **Security scanning**:
+  - CodeQL (`.github/workflows/codeql.yml`)
+  - `rustsec/audit-check` + Trivy (`.github/workflows/audit.yml`)
+- **Dependencies**: Dependabot (`.github/dependabot.yml`) for Cargo, GitHub Actions, Docker.
+- **Docker** (`.github/workflows/docker.yml`, `Dockerfile`): Reproducible builds.
+  Local usage:
+  ```bash
+  # Runtime image (example binaries only — no cargo toolchain)
+  docker build -t neuromod:runtime .
+  docker run --rm neuromod:runtime ls /usr/local/bin
+
+  # Run tests inside the builder stage (has Rust + source)
+  docker build --target builder -t neuromod:builder .
+  docker run --rm neuromod:builder cargo test --all-features --quiet
+  ```
+- **Azure Pipelines** (`azure-pipelines.yml`): Cross-platform (Linux / Windows / macOS) parity.
+
+### Error monitoring (optional `sentry` feature)
+
+```toml
+[dependencies]
+neuromod = { version = "0.5.0", features = ["sentry"] }
+```
+
+Guarded initialization example:
+
+```bash
+SENTRY_DSN=... cargo run --features sentry --example sentry
+```
+
+See `examples/sentry.rs`. The feature is completely optional and never pulls in Sentry in the default build.
 
 ## Links
 

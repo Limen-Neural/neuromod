@@ -1,6 +1,8 @@
 /target
-Cargo.lock
 *.crate
 
 # Rust build
 /target/
+.idea/
+.kilo/
+.kilocode/

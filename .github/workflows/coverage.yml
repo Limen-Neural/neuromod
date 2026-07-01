@@ -40,9 +40,11 @@ jobs:
           tool: nextest
           version: '0.9.70'
 
-      # Use nextest's stable JUnit output (--junit flag stabilized in nextest >= 0.9.50).
+      # JUnit output via nextest profile (see .config/nextest.toml).
       - name: Run tests (JUnit)
-        run: cargo nextest run --all-features --junit --output-file junit.xml
+        run: |
+          cargo nextest run --all-features --profile ci
+          cp target/nextest/ci/junit.xml junit.xml
 
       - name: Upload test results to Codecov
         if: ${{ !cancelled() }}

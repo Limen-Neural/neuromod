@@ -61,17 +61,17 @@ jobs:
     displayName: 'Build'
 
   - bash: |
-      curl -LsSf https://get.nexte.st/latest/linux | tar zxf - -C ${CARGO_HOME:-~/.cargo}/bin
+      curl -LsSf https://get.nexte.st/0.9.70/linux | tar zxf - -C ${CARGO_HOME:-~/.cargo}/bin
     displayName: 'Install nextest - Linux'
     condition: eq(variables['Agent.OS'], 'Linux')
 
   - bash: |
-      curl -LsSf https://get.nexte.st/latest/mac | tar zxf - -C ${CARGO_HOME:-~/.cargo}/bin
+      curl -LsSf https://get.nexte.st/0.9.70/mac | tar zxf - -C ${CARGO_HOME:-~/.cargo}/bin
     displayName: 'Install nextest - macOS'
     condition: eq(variables['Agent.OS'], 'Darwin')
 
   - script: |
-      curl -LsSf https://get.nexte.st/latest/windows-tar -o nextest.tar.gz
+      curl -LsSf https://get.nexte.st/0.9.70/windows-tar -o nextest.tar.gz
       tar zxf nextest.tar.gz -C %USERPROFILE%\.cargo\bin
     displayName: 'Install nextest - Windows'
     condition: eq(variables['Agent.OS'], 'Windows_NT')

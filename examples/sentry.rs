@@ -10,19 +10,29 @@ fn main() {
     let _guard = {
         let dsn = std::env::var("SENTRY_DSN").unwrap_or_default();
         if !dsn.is_empty() {
-            let guard = sentry::init((
-                dsn,
-                sentry::ClientOptions {
-                    release: sentry::release_name!(),
-                    ..Default::default()
-                },
-            ));
-            println!("Sentry initialized for error monitoring (feature enabled)");
-            sentry::capture_message(
-                "Sentry integration active in neuromod example",
-                sentry::Level::Info,
-            );
-            Some(guard)
+            // Validate DSN before initialization
+            match dsn.parse::<sentry::types::Dsn>() {
+                Ok(parsed_dsn) => {
+                    let guard = sentry::init((
+                        parsed_dsn,
+                        sentry::ClientOptions {
+                            release: sentry::release_name!(),
+                            ..Default::default()
+                        },
+                    ));
+                    println!("Sentry initialized for error monitoring (feature enabled)");
+                    sentry::capture_message(
+                        "Sentry integration active in neuromod example",
+                        sentry::Level::Info,
+                    );
+                    Some(guard)
+                }
+                Err(e) => {
+                    eprintln!("Invalid SENTRY_DSN format: {}", e);
+                    println!("Sentry feature enabled but not reporting due to invalid DSN.");
+                    None
+                }
+            }
         } else {
             println!("SENTRY_DSN not set; Sentry feature enabled but not reporting.");
             None

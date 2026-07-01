@@ -7,6 +7,28 @@ fn env_lock() -> std::sync::MutexGuard<'static, ()> {
     LOCK.get_or_init(|| Mutex::new(())).lock().unwrap()
 }
 
+/// RAII guard that automatically restores an environment variable on drop.
+struct EnvGuard {
+    key: &'static str,
+    original: Option<String>,
+}
+
+impl EnvGuard {
+    fn new(key: &'static str) -> Self {
+        let original = std::env::var(key).ok();
+        Self { key, original }
+    }
+}
+
+impl Drop for EnvGuard {
+    fn drop(&mut self) {
+        match &self.original {
+            Some(val) => unsafe { std::env::set_var(self.key, val) },
+            None => unsafe { std::env::remove_var(self.key) },
+        }
+    }
+}
+
 use neuromod::{NeuroModulators, SpikingNetwork};
 
 // ---------------------------------------------------------------------------
@@ -159,7 +181,7 @@ fn step_wrong_input_length_returns_error() {
 #[test]
 fn sentry_dsn_absent_resolves_to_empty() {
     let _lock = env_lock();
-    let original = std::env::var("SENTRY_DSN").ok();
+    let _guard = EnvGuard::new("SENTRY_DSN");
     // Safety: this test is single-threaded; other tests that touch this var
     // are separated by the same save/restore pattern.
     unsafe { std::env::remove_var("SENTRY_DSN") };
@@ -170,10 +192,7 @@ fn sentry_dsn_absent_resolves_to_empty() {
         "absent SENTRY_DSN must produce empty string"
     );
 
-    // Restore
-    if let Some(val) = original {
-        unsafe { std::env::set_var("SENTRY_DSN", val) };
-    }
+    // EnvGuard will automatically restore on drop
 }
 
 /// A non-empty SENTRY_DSN is detected by the example's guard condition.

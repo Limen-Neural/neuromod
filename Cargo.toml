@@ -25,6 +25,7 @@ sentry = { version = "0.48", optional = true, default-features = false, features
 
 [dev-dependencies]
 criterion = "0.5"
+temp-env = "0.3"
 
 [[bench]]
 name = "neuron_bench"

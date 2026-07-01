@@ -1,5 +1,5 @@
 # Multi-stage Docker for neuromod (library + examples/tests)
-# Builder
+# Builder — rust:1.85 matches edition 2024 in Cargo.toml; bump when MSRV increases.
 FROM rust:1.85-slim AS builder
 WORKDIR /app
 COPY . .

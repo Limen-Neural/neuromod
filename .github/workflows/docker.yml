@@ -33,15 +33,22 @@ jobs:
         with:
           driver: cloud
           endpoint: "pelon23/rmon34"
+      - name: Set image tag
+        id: image
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            echo "tag=neuromod:pr-${{ github.sha }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=${{ vars.DOCKER_USER }}/neuromod:${{ github.sha }}" >> "$GITHUB_OUTPUT"
+          fi
       - name: Build and push
         uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
         with:
           context: .
           load: ${{ github.event_name == 'pull_request' }}
-          tags: "${{ vars.DOCKER_USER }}/neuromod:${{ github.sha }}"
+          tags: ${{ steps.image.outputs.tag }}
           outputs: ${{ github.event_name == 'pull_request' && 'type=docker' || 'type=registry' }}
       - name: Verify image builds example binary
         if: github.event_name == 'pull_request'
         run: |
-          docker run --rm "${{ vars.DOCKER_USER }}/neuromod:${{ github.sha }}" \
-            ls /usr/local/bin/
+          docker run --rm "${{ steps.image.outputs.tag }}" ls /usr/local/bin/

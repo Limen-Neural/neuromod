@@ -1,44 +1,4 @@
-// env_lock()  is key to preventing data races in the tests.  Calls the test to stop and wait.
 #![allow(clippy::assertions_on_result_states)]
-use std::sync::{Mutex, OnceLock};
-
-fn env_lock() -> std::sync::MutexGuard<'static, ()> {
-    static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-    LOCK.get_or_init(|| Mutex::new(()))
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner())
-}
-
-/// RAII guard that automatically restores an environment variable on drop.
-struct EnvGuard {
-    key: &'static str,
-    original: Option<String>,
-}
-
-impl EnvGuard {
-    fn new(key: &'static str) -> Self {
-        let original = std::env::var(key).ok();
-        Self { key, original }
-    }
-
-    fn set(&self, value: &str) {
-        // Serialized by env_lock(); unsafe required until set_var is stabilized.
-        unsafe { std::env::set_var(self.key, value) };
-    }
-
-    fn remove(&self) {
-        unsafe { std::env::remove_var(self.key) };
-    }
-}
-
-impl Drop for EnvGuard {
-    fn drop(&mut self) {
-        match &self.original {
-            Some(val) => unsafe { std::env::set_var(self.key, val) },
-            None => unsafe { std::env::remove_var(self.key) },
-        }
-    }
-}
 
 use neuromod::{NeuroModulators, SpikingNetwork};
 
@@ -191,45 +151,41 @@ fn step_wrong_input_length_returns_error() {
 /// checks `.is_empty()`. These tests validate that exact lookup pattern.
 #[test]
 fn sentry_dsn_absent_resolves_to_empty() {
-    let _lock = env_lock();
-    let guard = EnvGuard::new("SENTRY_DSN");
-    guard.remove();
-
-    let dsn = std::env::var("SENTRY_DSN").unwrap_or_default();
-    assert!(
-        dsn.is_empty(),
-        "absent SENTRY_DSN must produce empty string"
-    );
-
-    // EnvGuard will automatically restore on drop
+    temp_env::with_var_unset("SENTRY_DSN", || {
+        let dsn = std::env::var("SENTRY_DSN").unwrap_or_default();
+        assert!(
+            dsn.is_empty(),
+            "absent SENTRY_DSN must produce empty string"
+        );
+    });
 }
 
 /// A non-empty SENTRY_DSN is detected by the example's guard condition.
 #[test]
 fn sentry_dsn_present_is_non_empty() {
-    let _lock = env_lock();
-    let _guard = EnvGuard::new("SENTRY_DSN");
-    _guard.set("https://example@sentry.example.com/1");
-
-    let dsn = std::env::var("SENTRY_DSN").unwrap_or_default();
-    assert!(
-        !dsn.is_empty(),
-        "set SENTRY_DSN must produce non-empty string"
+    temp_env::with_var(
+        "SENTRY_DSN",
+        Some("https://example@sentry.example.com/1"),
+        || {
+            let dsn = std::env::var("SENTRY_DSN").unwrap_or_default();
+            assert!(
+                !dsn.is_empty(),
+                "set SENTRY_DSN must produce non-empty string"
+            );
+        },
     );
 }
 
 /// An explicitly empty SENTRY_DSN ("") also triggers the "not reporting" branch.
 #[test]
 fn sentry_dsn_explicit_empty_resolves_to_empty() {
-    let _lock = env_lock();
-    let _guard = EnvGuard::new("SENTRY_DSN");
-    _guard.set("");
-
-    let dsn = std::env::var("SENTRY_DSN").unwrap_or_default();
-    assert!(
-        dsn.is_empty(),
-        "explicitly empty SENTRY_DSN must still be empty"
-    );
+    temp_env::with_var("SENTRY_DSN", Some(""), || {
+        let dsn = std::env::var("SENTRY_DSN").unwrap_or_default();
+        assert!(
+            dsn.is_empty(),
+            "explicitly empty SENTRY_DSN must still be empty"
+        );
+    });
 }
 
 // ---------------------------------------------------------------------------
@@ -274,18 +230,16 @@ fn neuromod_usable_with_sentry_feature_enabled() {
 #[cfg(feature = "sentry")]
 #[test]
 fn sentry_feature_empty_dsn_uses_fallback_path() {
-    let _lock = env_lock();
-    let _guard = EnvGuard::new("SENTRY_DSN");
-    _guard.remove();
-
-    let dsn = std::env::var("SENTRY_DSN").unwrap_or_default();
-    // The example checks `!dsn.is_empty()` before calling sentry::init.
-    // When empty we skip init — verify that guard logic here.
-    let would_init = !dsn.is_empty();
-    assert!(
-        !would_init,
-        "should NOT attempt sentry::init when DSN is absent"
-    );
+    temp_env::with_var_unset("SENTRY_DSN", || {
+        let dsn = std::env::var("SENTRY_DSN").unwrap_or_default();
+        // The example checks `!dsn.is_empty()` before calling sentry::init.
+        // When empty we skip init — verify that guard logic here.
+        let would_init = !dsn.is_empty();
+        assert!(
+            !would_init,
+            "should NOT attempt sentry::init when DSN is absent"
+        );
+    });
 }
 
 // ---------------------------------------------------------------------------

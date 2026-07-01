@@ -15,7 +15,7 @@ jobs:
     name: reviewdog
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           persist-credentials: false
 
@@ -24,7 +24,7 @@ jobs:
         with:
           components: clippy, rustfmt
 
-      - uses: reviewdog/action-setup@19ad6fc8b7358ccdc9fd4a25c75dd93eeb097e1e # v1
+      - uses: reviewdog/action-setup@d8a7baabd7f3e8544ee4dbde3ee41d0011c3a93f # v1
 
       - name: reviewdog (clippy)
         env:

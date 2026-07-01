@@ -95,12 +95,12 @@ jobs:
   - bash: |
       cp target/nextest/ci/junit.xml junit.xml
     displayName: 'Copy JUnit report'
-    condition: ne(variables['Agent.OS'], 'Windows_NT')
+    condition: and(succeededOrFailed(), ne(variables['Agent.OS'], 'Windows_NT'))
 
   - powershell: |
       Copy-Item target/nextest/ci/junit.xml junit.xml
     displayName: 'Copy JUnit report'
-    condition: eq(variables['Agent.OS'], 'Windows_NT')
+    condition: and(succeededOrFailed(), eq(variables['Agent.OS'], 'Windows_NT'))
 
   - task: PublishTestResults@2
     displayName: 'Publish Test Results'

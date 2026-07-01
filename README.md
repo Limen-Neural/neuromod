@@ -190,8 +190,13 @@ This repository uses a comprehensive CI setup for speed, quality, security, and 
 - **Docker** (`.github/workflows/docker.yml`, `Dockerfile`): Reproducible builds.
   Local usage:
   ```bash
-  docker build --target builder -t neuromod:test .
-  docker run --rm neuromod:test cargo test --all-features --quiet
+  # Runtime image (example binaries only — no cargo toolchain)
+  docker build -t neuromod:runtime .
+  docker run --rm neuromod:runtime ls /usr/local/bin
+
+  # Run tests inside the builder stage (has Rust + source)
+  docker build --target builder -t neuromod:builder .
+  docker run --rm neuromod:builder cargo test --all-features --quiet
   ```
 - **Azure Pipelines** (`azure-pipelines.yml`): Cross-platform (Linux / Windows / macOS) parity.
 

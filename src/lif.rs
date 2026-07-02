@@ -27,7 +27,7 @@ impl PoissonEncoder {
             // Stochastic firing:
             // If the random number (0.0-1.0) is LESS than our intensity, we spike.
             // This mimics the noise inherent in quantum/chemical systems.
-            if rng.random::<f32>() < probability {
+            if rng.random_range(0.0..1.0) < probability {
                 spikes.push(1);
             } else {
                 spikes.push(0);

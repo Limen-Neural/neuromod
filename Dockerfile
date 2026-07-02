@@ -1,6 +1,6 @@
 # Multi-stage Docker for neuromod (library + examples/tests)
 # Builder — rust:1.86+ required by criterion 0.8 (dev-dep); bump when MSRV increases.
-FROM rust:1.86-slim AS builder
+FROM rust:1.96-slim AS builder
 WORKDIR /app
 COPY . .
 # hadolint ignore=DL3008: Pinning Debian package versions breaks across image updates

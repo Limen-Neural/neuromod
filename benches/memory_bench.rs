@@ -1,9 +1,9 @@
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
-use std::hint::black_box;
 use neuromod::{
     FitzHughNagumoNeuron, HodgkinHuxleyNeuron, IzhikevichNeuron, LapicqueNeuron, LifNeuron,
     NeuroModulators, SpikingNetwork,
 };
+use std::hint::black_box;
 
 fn bench_neuron_memory_size(c: &mut Criterion) {
     c.bench_function("lif_neuron_size", |b| {

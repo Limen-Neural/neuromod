@@ -1,6 +1,6 @@
 use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
-use std::hint::black_box;
 use neuromod::{NeuroModulators, SpikingNetwork};
+use std::hint::black_box;
 
 fn bench_network_step_baseline(c: &mut Criterion) {
     let mut network = SpikingNetwork::new();

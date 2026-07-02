@@ -1,0 +1,94 @@
+steps:
+  - checkout: self
+    persistCredentials: 'false'
+
+  - task: Cache@2
+    displayName: 'Rust Cache'
+    inputs:
+      key: 'cargo | "$(Agent.OS)" | Cargo.lock'
+      restoreKeys: |
+        cargo | "$(Agent.OS)"
+      path: $(CARGO_HOME)
+
+  - bash: |
+      export CARGO_HOME="$(CARGO_HOME)"
+      export RUSTUP_HOME="$(RUSTUP_HOME)"
+      mkdir -p "$CARGO_HOME/bin"
+      curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable
+      echo "##vso[task.prependpath]$CARGO_HOME/bin"
+    displayName: 'Install Rust (rustup) - Unix'
+    condition: ne(variables['Agent.OS'], 'Windows_NT')
+
+  - powershell: |
+      $env:CARGO_HOME = "$(CARGO_HOME)"
+      $env:RUSTUP_HOME = "$(RUSTUP_HOME)"
+      New-Item -ItemType Directory -Force -Path "$env:CARGO_HOME\bin" | Out-Null
+      Invoke-WebRequest -Uri https://win.rustup.rs/ -OutFile rustup-init.exe
+      .\rustup-init.exe -y --default-toolchain stable --no-modify-path
+      Write-Host "##vso[task.prependpath]$env:CARGO_HOME\bin"
+    displayName: 'Install Rust (rustup) - Windows'
+    condition: eq(variables['Agent.OS'], 'Windows_NT')
+
+  - script: rustup component add rustfmt clippy llvm-tools-preview
+    displayName: 'Install rustfmt + clippy + llvm-tools-preview'
+
+  - script: cargo fmt -- --check
+    displayName: 'Check formatting'
+
+  - script: cargo clippy --all-targets --all-features -- -D warnings
+    displayName: 'Clippy'
+
+  - script: cargo build --all-features
+    displayName: 'Build'
+
+  - bash: |
+      export CARGO_HOME="$(CARGO_HOME)"
+      mkdir -p "$CARGO_HOME/bin"
+      curl -LsSf https://get.nexte.st/0.9.70/linux | tar zxf - -C "$CARGO_HOME/bin"
+    displayName: 'Install nextest - Linux'
+    condition: eq(variables['Agent.OS'], 'Linux')
+
+  - bash: |
+      export CARGO_HOME="$(CARGO_HOME)"
+      mkdir -p "$CARGO_HOME/bin"
+      curl -LsSf https://get.nexte.st/0.9.70/mac | tar zxf - -C "$CARGO_HOME/bin"
+    displayName: 'Install nextest - macOS'
+    condition: eq(variables['Agent.OS'], 'Darwin')
+
+  - powershell: |
+      $env:CARGO_HOME = "$(CARGO_HOME)"
+      New-Item -ItemType Directory -Force -Path "$env:CARGO_HOME\bin" | Out-Null
+      Invoke-WebRequest -Uri https://get.nexte.st/0.9.70/windows-tar -OutFile nextest.tar.gz
+      tar -xzf nextest.tar.gz -C "$env:CARGO_HOME\bin"
+    displayName: 'Install nextest - Windows'
+    condition: eq(variables['Agent.OS'], 'Windows_NT')
+
+  - script: cargo nextest run --all-features --profile ci
+    displayName: 'Test'
+
+  - bash: |
+      cp target/nextest/ci/junit.xml junit.xml
+    displayName: 'Copy JUnit report'
+    condition: and(succeededOrFailed(), ne(variables['Agent.OS'], 'Windows_NT'))
+
+  - powershell: |
+      Copy-Item target/nextest/ci/junit.xml junit.xml
+    displayName: 'Copy JUnit report'
+    condition: and(succeededOrFailed(), eq(variables['Agent.OS'], 'Windows_NT'))
+
+  - task: PublishTestResults@2
+    displayName: 'Publish Test Results'
+    inputs:
+      testResultsFormat: 'JUnit'
+      testResultsFiles: '**/junit.xml'
+      mergeTestResults: true
+      testRunTitle: 'Azure Tests'
+    condition: succeededOrFailed()
+
+  - bash: |
+      export CARGO_HOME="$(CARGO_HOME)"
+      cargo install cargo-llvm-cov --locked
+      cargo llvm-cov --all-features --lcov --output-path lcov.info
+    displayName: 'Coverage (optional)'
+    continueOnError: true
+    condition: and(succeeded(), eq(variables['Agent.OS'], 'Linux'))

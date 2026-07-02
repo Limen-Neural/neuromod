@@ -198,7 +198,7 @@ This repository uses a comprehensive CI setup for speed, quality, security, and 
   docker build --target builder -t neuromod:builder .
   docker run --rm neuromod:builder cargo test --all-features --quiet
   ```
-- **Azure Pipelines** (`azure-pipelines.yml`): Cross-platform (Linux / Windows / macOS) parity.
+- **Azure Pipelines** (`azure-pipelines.yml`): Cross-platform (Linux / Windows / macOS) parity. For branch protection, require the three per-OS checks (`Limen-Neural.neuromod (BuildTest linux|mac|windows)`), not the parent aggregate `Limen-Neural.neuromod`.
 
 ### Error monitoring (optional `sentry` feature)
 

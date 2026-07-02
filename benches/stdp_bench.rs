@@ -1,8 +1,9 @@
-use criterion::{BenchmarkId, Criterion, black_box, criterion_group, criterion_main};
+use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
 use neuromod::rm_stdp::{
     EligibilityTrace, RM_STDP_A_MINUS, RM_STDP_A_PLUS, RM_STDP_TAU_MINUS, RM_STDP_TAU_PLUS,
 };
 use neuromod::{HebbianIzhikevichNetwork, StdpParams, apply_classical_stdp};
+use std::hint::black_box;
 
 fn bench_classical_stdp(c: &mut Criterion) {
     let params = StdpParams::default();

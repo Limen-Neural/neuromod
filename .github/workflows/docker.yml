@@ -19,7 +19,8 @@ jobs:
         with:
           persist-credentials: false
       - name: Log in to Docker Hub
-        if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+        # Dependabot PRs lack secrets; same-repo human PRs keep authenticated pulls.
+        if: github.event_name != 'pull_request' || (github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.user.login != 'dependabot[bot]')
         uses: docker/login-action@650006c6eb7dba73a995cc03b0b2d7f5ca915bee # v4.2.0
         with:
           username: ${{ vars.DOCKER_USER }}
@@ -32,7 +33,7 @@ jobs:
         uses: docker/setup-buildx-action@d7f5e7f509e45cec5c76c4d5afdd7de93d0b3df5 # v4.1.0
         with:
           driver: cloud
-          endpoint: "pelon23/rmon34"
+          endpoint: ${{ vars.DOCKER_BUILDX_ENDPOINT != '' && vars.DOCKER_BUILDX_ENDPOINT || 'pelon23/rmon34' }}
       - name: Set image tag
         id: image
         run: |

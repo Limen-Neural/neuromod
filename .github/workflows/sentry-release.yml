@@ -24,3 +24,6 @@ jobs:
           SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
           SENTRY_ORG: ${{ secrets.SENTRY_ORG }}
           SENTRY_PROJECT: neuromod
+        with:
+          environment: production
+          release: ${{ github.ref_name }}

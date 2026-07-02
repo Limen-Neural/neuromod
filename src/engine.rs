@@ -1,4 +1,4 @@
-use rand::Rng;
+use rand::RngExt;
 use serde::{Deserialize, Serialize};
 
 use super::izhikevich::IzhikevichNeuron;
@@ -107,7 +107,7 @@ impl SpikingNetwork {
         let mut rng = rand::rng();
         for (ch, &s) in stimuli.iter().enumerate() {
             let abs_s = s.abs().clamp(0.0, 1.0);
-            if abs_s > 0.01 && rng.random::<f32>() < abs_s {
+            if abs_s > 0.01 && rng.random_range(0.0..1.0) < abs_s {
                 self.input_spike_times[ch] = self.global_step;
             }
         }

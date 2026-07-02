@@ -55,8 +55,8 @@ jobs:
     displayName: 'Install Rust (rustup) - Windows'
     condition: eq(variables['Agent.OS'], 'Windows_NT')
 
-  - script: rustup component add rustfmt clippy llvm-tools-preview
-    displayName: 'Install rustfmt + clippy + llvm-tools-preview'
+  - script: rustup component add rustfmt clippy
+    displayName: 'Install rustfmt + clippy'
 
   - script: cargo fmt -- --check
     displayName: 'Check formatting'
@@ -112,8 +112,7 @@ jobs:
     condition: succeededOrFailed()
 
   - bash: |
-      export CARGO_HOME="$(CARGO_HOME)"
-      cargo install cargo-llvm-cov --locked
+      curl -LsSf https://taiki-e.github.io/install/install.sh | sh -s -- cargo-llvm-cov
       cargo llvm-cov --all-features --lcov --output-path lcov.info
     displayName: 'Coverage (optional)'
     continueOnError: true

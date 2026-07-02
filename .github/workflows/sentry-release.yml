@@ -18,6 +18,16 @@ jobs:
           persist-credentials: false
           fetch-depth: 0
 
+      - name: Resolve release version
+        id: version
+        run: |
+          if [[ "${{ github.ref }}" == refs/tags/v* ]]; then
+            echo "release=neuromod@${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+          else
+            ver=$(grep -m1 '^version' Cargo.toml | sed 's/.*"\(.*\)".*/\1/')
+            echo "release=neuromod@${ver}" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Create Sentry release
         uses: getsentry/action-release@ff07929a6537bac57790c3451cf4d364aca38528 # v3.7.0
         env:
@@ -26,4 +36,4 @@ jobs:
           SENTRY_PROJECT: rust
         with:
           environment: production
-          release: neuromod@${{ github.ref_name }}
+          release: ${{ steps.version.outputs.release }}

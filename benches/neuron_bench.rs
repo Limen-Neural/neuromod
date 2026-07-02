@@ -1,8 +1,8 @@
-use criterion::{Criterion, criterion_group, criterion_main}; // Import criterion macros
+use criterion::{Criterion, criterion_group, criterion_main};
 use neuromod::{
     FitzHughNagumoNeuron, HodgkinHuxleyNeuron, IzhikevichNeuron, LapicqueNeuron, LifNeuron,
-};
-use std::hint::black_box; // Import neuron types
+}; // Import neuron types
+use std::hint::black_box;
 
 /// Benchmark LIF neuron integration
 fn bench_lif_integrate(c: &mut Criterion) {

@@ -24,7 +24,7 @@ rand = "0.10.1"
 sentry = { version = "0.48", optional = true, default-features = false, features = ["backtrace", "contexts", "panic", "rustls", "transport"] }
 
 [dev-dependencies]
-criterion = "0.8"
+criterion = "0.8.2"
 temp-env = "0.3"
 
 [[bench]]

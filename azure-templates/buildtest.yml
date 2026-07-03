@@ -10,24 +10,18 @@ steps:
         cargo | "$(Agent.OS)"
       path: $(CARGO_HOME)
 
-  - bash: |
-      set -euo pipefail
-      rustup default stable
-      rustup component add rustfmt clippy llvm-tools-preview
-    displayName: 'Set Rust toolchain'
-
-  - bash: |
-      echo "##vso[task.setvariable variable=RUSTC_VERSION]$(rustc --version)"
-    displayName: 'Record Rust version for cache key'
-
   - task: Cache@2
     displayName: 'Cargo target cache'
     inputs:
-      key: 'target | "$(Agent.OS)" | Cargo.lock | $(RUSTC_VERSION)'
+      key: 'target | "$(Agent.OS)" | Cargo.lock'
       restoreKeys: |
-        target | "$(Agent.OS)" | Cargo.lock
         target | "$(Agent.OS)"
       path: target
+
+  - script: |
+      rustup default stable
+      rustup component add rustfmt clippy llvm-tools-preview
+    displayName: 'Set Rust toolchain'
 
   - script: cargo fmt -- --check
     displayName: 'Check formatting'

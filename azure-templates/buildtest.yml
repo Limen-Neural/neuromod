@@ -58,12 +58,16 @@ steps:
     displayName: 'Test'
 
   - bash: |
-      cp target/nextest/ci/junit.xml junit.xml
+      if [ -f target/nextest/ci/junit.xml ]; then
+        cp target/nextest/ci/junit.xml junit.xml
+      fi
     displayName: 'Copy JUnit report'
     condition: and(succeededOrFailed(), ne(variables['Agent.OS'], 'Windows_NT'))
 
   - powershell: |
-      Copy-Item target/nextest/ci/junit.xml junit.xml
+      if (Test-Path target/nextest/ci/junit.xml) {
+        Copy-Item target/nextest/ci/junit.xml junit.xml
+      }
     displayName: 'Copy JUnit report'
     condition: and(succeededOrFailed(), eq(variables['Agent.OS'], 'Windows_NT'))
 
@@ -78,7 +82,9 @@ steps:
 
   - bash: |
       export CARGO_HOME="$(CARGO_HOME)"
-      cargo install cargo-llvm-cov --locked
+      if ! command -v cargo-llvm-cov &> /dev/null; then
+        cargo install cargo-llvm-cov --locked
+      fi
       cargo llvm-cov --all-features --lcov --output-path lcov.info
     displayName: 'Coverage (optional)'
     continueOnError: true

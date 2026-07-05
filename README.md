@@ -131,6 +131,16 @@ For legacy hardware-calibrated signal mapping, use `SignalProfile::hardware_cali
   - `apply_classical_stdp`, `StdpParams`, `HebbianIzhikevichNetwork`
   - `EligibilityTrace`, `RmStdpConfig`
 
+## Architecture & Boundaries
+
+`neuromod` is the core library layer for neuron dynamics, generic neuromodulation, and foundational plasticity primitives.
+
+See the full planning documents:
+
+- [Org Modularization Standards](docs/org-modularization.md) — workstream index (#35–#43), cross-cutting git/build/beads standards, and audit commands.
+- [neuromod Boundary Matrix](docs/neuromod-boundary-matrix.md) — runtime/deployment role, owns/does-not-own, allowed/forbidden dependencies vs. limbic-critic, brainstem-daemon, axon-encoder, synaptic-mesh, silicon-bridge, Spikenaut-Hardware, plasticity-lab, etc. (LIM-9).
+- [ADR 001: Shared traits live in neuromod](docs/adr/001-traits-in-neuromod.md) — why traits are hosted here.
+
 ## Examples
 
 Run included examples:

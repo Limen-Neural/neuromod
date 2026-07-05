@@ -4,9 +4,17 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+### Added
+
+- Documentation for org modularization program:
+  - `docs/org-modularization.md` (standards, workstream index for #35–#43, git/build/beads rules, audit commands)
+  - `docs/adr/001-traits-in-neuromod.md` (records decision to host shared traits in neuromod)
+  - `docs/neuromod-boundary-matrix.md` (runtime/deployment boundary matrix per LIM-9 / #11 / #25)
+
 ### Changed
 
 - **License:** switched from GPL-3.0 to dual MIT/Apache-2.0 for maximum adoption and ecosystem health.
+- README now links the new Architecture & Boundaries docs.
 
 ## [0.5.0] - 2026-06-20
 

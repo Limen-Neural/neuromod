@@ -10,7 +10,7 @@ See also:
 
 `neuromod` hosts shared traits and core SNN contracts for the org (no separate traits crate).
 
-The org maintains ~22 repositories (Rust crates for core infrastructure + Julia research layers + one hardware HDL repo). Hard boundaries are enforced so each owns one layer.
+The org maintains **14 Rust crates** (axon-encoder, neuromod, synaptic-mesh, kinetic-signals, corpus-ipc, silicon-bridge, thalamic-relay, limbic-critic, engram-parser, cortex-tensor, plasticity-lab, metabolic-ledger, brainstem-daemon, hybrid-fusion) plus additional non-crate repositories (e.g., Julia research layers and hardware/HDL). Hard boundaries are enforced so each owns one layer.
 
 Why `neuromod` for shared traits:
 - Lowest layer for neuron dynamics, network stepping, generic neuromodulation, and plasticity primitives.
@@ -21,15 +21,15 @@ Why `neuromod` for shared traits:
 
 | Issue | Phase    | Summary |
 |-------|----------|---------|
-| #35   | Traits   | Audit trait boundaries across org |
-| #36   | Traits   | Design trait API contract |
-| #37   | Traits   | Implement traits in neuromod |
-| #43   | Traits   | ADR: traits live in neuromod |
-| #38   | Deps     | Fix git dependency URLs |
-| #42   | Deps     | Remove pinned `rev` pins |
-| #40   | Build    | Validate neuromod release profile |
-| #41   | Build    | Roll out release profiles org-wide |
-| #39   | Tooling  | Initialize beads in missing repos |
+| [#35](https://github.com/Limen-Neural/neuromod/issues/35) | Traits   | Audit trait boundaries across org |
+| [#36](https://github.com/Limen-Neural/neuromod/issues/36) | Traits   | Design trait API contract |
+| [#37](https://github.com/Limen-Neural/neuromod/issues/37) | Traits   | Implement traits in neuromod |
+| [#43](https://github.com/Limen-Neural/neuromod/issues/43) | Traits   | ADR: traits live in neuromod |
+| [#38](https://github.com/Limen-Neural/neuromod/issues/38) | Deps     | Fix git dependency URLs |
+| [#42](https://github.com/Limen-Neural/neuromod/issues/42) | Deps     | Remove pinned `rev` pins |
+| [#40](https://github.com/Limen-Neural/neuromod/issues/40) | Build    | Validate neuromod release profile |
+| [#41](https://github.com/Limen-Neural/neuromod/issues/41) | Build    | Roll out release profiles org-wide |
+| [#39](https://github.com/Limen-Neural/neuromod/issues/39) | Tooling  | Initialize beads in missing repos |
 
 (Full current list of open issues in the repo can be found via GitHub search.)
 
@@ -100,6 +100,6 @@ rg '^\[profile\.release\]' --glob '**/Cargo.toml' -A 3
 - Parent: this doc was extracted from the body of #44.
 - Siblings: #35–#43.
 - Boundary matrix and ADR live alongside this file.
-- Org repo inventory (as of 2026-07): axon-encoder, neuromod, synaptic-mesh, kinetic-signals, corpus-ipc, silicon-bridge, thalamic-relay, limbic-critic, engram-parser, cortex-tensor, plasticity-lab, metabolic-ledger, brainstem-daemon, hybrid-fusion, silicon-hdl, plus Julia crates and Spikenaut-Hardware.
+- Org inventory (as of 2026-07): **14 Rust crates** (axon-encoder, neuromod, synaptic-mesh, kinetic-signals, corpus-ipc, silicon-bridge, thalamic-relay, limbic-critic, engram-parser, cortex-tensor, plasticity-lab, metabolic-ledger, brainstem-daemon, hybrid-fusion) plus additional non-crate repositories (e.g., silicon-hdl, Julia crates, Spikenaut-Hardware).
 
 Update this document as child issues complete.

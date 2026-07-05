@@ -9,7 +9,7 @@ See also:
 
 ## 1. Program overview
 
-`neuromod` hosts shared traits and core SNN contracts for the org (no separate traits crate).
+`neuromod` hosts foundational SNN and neuromodulation contracts (plus core shared traits) for the org (no separate traits crate).
 
 The org maintains ~22 repositories (Rust crates for core infrastructure + Julia research layers + one hardware HDL repo). Hard boundaries are enforced so each owns one layer.
 
@@ -23,21 +23,21 @@ Why `neuromod` for shared traits:
 
 | Issue | Phase    | Summary |
 |-------|----------|---------|
-| #35   | Traits   | Audit trait boundaries across org |
-| #36   | Traits   | Design trait API contract |
-| #37   | Traits   | Implement traits in neuromod |
-| #43   | Traits   | ADR: traits live in neuromod |
-| #38   | Deps     | Fix git dependency URLs |
-| #42   | Deps     | Remove pinned `rev` pins |
-| #40   | Build    | Validate neuromod release profile |
-| #41   | Build    | Roll out release profiles org-wide |
-| #39   | Tooling  | Initialize beads in missing repos |
+| [#35](https://github.com/Limen-Neural/neuromod/issues/35)   | Traits   | Audit trait boundaries across org |
+| [#36](https://github.com/Limen-Neural/neuromod/issues/36)   | Traits   | Design trait API contract |
+| [#37](https://github.com/Limen-Neural/neuromod/issues/37)   | Traits   | Implement traits in neuromod |
+| [#43](https://github.com/Limen-Neural/neuromod/issues/43)   | Traits   | ADR: traits live in neuromod |
+| [#38](https://github.com/Limen-Neural/neuromod/issues/38)   | Deps     | Fix git dependency URLs |
+| [#42](https://github.com/Limen-Neural/neuromod/issues/42)   | Deps     | Remove pinned `rev` pins |
+| [#40](https://github.com/Limen-Neural/neuromod/issues/40)   | Build    | Validate neuromod release profile |
+| [#41](https://github.com/Limen-Neural/neuromod/issues/41)   | Build    | Roll out release profiles org-wide |
+| [#39](https://github.com/Limen-Neural/neuromod/issues/39)   | Tooling  | Initialize beads in missing repos |
 
 (Full current list of open issues in the repo can be found via GitHub search.)
 
 ## 3. Execution order
 
-```
+```text
 Traits:  #35 → #36 → #37 → #43
 Deps:    #38 → #42
 Build:   #40 → #41
@@ -94,7 +94,7 @@ test -d .beads && echo OK || echo MISSING
 rg '^\[profile\.release\]' --glob '**/Cargo.toml' -A 3
 
 # Domain leakage in docs (CI guard)
-! grep -riE 'spikenaut|\bhft\b|\bmining\b|\bcrypto\b|eagle-lander' target/doc/<crate>/ || echo "leak"
+! grep -riE 'spikenaut|\bhft\b|\bmining\b|\bcrypto\b|eagle-lander' target/doc/<crate>/
 ```
 
 ## Related

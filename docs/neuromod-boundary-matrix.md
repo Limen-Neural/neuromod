@@ -38,7 +38,7 @@ It is a pure computation library: no I/O, no hardware, no application orchestrat
 
 - `serde` (with derive) — for serialization of core types
 - `rand` — for stochastic elements inside neuron models
-- `sentry` (optional, feature-gated) — error monitoring only
+- `sentry` (optional, feature-gated) — error monitoring only (intentional exception to the no-I/O rule)
 - Minimal std + the above; keep the crate lightweight and portable
 
 ## Forbidden Dependencies / Domains
@@ -54,8 +54,8 @@ It is a pure computation library: no I/O, no hardware, no application orchestrat
 
 | Layer                  | Responsibility                                      | Example Repos                          |
 |------------------------|-----------------------------------------------------|----------------------------------------|
-| **Core Library**       | Neuron dynamics, network step, generic modulators, plasticity primitives, shared traits | `neuromod`, `limbic-critic`            |
-| **Supervisor/App**     | Encoding, topology, training loops, IPC, runtime daemon | `axon-encoder`, `synaptic-mesh`, `plasticity-lab`, `corpus-ipc`, `brainstem-daemon`, `thalamic-relay` |
+| **Core Library**       | Neuron dynamics, network step, generic modulators, plasticity primitives, foundational shared traits | `neuromod`            |
+| **Supervisor/App**     | Encoding, topology, training loops, IPC, runtime daemon, reward shaping | `axon-encoder`, `synaptic-mesh`, `plasticity-lab`, `corpus-ipc`, `brainstem-daemon`, `thalamic-relay`, `limbic-critic` |
 | **Deployment/Hardware**| Parameter export, fixed-point, UART, HDL synthesis  | `silicon-bridge`, `Spikenaut-Hardware` |
 
 ## Domain Leaks

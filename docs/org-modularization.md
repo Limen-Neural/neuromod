@@ -3,6 +3,7 @@
 This document is the durable, in-repo reference for the Limen-Neural modularization program. It replaces scattered GitHub issue threads as the canonical place maintainers and agents consult.
 
 See also:
+
 - `docs/neuromod-boundary-matrix.md`
 - `docs/adr/001-traits-in-neuromod.md`
 

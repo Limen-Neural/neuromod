@@ -44,7 +44,7 @@ Tooling: #39 (parallel)
 
 ## 4. Cross-cutting standards
 
-**Git dependencies**
+### Git dependencies
 
 - Inter-repo: `git = "https://github.com/Limen-Neural/<repo>", branch = "main"`
 - No pinned `rev` unless a documented exception with justification and removal plan.

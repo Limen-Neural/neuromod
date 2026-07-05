@@ -68,7 +68,7 @@ codegen-units = 1
 
 (This is already present in `neuromod/Cargo.toml` and was validated under #40.)
 
-**Beads**
+### Beads
 
 - Every active org repo should have `.beads/` committed (complements GitHub Issues; does not replace it).
 - See #39.

@@ -13,6 +13,7 @@ See also:
 The org maintains ~22 repositories (Rust crates for core infrastructure + Julia research layers + one hardware HDL repo). Hard boundaries are enforced so each owns one layer.
 
 Why `neuromod` for shared traits:
+
 - Lowest layer for neuron dynamics, network stepping, generic neuromodulation, and plasticity primitives.
 - Already depended on (directly or indirectly) by runtime, training, relay, and hybrid crates.
 - Avoids extra repo overhead and duplication risk.

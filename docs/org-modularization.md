@@ -55,7 +55,7 @@ Tooling: #39 (parallel)
   ```
 - Current examples of pinned usage (to be cleaned by #42 work) exist in plasticity-lab, etc.
 
-**Release profile template**
+### Release profile template
 
 Every active Rust crate should include:
 

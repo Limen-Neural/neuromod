@@ -208,13 +208,7 @@ This repository uses a comprehensive CI setup for speed, quality, security, and 
   docker build --target builder -t neuromod:builder .
   docker run --rm neuromod:builder cargo test --all-features --quiet
   ```
-- **Azure Pipelines** (`azure-pipelines.yml`): Cross-platform (Linux / Windows / macOS) parity using three explicit jobs (one check per OS). 
-  - Pure docs / markdown / non-code PRs are skipped via path filtering (no Azure checks at all).
-  - For branch protection on `main`, **require only the three per-OS checks**:
-    - `Limen-Neural.neuromod (BuildTest linux)`
-    - `Limen-Neural.neuromod (BuildTest mac)`
-    - `Limen-Neural.neuromod (BuildTest windows)`
-  - **Do not require** the parent aggregate `Limen-Neural.neuromod` (it is redundant and always appears alongside the jobs).
+- **Azure Pipelines** (`azure-pipelines.yml`): Cross-platform (Linux / Windows / macOS) parity. Three explicit jobs so GitHub surfaces one check per OS. For branch protection, require the three per-OS checks (`Limen-Neural.neuromod (BuildTest linux)`, `Limen-Neural.neuromod (BuildTest mac)`, `Limen-Neural.neuromod (BuildTest windows)`), not the parent aggregate `Limen-Neural.neuromod`. The parent aggregate check will still appear.
 
 ### Error monitoring (optional `sentry` feature)
 

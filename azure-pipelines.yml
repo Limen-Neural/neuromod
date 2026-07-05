@@ -1,15 +1,7 @@
 # Azure Pipelines for cross-platform parity (Linux / Windows / macOS)
 # Pipeline: Limen-Neural.neuromod (id=1) in the "CI CD" project at https://dev.azure.com/Limen-Neural
 # Modeled on metabolic-ledger/full-ci (id=5) and the planned brainstem-daemon Azure setup (GH#21).
-#
-# Three explicit jobs (not matrix) so GitHub gets one check per OS.
-# IMPORTANT: In GitHub branch protection, require ONLY the three per-OS checks:
-#   Limen-Neural.neuromod (BuildTest linux)
-#   Limen-Neural.neuromod (BuildTest mac)
-#   Limen-Neural.neuromod (BuildTest windows)
-# Do NOT require the parent aggregate "Limen-Neural.neuromod" (it is redundant).
-#
-# Path filtering below skips Azure entirely for pure-docs / non-code PRs to avoid noise.
+# Three explicit jobs (not matrix) so GitHub gets one check per OS; require the per-OS legs in branch protection.
 trigger:
   branches:
     include:
@@ -18,18 +10,6 @@ pr:
   branches:
     include:
       - main
-  paths:
-    exclude:
-      # Pure documentation / non-code changes should not trigger full cross-OS Azure builds
-      - docs/**
-      - README.md
-      - CHANGELOG.md
-      - LICENSE*
-      - '*.md'
-      - .github/ISSUE_TEMPLATE/**
-      - .github/PULL_REQUEST_TEMPLATE*
-      - codecov.yml
-      - azure-pipelines.yml  # itself only if other changes; but keep simple
   autoCancel: false
 variables:
   CARGO_HOME: $(Pipeline.workspace)/.cargo

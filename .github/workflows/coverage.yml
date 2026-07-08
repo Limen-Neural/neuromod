@@ -26,7 +26,7 @@ jobs:
         uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
 
       - name: Install cargo-llvm-cov
-        uses: taiki-e/install-action@16b05812d776ae1dfaabc8277e421fb6d2506419 # pinned (taiki-e/install-action v2)
+        uses: taiki-e/install-action@50414676f9f5d50a65992c6dd2ed02641263226c # pinned (taiki-e/install-action v2)
         with:
           tool: cargo-llvm-cov
 
@@ -35,7 +35,7 @@ jobs:
 
       # Generate JUnit XML via nextest ci profile (.config/nextest.toml).
       - name: Install nextest
-        uses: taiki-e/install-action@16b05812d776ae1dfaabc8277e421fb6d2506419 # pinned (taiki-e/install-action v2)
+        uses: taiki-e/install-action@50414676f9f5d50a65992c6dd2ed02641263226c # pinned (taiki-e/install-action v2)
         with:
           tool: nextest
           version: '0.9.70'
@@ -54,7 +54,7 @@ jobs:
           fail_ci_if_error: false
 
       - name: Codecov
-        uses: codecov/codecov-action@0fb7174895f61a3b6b78fc075e0cd60383518dac # v5
+        uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v7.0.0
         env:
           CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
         with:

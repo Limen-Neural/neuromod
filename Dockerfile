@@ -3,7 +3,7 @@
 FROM rust:1.97.1-slim-bookworm AS builder
 WORKDIR /app
 COPY . .
-# hadolint ignore=DL3008: Pinning Debian package versions breaks across image updates
+# hadolint ignore=DL3008
 RUN apt-get update && apt-get install -y --no-install-recommends pkg-config libssl-dev \
     && rm -rf /var/lib/apt/lists/*
 RUN cargo build --release --examples && \

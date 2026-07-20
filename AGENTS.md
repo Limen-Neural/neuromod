@@ -29,7 +29,6 @@ Part of the [Limen-Neural](https://github.com/Limen-Neural) ecosystem. See [docs
 | `docs/` | Architecture docs: boundary matrix, org modularization index, Architecture Decision Records (ADRs) |
 | [rust-toolchain.toml](rust-toolchain.toml) | Pinned Rust toolchain (1.97.1) |
 | `.devcontainer/` | VS Code dev container configuration |
-| `REVIEW.md` | Local review quality gate |
 | `AGENTS.md` | Agent instructions (this file) |
 | `.github/workflows/` | CI/CD pipelines |
 
@@ -84,11 +83,11 @@ Open in VS Code with the Dev Containers extension or run:
 devcontainer up --workspace-folder .
 ```
 
-The container is based on `rust:1.97.1-slim-bookworm`. It adds `pkg-config` and `libssl-dev` for the `sentry` feature. `cargo fetch` runs on first create. The non-root `vscode` user owns the Rust toolchain. That lets `cargo` commands and component installs work from the terminal. It also supports the optional `cargo-llvm-cov` workflow.
+The container is `rust:1.97.1-slim-bookworm`. It adds `pkg-config` and `libssl-dev` for `sentry`. `cargo fetch` runs on first create. The `vscode` user owns the toolchain, so `cargo` commands and component installs work from the terminal. `cargo-llvm-cov` is also supported.
 
 ## Boundaries
 
-- **Owns:** `src/`, `Cargo.toml`, `README.md`, `AGENTS.md`, `REVIEW.md`, [rust-toolchain.toml](rust-toolchain.toml), `.devcontainer/`
+- **Owns:** `src/`, `Cargo.toml`, `README.md`, `AGENTS.md`, review quality gate document, [rust-toolchain.toml](rust-toolchain.toml), `.devcontainer/`
 - **Does not own:** sensory encoding (`axon-encoder`), topology/wiring (`synaptic-mesh`), reward shaping (`limbic-critic`), training loops (`plasticity-lab`), IPC (`corpus-ipc`), runtime daemon (`brainstem-daemon`), hardware export (`silicon-bridge`, `Spikenaut-Hardware`)
 - **Off-limits:** no mining/trading/high-frequency trading (HFT)/crypto domain logic; no async, networking, or hardware-specific code in the core library
 

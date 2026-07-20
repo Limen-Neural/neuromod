@@ -23,7 +23,7 @@
 //! Reference: Hodgkin, A.L. & Huxley, A.F. (1952). A quantitative description
 //! of membrane current and its application to conduction and excitation in nerve.
 //! *Journal of Physiology*, 117(4), 500–544.
-//! https://www.nature.com/articles/117500a0
+//! <https://www.nature.com/articles/117500a0>
 //! Note: The original codebase had a more complex neuron model with plasticity, but this HH implementation is a simplified version that focuses on the core biophysical dynamics without the additional complexity of the original model.
 //! The weights and plasticity mechanisms will be handled separately in the reward-modulated STDP module,  allowing us to keep the HH neuron model clean and focused on its core functionality. This separation of concerns also makes it easier to modify or extend the neuron model in the future without affecting the learning rules, and vice versa.
 //! The HH neuron can be used as a building block in larger networks where different types of neurons (e.g., LIF, Izhikevich) can be combined to create a rich diversity of firing patterns and computational capabilities, while still maintaining the biophysical realism of the HH model for certain parts of the network that require detailed modeling of action potential dynamics and ionic currents.

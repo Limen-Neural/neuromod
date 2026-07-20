@@ -19,7 +19,7 @@ steps:
       path: target
 
   - script: |
-      rustup default stable
+      rustup default 1.97.1
       rustup component add rustfmt clippy llvm-tools-preview
     displayName: 'Set Rust toolchain'
 

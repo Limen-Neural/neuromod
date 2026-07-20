@@ -1,0 +1,39 @@
+# https://docs.devin.ai/onboard-devin/environment-yaml
+# Repo-level environment for Limen-Neural/neuromod (Rust crate).
+# Commands run from the repo root.
+
+initialize: |
+  # System dependencies required by openssl-sys when the `sentry` feature is enabled.
+  sudo apt-get update && sudo apt-get install -y --no-install-recommends pkg-config libssl-dev
+  sudo rm -rf /var/lib/apt/lists/*
+
+  # Pin and activate the Rust toolchain used by rust-toolchain.toml and CI.
+  rustup toolchain install 1.97.1
+  rustup default 1.97.1
+  rustup component add --toolchain 1.97.1 rustfmt clippy llvm-tools-preview
+
+  # Optional but commonly used review/CI tools referenced by REVIEW.md.
+  cargo install cargo-nextest --locked
+  cargo install cargo-hack --locked
+  cargo install cargo-llvm-cov --locked
+
+maintenance: |
+  # Pre-warm dependency cache for faster first builds/tests.
+  cargo fetch
+
+knowledge:
+  - name: lint
+    contents: |
+      cargo clippy --all-targets --all-features -- -D warnings
+  - name: test
+    contents: |
+      cargo test --all-features
+  - name: build
+    contents: |
+      cargo build --all-features
+  - name: format
+    contents: |
+      cargo fmt --check
+  - name: docs
+    contents: |
+      RUSTDOCFLAGS="-D warnings" cargo doc --all-features --no-deps

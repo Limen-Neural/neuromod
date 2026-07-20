@@ -2,11 +2,13 @@
 
 ## Identity
 
-You are a Rust contributor to `neuromod`, a foundational SNN neuron-dynamics crate in the Limen-Neural ecosystem. Be concise, correct, and preserve ownership boundaries.
+You are a Rust contributor to `neuromod`, a foundational spiking neural network (SNN) neuron-dynamics crate in the Limen-Neural ecosystem. Keep responses under three paragraphs unless the user asks for more. Prefer concrete commands and file references over speculation.
 
 ## Overview
 
-A Rust library crate providing biologically grounded spiking neural network (SNN) primitives: neuron models (Lapicque, Leaky Integrate-and-Fire (LIF), Generalized Integrate-and-Fire (GIF), Izhikevich, FitzHugh-Nagumo, Hodgkin-Huxley), a topology-neutral `SpikingNetwork`, generic `NeuroModulators`, and foundational plasticity building blocks (classical STDP, reward-modulated STDP, eligibility traces).
+`neuromod` is a Rust library crate. It provides biologically grounded SNN primitives: neuron models, a topology-neutral `SpikingNetwork`, generic `NeuroModulators`, and foundational plasticity building blocks.
+
+Neuron models include Lapicque, Leaky Integrate-and-Fire (LIF), Generalized Integrate-and-Fire (GIF), Izhikevich, FitzHugh-Nagumo, and Hodgkin-Huxley. Plasticity building blocks include classical Spike-Timing-Dependent Plasticity (STDP), reward-modulated STDP, and eligibility traces.
 
 Part of the [Limen-Neural](https://github.com/Limen-Neural) ecosystem. See [docs/neuromod-boundary-matrix.md](docs/neuromod-boundary-matrix.md) for ownership boundaries and [docs/org-modularization.md](docs/org-modularization.md) for cross-repo conventions.
 
@@ -27,7 +29,7 @@ Part of the [Limen-Neural](https://github.com/Limen-Neural) ecosystem. See [docs
 | `docs/` | Architecture docs: boundary matrix, org modularization index, Architecture Decision Records (ADRs) |
 | [rust-toolchain.toml](rust-toolchain.toml) | Pinned Rust toolchain (1.97.1) |
 | `.devcontainer/` | VS Code dev container configuration |
-| [REVIEW.md](REVIEW.md) | Local review quality gate |
+| `REVIEW.md` | Local review quality gate |
 | `AGENTS.md` | Agent instructions (this file) |
 | `.github/workflows/` | CI/CD pipelines |
 
@@ -70,7 +72,7 @@ SENTRY_DSN=https://...@... cargo run --example sentry --features sentry
 
 - Unit tests: inline `#[cfg(test)]` modules (48 at last count)
 - Integration tests: `tests/sentry_integration.rs` (16 tests)
-- Doc tests: crate-level example in `src/lib.rs`
+- Doc tests: before committing, run `cargo test` so the crate-level example in `src/lib.rs` runs as a doctest
 - Feature matrix: CI runs `cargo hack check --feature-powerset --exclude-no-default-features --keep-going`
 - Optional `sentry` feature is off by default; enable with `--features sentry`
 
@@ -82,7 +84,7 @@ Open in VS Code with the Dev Containers extension or run:
 devcontainer up --workspace-folder .
 ```
 
-The container is based on `rust:1.97.1-slim-bookworm`. It adds `pkg-config` and `libssl-dev` for the `sentry` feature. `cargo fetch` runs on first create. The non-root `vscode` user owns the Rust toolchain. That lets `cargo` commands, component installs, and the optional `cargo-llvm-cov` workflow run from the terminal.
+The container is based on `rust:1.97.1-slim-bookworm`. It adds `pkg-config` and `libssl-dev` for the `sentry` feature. `cargo fetch` runs on first create. The non-root `vscode` user owns the Rust toolchain. That lets `cargo` commands and component installs work from the terminal. It also supports the optional `cargo-llvm-cov` workflow.
 
 ## Boundaries
 

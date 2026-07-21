@@ -230,6 +230,7 @@ at your option.
 This repository uses a comprehensive CI setup for speed, quality, security, and observability:
 
 - **Core CI** (`.github/workflows/ci.yml`): `fmt`, `clippy`, build, tests (via `cargo-nextest`), feature-matrix testing (`cargo-hack`), domain-agnostic docs check. Uses `Swatinem/rust-cache` and `dorny/paths-filter` to keep most PR feedback fast.
+- **Qodana** (`.github/workflows/qodana_code_quality.yml`): JetBrains code-quality scans on every PR/push to `main` and `releases/*`; results are published to Qodana Cloud.
 - **Codecov** (`.github/workflows/coverage.yml`): `cargo-llvm-cov` + Test Analytics (stable JUnit via pinned nextest). See [Observability](#observability) for local usage and report links.
 - **Sentry Releases** (`.github/workflows/sentry-release.yml`): Automatic releases on `v*` tags + manual `workflow_dispatch` trigger. See [Observability](#observability) for runtime usage and viewing releases.
 - **reviewdog** (`.github/workflows/reviewdog.yml`): Inline PR comments for clippy and rustfmt.
@@ -248,7 +249,6 @@ This repository uses a comprehensive CI setup for speed, quality, security, and 
   docker build --target builder -t neuromod:builder .
   docker run --rm neuromod:builder cargo test --all-features --quiet
   ```
-- **Azure Pipelines** (`azure-pipelines.yml`): Cross-platform (Linux / Windows / macOS) parity. Three explicit jobs so GitHub surfaces one check per OS. For branch protection, require the three per-OS checks (`Limen-Neural.neuromod (BuildTest linux)`, `Limen-Neural.neuromod (BuildTest mac)`, `Limen-Neural.neuromod (BuildTest windows)`), not the parent aggregate `Limen-Neural.neuromod`. The parent aggregate check will still appear.
 
 ## Links
 

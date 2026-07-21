@@ -159,7 +159,7 @@ cargo clippy --all-targets --all-features -- -D warnings
 cargo fmt --check
 cargo bench --no-run
 
-# Coverage (matches CI)
+# Coverage (matches CI; see codecov.yml)
 cargo install cargo-llvm-cov
 cargo llvm-cov --all-features --lcov --output-path lcov.info
 # HTML report: cargo llvm-cov --all-features --html
@@ -172,6 +172,50 @@ cargo test --all-features
 cargo hack check --feature-powerset --exclude-no-default-features --keep-going
 ```
 
+## Observability
+
+`neuromod` publishes test coverage to Codecov and release metadata to Sentry.
+
+### Codecov
+
+[![codecov](https://codecov.io/gh/Limen-Neural/neuromod/branch/main/graph/badge.svg)](https://codecov.io/gh/Limen-Neural/neuromod)
+
+- Configuration: [`codecov.yml`](codecov.yml)
+- Workflow: [`.github/workflows/coverage.yml`](.github/workflows/coverage.yml)
+
+Local coverage (also listed under [Development](#development)):
+
+```bash
+cargo install cargo-llvm-cov
+cargo llvm-cov --all-features --lcov --output-path lcov.info
+# HTML report: cargo llvm-cov --all-features --html
+```
+
+- View the dashboard at [Codecov](https://codecov.io/gh/Limen-Neural/neuromod).
+- Open `target/llvm-cov/html/index.html` after running the HTML report locally.
+- CI runs the `coverage.yml` workflow on every PR and push to `main`.
+
+### Sentry releases
+
+- Workflow: [`.github/workflows/sentry-release.yml`](.github/workflows/sentry-release.yml)
+
+A Sentry release is created automatically when a `v*` tag is pushed and can be triggered manually via `workflow_dispatch`. The release name follows `neuromod@{version}`.
+
+To enable Sentry at runtime, use the optional `sentry` feature:
+
+```toml
+[dependencies]
+neuromod = { version = "0.5.0", features = ["sentry"] }
+```
+
+```bash
+SENTRY_DSN=... cargo run --example sentry --features sentry
+```
+
+See `examples/sentry.rs`. The feature is optional and is not included in the default build.
+
+View releases and issues in the linked Sentry project. The organization and auth token come from repository secrets; `SENTRY_PROJECT` is set to `rust` in `.github/workflows/sentry-release.yml`.
+
 ## License
 
 This project is licensed under either of
@@ -181,17 +225,13 @@ This project is licensed under either of
 
 at your option.
 
-## Coverage
-
-[![codecov](https://codecov.io/gh/Limen-Neural/neuromod/branch/main/graph/badge.svg)](https://codecov.io/gh/Limen-Neural/neuromod)
-
 ## CI & Automation
 
 This repository uses a comprehensive CI setup for speed, quality, security, and observability:
 
 - **Core CI** (`.github/workflows/ci.yml`): `fmt`, `clippy`, build, tests (via `cargo-nextest`), feature-matrix testing (`cargo-hack`), domain-agnostic docs check. Uses `Swatinem/rust-cache` and `dorny/paths-filter` to keep most PR feedback fast.
-- **Codecov** (`.github/workflows/coverage.yml`): `cargo-llvm-cov` + Test Analytics (stable JUnit via pinned nextest).
-- **Sentry Releases** (`.github/workflows/sentry-release.yml`): Automatic releases on `v*` tags + manual `workflow_dispatch` trigger.
+- **Codecov** (`.github/workflows/coverage.yml`): `cargo-llvm-cov` + Test Analytics (stable JUnit via pinned nextest). See [Observability](#observability) for local usage and report links.
+- **Sentry Releases** (`.github/workflows/sentry-release.yml`): Automatic releases on `v*` tags + manual `workflow_dispatch` trigger. See [Observability](#observability) for runtime usage and viewing releases.
 - **reviewdog** (`.github/workflows/reviewdog.yml`): Inline PR comments for clippy and rustfmt.
 - **Security scanning**:
   - CodeQL (`.github/workflows/codeql.yml`)
@@ -209,21 +249,6 @@ This repository uses a comprehensive CI setup for speed, quality, security, and 
   docker run --rm neuromod:builder cargo test --all-features --quiet
   ```
 - **Azure Pipelines** (`azure-pipelines.yml`): Cross-platform (Linux / Windows / macOS) parity. Three explicit jobs so GitHub surfaces one check per OS. For branch protection, require the three per-OS checks (`Limen-Neural.neuromod (BuildTest linux)`, `Limen-Neural.neuromod (BuildTest mac)`, `Limen-Neural.neuromod (BuildTest windows)`), not the parent aggregate `Limen-Neural.neuromod`. The parent aggregate check will still appear.
-
-### Error monitoring (optional `sentry` feature)
-
-```toml
-[dependencies]
-neuromod = { version = "0.5.0", features = ["sentry"] }
-```
-
-Guarded initialization example:
-
-```bash
-SENTRY_DSN=... cargo run --features sentry --example sentry
-```
-
-See `examples/sentry.rs`. The feature is completely optional and never pulls in Sentry in the default build.
 
 ## Links
 

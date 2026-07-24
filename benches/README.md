@@ -27,6 +27,13 @@ Compare with a previous baseline:
 cargo bench -- --baseline main
 ```
 
+> **IDE users:** these targets are declared with `harness = false` (required for
+> Criterion's own runner to execute at all). Run them via a terminal or a plain
+> **Cargo** run configuration. Don't use a "Run Test" / "Debug Test" gutter
+> action — that expects the structured libtest protocol, which `harness = false`
+> targets don't emit, and will fail with an IDE-side error (e.g. RustRover's
+> "test frame quit unexpectedly") even though `cargo bench` itself succeeds.
+
 ## Benchmark Suites
 
 ### 1. Neuron Benchmarks (`neuron_bench.rs`)

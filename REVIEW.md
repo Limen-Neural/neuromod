@@ -57,6 +57,13 @@ cargo run --example rstdp_demo
 
 # Optional sentry example (no DSN needed for compilation smoke)
 cargo run --example sentry --features sentry
+
+# Release-mode smoke
+cargo run --example basic --release
+cargo run --example basic_lif --release
+cargo run --example hebbian_learning --release
+cargo run --example rstdp_demo --release
+cargo run --example sentry --release --features sentry
 ```
 
 ## Benchmarks smoke
@@ -64,6 +71,11 @@ cargo run --example sentry --features sentry
 ```bash
 # Compile benchmarks without running long measurements
 cargo bench --no-run --all-features
+
+# Benchmarks use harness = false (Criterion's own runner), so run them via
+# `cargo bench --bench <name>` in a terminal or a plain Cargo run
+# configuration in your IDE -- not a "Run Test" gutter action, which expects
+# the structured libtest protocol these targets don't emit.
 ```
 
 ## Docs and domain hygiene
@@ -97,6 +109,12 @@ grep -R 'pub struct NeuroModulators\|pub struct SignalProfile\|pub struct Observ
 grep -R 'pub trait GenericReward\|pub struct UnitReward' src/
 grep -R 'pub fn apply_classical_stdp\|pub fn apply_neuromodulation' src/
 grep -R 'pub struct EligibilityTrace\|pub struct RmStdpConfig' src/
+```
+
+Verify Criterion benchmarks aren't silently reverted to the default libtest harness (causes `cargo bench` to report `running 0 tests` instead of executing benchmarks):
+
+```bash
+! grep -n 'harness = true' Cargo.toml
 ```
 
 ## Diff hygiene

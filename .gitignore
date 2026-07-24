@@ -1,9 +1,48 @@
-/target
-*.crate
+# AI Tool Local/Ephemeral (no clutter)
+.kilo/worktrees/
+.kilo/*.json
+.devin/cache/
+.mimocode/auth.json
+.mimocode/plans/
+.worktrees/
+.swarm/
+.beads/
+.cline/
+.claude/
+.codex/
+.opencode/
+.beads/
 
-# Rust build
+
+# Compiled output
 /target/
+
+# IDE / editor
 .idea/
-.kilo/
-.kilocode/
-.mimocode/
+.vscode/
+*.swp
+*~
+.cursor/
+.cursorignore
+.zed/
+
+# Standard dev + your data
+node_modules/
+dist/
+build/
+*.log
+.env*
+*.env
+__pycache__/
+.cache/
+.DS_Store
+neuromorphic_data/
+remotes.txt
+
+# Negations: Force-commit the good stuff
+!.kilo/skills/**
+!.kilo/tui.jsonc
+!.devin/blueprint.yaml
+!.mimocode/mimocode.jsonc
+!.mimocode/AGENTS.md
+!.kilocodeignore

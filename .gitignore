@@ -1,9 +1,8 @@
 # AI Tool Local/Ephemeral (no clutter)
-.kilo/worktrees/
-.kilo/*.json
+.kilo/
+.kilocode/
+.mimocode/
 .devin/cache/
-.mimocode/auth.json
-.mimocode/plans/
 .worktrees/
 .swarm/
 .beads/
@@ -11,7 +10,6 @@
 .claude/
 .codex/
 .opencode/
-.beads/
 
 
 # Compiled output

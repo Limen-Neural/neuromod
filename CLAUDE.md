@@ -60,9 +60,9 @@ The toolchain is pinned in [rust-toolchain.toml](rust-toolchain.toml) (1.97.1). 
 
 ### Two neuron banks driven by one engine
 
-`SpikingNetwork` (`src/engine.rs`) is the central struct. It owns two parallel neuron banks: `neurons: Vec<LifNeuron>` and `iz_neurons: Vec<IzhikevichNeuron>`. It also holds a `NeuroModulators` snapshot, a `global_step` counter, and per-channel spike-timing-dependent plasticity (STDP) / prediction state (`input_spike_times`, `predictive_state`).
+`SpikingNetwork` (`src/engine.rs`) is the central struct. It owns two parallel neuron banks: leaky integrate-and-fire (LIF) neurons (`neurons: Vec<LifNeuron>`) and Izhikevich neurons (`iz_neurons: Vec<IzhikevichNeuron>`). It also holds a `NeuroModulators` snapshot, a `global_step` counter, and per-channel spike-timing-dependent plasticity (STDP) / prediction state (`input_spike_times`, `predictive_state`).
 
-Construction is topology-neutral. `new()` is the legacy default (16 leaky integrate-and-fire (LIF) neurons, 5 Izhikevich, 16 channels). `with_dimensions(num_lif, num_izh, num_channels)` builds arbitrary sizes with blank synaptic weights. No domain topology is hardcoded.
+Construction is topology-neutral. `new()` is the legacy default (16 LIF, 5 Izhikevich, 16 channels). `with_dimensions(num_lif, num_izh, num_channels)` builds arbitrary sizes with blank synaptic weights. No domain topology is hardcoded.
 
 `SpikingNetwork::step(stimuli, modulators)` is the normal per-tick entry point for the default engine. Prefer it for full-network simulation; call lower-level neuron APIs only when testing or embedding a single model. Order of work inside `step`:
 

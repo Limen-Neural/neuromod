@@ -1,12 +1,18 @@
 //! R-STDP (Reward-modulated Spike-Timing-Dependent Plasticity) parameters.
 //!
-//! Weights don't change immediately on a spike pair; instead an eligibility
-//! trace accumulates a "memory" of recent pre/post spike-timing coincidences.
-//! When a reward signal (dopamine) arrives, that trace is converted into an
-//! actual weight change.
+//! This module holds R-STDP constants, `RmStdpConfig`, and a standalone
+//! [`EligibilityTrace`] building block for future or external use.
 //!
-//! ANALOGY: This is the "learning rule" — like Hebb's Rule on a timer.
-//! "Neurons that fire together wire together," but only if the timing is right.
+//! **Live engine path:** `SpikingNetwork::apply_stdp` in `src/engine.rs` is
+//! dopamine-gated and updates weights directly from spike timing. It does
+//! **not** currently consume or convert `EligibilityTrace` values.
+//!
+//! Idealized R-STDP (not yet wired in-engine): an eligibility trace accumulates
+//! a "memory" of recent pre/post spike-timing coincidences, then a reward
+//! signal (dopamine) converts that trace into a weight change.
+//!
+//! ANALOGY: Hebb's Rule on a timer — "neurons that fire together wire
+//! together," but only if the timing (and, eventually, reward) is right.
 
 /// LTP (potentiation) time constant, in steps.
 pub const RM_STDP_TAU_PLUS: f32 = 20.0;

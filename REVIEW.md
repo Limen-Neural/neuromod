@@ -134,10 +134,22 @@ grep -R 'pub fn apply_classical_stdp\|pub fn apply_neuromodulation' src/
 grep -R 'pub struct EligibilityTrace\|pub struct RmStdpConfig' src/
 ```
 
-Verify Criterion benchmarks aren't silently reverted to the default libtest harness (causes `cargo bench` to report `running 0 tests` instead of executing benchmarks):
+Verify Criterion benchmarks aren't silently reverted to the default libtest harness (causes `cargo bench` to report `running 0 tests` instead of executing benchmarks). Every `[[bench]]` must explicitly set `harness = false` — omitting the key is as bad as setting `true`:
 
 ```bash
 ! grep -n 'harness = true' Cargo.toml
+# Fail if any [[bench]] lacks an explicit harness = false in the following lines
+python3 - <<'PY'
+from pathlib import Path
+text = Path("Cargo.toml").read_text()
+blocks = text.split("[[bench]]")[1:]
+assert blocks, "expected at least one [[bench]] target"
+for i, block in enumerate(blocks, 1):
+    # Only the next table section belongs to this bench target
+    section = block.split("\n[")[0]
+    assert "harness = false" in section, f"[[bench]] #{i} missing harness = false"
+print(f"ok: {len(blocks)} [[bench]] targets declare harness = false")
+PY
 ```
 
 ## Diff hygiene

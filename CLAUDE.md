@@ -81,7 +81,7 @@ Returns the indices of LIF neurons that fired this step.
 
 - **Classical/unmodulated Hebbian STDP** — `src/hebbian/classical.rs` (`apply_classical_stdp`, `StdpParams`, `HebbianIzhikevichNetwork`). Pure Hebb's rule, no reward gating; the "biological root."
 - **Reward-modulated STDP (R-STDP)** — constants and `EligibilityTrace`/`RmStdpConfig` types live in `src/rm_stdp.rs`. The live per-step learning rule is inlined in `SpikingNetwork::apply_stdp` (`src/engine.rs`), gated by dopamine.
-- That path was reconstructed after going missing; `EligibilityTrace` is not yet wired into `apply_stdp`. Weight updates currently happen directly rather than via eligibility-trace-then-reward-conversion. Do not assume eligibility traces are live.
+- The R-STDP engine path was reconstructed after going missing; `EligibilityTrace` is not yet wired into `apply_stdp`. Weight updates currently happen directly rather than via eligibility-trace-then-reward-conversion. Do not assume eligibility traces are live.
 
 ### Neuromodulators are domain-agnostic by design
 

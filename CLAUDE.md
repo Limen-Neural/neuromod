@@ -4,7 +4,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Identity
 
-You are a Rust contributor to `neuromod`, a foundational spiking neural network (SNN) neuron-dynamics crate in the Limen-Neural ecosystem. Prefer concrete commands and file references over speculation. For the full agent brief (repo map, boundaries, PR conventions), read [AGENTS.md](AGENTS.md) before structural changes. This file focuses on commands and architecture.
+You are a Rust contributor to `neuromod`, a foundational spiking neural network (SNN) neuron-dynamics crate in the Limen-Neural ecosystem. Prefer concrete commands and file references over speculation.
+
+For the full agent brief (repo map, boundaries, PR conventions), read [AGENTS.md](AGENTS.md) before structural changes. This file focuses on commands and architecture.
 
 ## Project
 
@@ -60,7 +62,7 @@ The toolchain is pinned in [rust-toolchain.toml](rust-toolchain.toml) (1.97.1). 
 
 `SpikingNetwork` (`src/engine.rs`) is the central struct. It owns two parallel neuron banks: `neurons: Vec<LifNeuron>` and `iz_neurons: Vec<IzhikevichNeuron>`. It also holds a `NeuroModulators` snapshot, a `global_step` counter, and per-channel spike-timing-dependent plasticity (STDP) / prediction state (`input_spike_times`, `predictive_state`).
 
-Construction is topology-neutral. `new()` is the legacy default (16 LIF, 5 Izhikevich, 16 channels). `with_dimensions(num_lif, num_izh, num_channels)` builds arbitrary sizes with blank synaptic weights. No domain topology is hardcoded.
+Construction is topology-neutral. `new()` is the legacy default (16 leaky integrate-and-fire (LIF) neurons, 5 Izhikevich, 16 channels). `with_dimensions(num_lif, num_izh, num_channels)` builds arbitrary sizes with blank synaptic weights. No domain topology is hardcoded.
 
 `SpikingNetwork::step(stimuli, modulators)` is the normal per-tick entry point for the default engine. Prefer it for full-network simulation; call lower-level neuron APIs only when testing or embedding a single model. Order of work inside `step`:
 
@@ -78,7 +80,8 @@ Returns the indices of LIF neurons that fired this step.
 ### Two separate STDP implementations — do not conflate them
 
 - **Classical/unmodulated Hebbian STDP** — `src/hebbian/classical.rs` (`apply_classical_stdp`, `StdpParams`, `HebbianIzhikevichNetwork`). Pure Hebb's rule, no reward gating; the "biological root."
-- **Reward-modulated STDP (R-STDP)** — constants and `EligibilityTrace`/`RmStdpConfig` types live in `src/rm_stdp.rs`. The live per-step learning rule is inlined in `SpikingNetwork::apply_stdp` (`src/engine.rs`), gated by dopamine. That path was reconstructed after going missing; `EligibilityTrace` is not yet wired into `apply_stdp`. Weight updates currently happen directly rather than via eligibility-trace-then-reward-conversion. Do not assume eligibility traces are live.
+- **Reward-modulated STDP (R-STDP)** — constants and `EligibilityTrace`/`RmStdpConfig` types live in `src/rm_stdp.rs`. The live per-step learning rule is inlined in `SpikingNetwork::apply_stdp` (`src/engine.rs`), gated by dopamine.
+- That path was reconstructed after going missing; `EligibilityTrace` is not yet wired into `apply_stdp`. Weight updates currently happen directly rather than via eligibility-trace-then-reward-conversion. Do not assume eligibility traces are live.
 
 ### Neuromodulators are domain-agnostic by design
 
@@ -100,4 +103,4 @@ Only `LifNeuron` and `IzhikevichNeuron` are wired into `SpikingNetwork`. The oth
 
 ### Optional `sentry` feature
 
-Off by default (`features = []`). When enabled, adds error/panic reporting (`sentry` crate, rustls transport) — see `examples/sentry.rs` and `tests/sentry_integration.rs`. Requires `pkg-config`/`libssl-dev` system deps only when building with this feature.
+Off by default (`features = []`). When enabled, adds error/panic reporting (`sentry` crate, rustls transport). See the [examples/sentry.rs](examples/sentry.rs) example and [tests/sentry_integration.rs](tests/sentry_integration.rs) integration tests. Requires `pkg-config`/`libssl-dev` system deps only when building with this feature.

@@ -28,9 +28,8 @@ impl PoissonEncoder {
             // If the random number (0.0-1.0) is LESS than our intensity, we spike.
             // This mimics the noise inherent in quantum/chemical systems.
             //
-            // Handle exact 0.0 / 1.0 without RNG: floating-point
-            // `random_range(0.0..1.0)` is not guaranteed to exclude 1.0, which
-            // would make full-intensity encoding flaky if compared with `< 1.0`.
+            // Handle exact 0.0 / 1.0 without RNG to make edge-case behavior
+            // explicit and avoid RNG calls for deterministic paths.
             let fire = if probability <= 0.0 {
                 false
             } else if probability >= 1.0 {
@@ -143,8 +142,10 @@ mod tests {
     fn integrate_accumulates_over_multiple_calls() {
         let mut neuron = LifNeuron::new();
         neuron.integrate(0.5);
+        let after_first = neuron.membrane_potential;
+        let expected_after_second = after_first + 0.5 - (after_first + 0.5) * neuron.decay_rate;
         neuron.integrate(0.5);
-        assert!(neuron.membrane_potential > 0.0);
+        assert!((neuron.membrane_potential - expected_after_second).abs() < 1e-6);
     }
 
     #[test]
@@ -160,12 +161,17 @@ mod tests {
     #[test]
     fn check_fire_at_or_above_threshold_fires_and_hard_resets() {
         let mut neuron = LifNeuron::new();
+
+        neuron.membrane_potential = neuron.threshold;
+        let expected_peak_exact = neuron.membrane_potential;
+        let fired_exact = neuron.check_fire();
+        assert_eq!(fired_exact, Some(expected_peak_exact));
+        assert_eq!(neuron.membrane_potential, 0.0);
+
         neuron.membrane_potential = neuron.threshold + 0.05;
-        let expected_peak = neuron.membrane_potential;
-
-        let fired = neuron.check_fire();
-
-        assert_eq!(fired, Some(expected_peak));
+        let expected_peak_above = neuron.membrane_potential;
+        let fired_above = neuron.check_fire();
+        assert_eq!(fired_above, Some(expected_peak_above));
         assert_eq!(neuron.membrane_potential, 0.0);
     }
 

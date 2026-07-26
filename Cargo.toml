@@ -56,7 +56,7 @@ lto = true
 codegen-units = 1
 
 [profile.dev]
-opt-level = 1          # slightly faster debug builds
+opt-level = 1          # faster-running debug binaries
 incremental = true
 
 [profile.release-with-debug]

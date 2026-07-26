@@ -31,12 +31,10 @@
 .zed/
 
 # Standard dev + your data
-node_modules/
-dist/
-build/
 *.log
 .env*
 *.env
+!.env.example
 __pycache__/
 .cache/
 .DS_Store

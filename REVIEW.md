@@ -147,7 +147,12 @@ assert blocks, "expected at least one [[bench]] target"
 for i, block in enumerate(blocks, 1):
     # Only the next table section belongs to this bench target
     section = block.split("\n[")[0]
-    assert "harness = false" in section, f"[[bench]] #{i} missing harness = false"
+    has_harness = any(
+        line.strip().startswith("harness") and "=" in line and "false" in line
+        for line in section.split("\n")
+        if not line.strip().startswith("#")
+    )
+    assert has_harness, f"[[bench]] #{i} missing active harness = false assignment"
 print(f"ok: {len(blocks)} [[bench]] targets declare harness = false")
 PY
 ```

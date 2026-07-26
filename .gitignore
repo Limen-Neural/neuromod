@@ -1,7 +1,13 @@
 # AI Tool Local/Ephemeral (no clutter)
-.kilo/
+# Use `dir/*` + selective re-includes so parent-dir ignores do not block exceptions.
+.kilo/*
+!.kilo/skills/
+!.kilo/skills/**
+!.kilo/tui.jsonc
 .kilocode/
-.mimocode/
+.mimocode/*
+!.mimocode/mimocode.jsonc
+!.mimocode/AGENTS.md
 .devin/cache/
 .worktrees/
 .swarm/
@@ -38,9 +44,5 @@ neuromorphic_data/
 remotes.txt
 
 # Negations: Force-commit the good stuff
-!.kilo/skills/**
-!.kilo/tui.jsonc
 !.devin/blueprint.yaml
-!.mimocode/mimocode.jsonc
-!.mimocode/AGENTS.md
 !.kilocodeignore

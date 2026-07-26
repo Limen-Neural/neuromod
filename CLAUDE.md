@@ -2,11 +2,17 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Identity
+
+You are a Rust contributor to `neuromod`, a foundational spiking neural network (SNN) neuron-dynamics crate in the Limen-Neural ecosystem. Prefer concrete commands and file references over speculation. For the full agent brief (repo map, boundaries, PR conventions), read [AGENTS.md](AGENTS.md) before structural changes. This file focuses on commands and architecture.
+
 ## Project
 
-`neuromod` is a Rust library crate (edition 2024) implementing biologically grounded spiking neural network (SNN) primitives: neuron models, a topology-neutral `SpikingNetwork` engine, generic `NeuroModulators`, and reward-modulated plasticity building blocks. It is the core library layer of the Limen-Neural ecosystem — see `AGENTS.md` for the full agent brief (identity, repo map, boundaries, PR conventions) and `docs/neuromod-boundary-matrix.md` / `docs/org-modularization.md` for cross-repo ownership rules. Read `AGENTS.md` before making structural changes; this file focuses on commands and architecture.
+`neuromod` is a Rust library crate (edition 2024). It implements biologically grounded SNN primitives: neuron models, a topology-neutral `SpikingNetwork` engine, generic `NeuroModulators`, and reward-modulated plasticity building blocks. It is the core library layer of the Limen-Neural ecosystem.
 
-**Off-limits in this crate:** no async, networking, or hardware-specific code; no mining/trading/HFT/crypto domain logic. Downstream crates (`axon-encoder`, `synaptic-mesh`, `limbic-critic`, `plasticity-lab`, `corpus-ipc`, `brainstem-daemon`, `silicon-bridge`, `Spikenaut-Hardware`) own everything outside neuron dynamics/neuromodulation/plasticity.
+Ownership rules: [docs/neuromod-boundary-matrix.md](docs/neuromod-boundary-matrix.md) and [docs/org-modularization.md](docs/org-modularization.md).
+
+**Off-limits in this crate:** no async, networking, or hardware-specific code. No mining, trading, high-frequency trading (HFT), or crypto domain logic. Downstream crates (`axon-encoder`, `synaptic-mesh`, `limbic-critic`, `plasticity-lab`, `corpus-ipc`, `brainstem-daemon`, `silicon-bridge`, `Spikenaut-Hardware`) own everything outside neuron dynamics, neuromodulation, and plasticity.
 
 ## Commands
 
@@ -44,22 +50,24 @@ cargo run --example rstdp_demo
 SENTRY_DSN=https://...@... cargo run --example sentry --features sentry
 ```
 
-Before pushing changes touching `src/`, `benches/`, `examples/`, `tests/`, or `Cargo.toml`, run the full gate in `REVIEW.md` (fmt, clippy, build, test, examples smoke, docs domain-hygiene grep, regression grep for the public API surface).
+Before pushing changes that touch `src/`, `benches/`, `examples/`, `tests/`, or `Cargo.toml`, run the full gate in [REVIEW.md](REVIEW.md). That gate covers fmt, clippy, build, test, examples smoke, docs domain-hygiene grep, and public-API regression greps.
 
-The toolchain is pinned in `rust-toolchain.toml` (1.97.1); a matching `.devcontainer/` is available (`devcontainer up --workspace-folder .`).
+The toolchain is pinned in [rust-toolchain.toml](rust-toolchain.toml) (1.97.1). A matching `.devcontainer/` is available (`devcontainer up --workspace-folder .`).
 
 ## Architecture
 
 ### Two neuron banks driven by one engine
 
-`SpikingNetwork` (`src/engine.rs`) is the central struct. It owns two parallel neuron banks — `neurons: Vec<LifNeuron>` and `iz_neurons: Vec<IzhikevichNeuron>` — plus a `NeuroModulators` snapshot, a `global_step` counter, and per-channel STDP/prediction state (`input_spike_times`, `predictive_state`). It is constructed topology-neutral: `new()` gives the legacy default (16 LIF, 5 Izhikevich, 16 channels), `with_dimensions(num_lif, num_izh, num_channels)` builds arbitrary sizes with blank synaptic weights — no domain topology is hardcoded.
+`SpikingNetwork` (`src/engine.rs`) is the central struct. It owns two parallel neuron banks: `neurons: Vec<LifNeuron>` and `iz_neurons: Vec<IzhikevichNeuron>`. It also holds a `NeuroModulators` snapshot, a `global_step` counter, and per-channel spike-timing-dependent plasticity (STDP) / prediction state (`input_spike_times`, `predictive_state`).
 
-`SpikingNetwork::step(stimuli, modulators)` is the single per-tick entry point and always runs, in order:
+Construction is topology-neutral. `new()` is the legacy default (16 LIF, 5 Izhikevich, 16 channels). `with_dimensions(num_lif, num_izh, num_channels)` builds arbitrary sizes with blank synaptic weights. No domain topology is hardcoded.
+
+`SpikingNetwork::step(stimuli, modulators)` is the normal per-tick entry point for the default engine. Prefer it for full-network simulation; call lower-level neuron APIs only when testing or embedding a single model. Order of work inside `step`:
 
 1. Validate `stimuli.len() == num_channels`, else `Err(StepError::InputLenMismatch)`.
-2. Recompute per-neuron `decay_rate`/`threshold` targets from the current `NeuroModulators` (dopamine/serotonin/acetylcholine/norepinephrine each pull thresholds/decay in different directions — see the formulas inline in `engine.rs`).
-3. Update `predictive_state` (EMA per channel) and derive `pred_errors` ("surprise") that boost synaptic drive.
-4. Stochastically encode `stimuli` into `input_spike_times` (Poisson-style, probability ∝ stimulus magnitude).
+2. Recompute per-neuron `decay_rate`/`threshold` targets from the current `NeuroModulators` (dopamine/serotonin/acetylcholine/norepinephrine each pull thresholds/decay in different directions — see formulas in `engine.rs`).
+3. Update `predictive_state` (exponential moving average (EMA) per channel) and derive `pred_errors` ("surprise") that boost synaptic drive.
+4. Stochastically encode `stimuli` into `input_spike_times` (Poisson-style, probability proportional to stimulus magnitude).
 5. Integrate LIF membrane potentials, fire (`check_fire`), apply lateral inhibition to non-firing LIF neurons.
 6. Apply reward-modulated STDP (`apply_stdp`, gated by `dopamine`-derived `learning_rate`; skipped entirely if learning rate ≈ 0).
 7. Re-normalize each neuron's weights to `WEIGHT_BUDGET` (L1 budget) and clamp to `RM_STDP_W_MIN..RM_STDP_W_MAX`.
@@ -67,22 +75,28 @@ The toolchain is pinned in `rust-toolchain.toml` (1.97.1); a matching `.devconta
 
 Returns the indices of LIF neurons that fired this step.
 
-### Two separate STDP implementations — don't conflate them
+### Two separate STDP implementations — do not conflate them
 
 - **Classical/unmodulated Hebbian STDP** — `src/hebbian/classical.rs` (`apply_classical_stdp`, `StdpParams`, `HebbianIzhikevichNetwork`). Pure Hebb's rule, no reward gating; the "biological root."
-- **Reward-modulated STDP (R-STDP)** — constants and `EligibilityTrace`/`RmStdpConfig` types live in `src/rm_stdp.rs`, but the actual per-step learning rule that consumes them is inlined in `SpikingNetwork::apply_stdp` (`src/engine.rs`), gated by dopamine. Per `rm_stdp.rs`'s own comments, this reward-modulated path was reconstructed after being found missing from the original codebase — `EligibilityTrace` exists but is not yet wired into `apply_stdp`; weight updates currently happen directly rather than via eligibility-trace-then-reward-conversion. Be aware of this gap before assuming eligibility traces are live.
+- **Reward-modulated STDP (R-STDP)** — constants and `EligibilityTrace`/`RmStdpConfig` types live in `src/rm_stdp.rs`. The live per-step learning rule is inlined in `SpikingNetwork::apply_stdp` (`src/engine.rs`), gated by dopamine. That path was reconstructed after going missing; `EligibilityTrace` is not yet wired into `apply_stdp`. Weight updates currently happen directly rather than via eligibility-trace-then-reward-conversion. Do not assume eligibility traces are live.
 
 ### Neuromodulators are domain-agnostic by design
 
-`NeuroModulators` (`src/modulators.rs`) is a plain 4-tuple (dopamine/serotonin/acetylcholine/norepinephrine) with its own exponential `decay()` and `add_*`/`boost_*`/`is_*` helpers. Domain signals (thermal, power, throughput, timing) are mapped into modulator levels via `SignalProfile` + `NeuroModulators::from_signals(...)` — `SignalProfile::default()` is unitless/neutral, `SignalProfile::hardware_calibrated()` is a legacy pre-0.5 profile kept for migration. Reward shaping for a specific domain is implemented downstream via the `GenericReward` trait (`UnitReward` is the only in-crate impl, used for tests). `apply_neuromodulation` applies a `NeuroModulators` snapshot to arbitrary weight/threshold slices independent of `SpikingNetwork`.
+`NeuroModulators` (`src/modulators.rs`) is a plain 4-tuple (dopamine/serotonin/acetylcholine/norepinephrine) with exponential `decay()` and `add_*`/`boost_*`/`is_*` helpers.
+
+Domain signals (thermal, power, throughput, timing) map into modulator levels via `SignalProfile` and `NeuroModulators::from_signals(...)`. `SignalProfile::default()` is unitless/neutral. `SignalProfile::hardware_calibrated()` is a legacy pre-0.5 profile kept for migration.
+
+Domain-specific reward shaping is downstream via the `GenericReward` trait. `UnitReward` is the only in-crate impl (tests). `apply_neuromodulation` applies a `NeuroModulators` snapshot to weight/threshold slices without needing `SpikingNetwork`.
 
 ### Neuron models are standalone structs, not a shared trait
 
-Each neuron model (`LifNeuron`, `GifNeuron`, `IzhikevichNeuron`, `LapicqueNeuron`, `FitzHughNagumoNeuron`, `HodgkinHuxleyNeuron`) is its own `Serialize`/`Deserialize` struct in its own file under `src/`, with its own `integrate`/`step`/`check_fire`-style API — there is no shared `Neuron` trait unifying them (see `docs/adr/001-traits-in-neuromod.md` for why shared traits are hosted in this crate at all). Only `LifNeuron` and `IzhikevichNeuron` are wired into `SpikingNetwork`; the others are standalone building blocks for downstream consumers/examples.
+Each neuron model (`LifNeuron`, `GifNeuron`, `IzhikevichNeuron`, `LapicqueNeuron`, `FitzHughNagumoNeuron`, `HodgkinHuxleyNeuron`) is its own `Serialize`/`Deserialize` struct under `src/`, with its own `integrate`/`step`/`check_fire`-style API. There is no shared `Neuron` trait (see [docs/adr/001-traits-in-neuromod.md](docs/adr/001-traits-in-neuromod.md)).
+
+Only `LifNeuron` and `IzhikevichNeuron` are wired into `SpikingNetwork`. The others are standalone building blocks for downstream consumers and examples.
 
 ### Serialization
 
-`SpikingNetwork` and its neuron banks derive `Serialize`/`Deserialize` (serde) for checkpointing; fields added after the initial release use `#[serde(default)]` (e.g. `LifNeuron::weights`, `base_threshold`, `last_spike_time`) to stay backward-compatible with older serialized states.
+`SpikingNetwork` and its neuron banks derive `Serialize`/`Deserialize` (serde) for checkpointing. Fields added after the initial release use `#[serde(default)]` (for example `LifNeuron::weights`, `base_threshold`, `last_spike_time`) so older serialized states still load.
 
 ### Optional `sentry` feature
 

@@ -19,6 +19,8 @@ All notable changes to this project are documented in this file.
 - **Benchmarks:** all four `[[bench]]` targets (`neuron_bench`, `stdp_bench`, `memory_bench`, `modulation_bench`) had `harness = true` in `Cargo.toml`, which left Cargo's default libtest harness attached instead of Criterion's runner — `cargo bench` silently reported `running 0 tests` instead of executing any benchmark. Fixed to `harness = false`.
 - Removed first-person development-log commentary from `src/rm_stdp.rs` doc comments that leaked into `cargo doc`/docs.rs output.
 - **Sentry example:** dropped the info-level `capture_message` probe (issue noise) and set `environment` from `SENTRY_ENVIRONMENT` (default `development`).
+- **PoissonEncoder:** full-intensity (probability 1.0) and zero-intensity paths no longer depend on floating-point RNG bounds (avoids flaky all-ones encoding).
+- **`.gitignore`:** restructured AI-tool ignores so selected `.kilo` / `.mimocode` / `.devin` paths can be force-committed.
 
 ### Changed
 

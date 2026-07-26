@@ -27,11 +27,18 @@ impl PoissonEncoder {
             // Stochastic firing:
             // If the random number (0.0-1.0) is LESS than our intensity, we spike.
             // This mimics the noise inherent in quantum/chemical systems.
-            if rng.random_range(0.0..1.0) < probability {
-                spikes.push(1);
+            //
+            // Handle exact 0.0 / 1.0 without RNG: floating-point
+            // `random_range(0.0..1.0)` is not guaranteed to exclude 1.0, which
+            // would make full-intensity encoding flaky if compared with `< 1.0`.
+            let fire = if probability <= 0.0 {
+                false
+            } else if probability >= 1.0 {
+                true
             } else {
-                spikes.push(0);
-            }
+                rng.random_range(0.0..1.0) < probability
+            };
+            spikes.push(u8::from(fire));
         }
         spikes
     }

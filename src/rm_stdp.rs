@@ -44,8 +44,8 @@ pub struct EligibilityTrace {
 
 /// R-STDP hyperparameters.
 pub struct RmStdpConfig {
-    /// Decay time constant, in steps. Typical values are 50-100.
-    pub tau: f32,
+    /// Eligibility trace decay time constant, in steps. Typical values are 50-100.
+    pub tau_eligibility: f32,
     /// Learning rate for converting an eligibility trace into a weight change
     /// when a reward signal arrives. Typical values are 0.01-0.1.
     pub reward_lr: f32,

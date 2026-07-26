@@ -64,6 +64,12 @@ qodana scan --project-dir . --linter qodana-rust --print-problems --save-report
 
 Do not push while Qodana reports new actionable defects on `src/`, `examples/`, `benches/`, or `tests/`.
 
+**Known noise (do not block on these alone):**
+
+- `DuplicatedCode` in multi-stage RK4 integrators (`fitzhugh_nagumo`, `hodgkin_huxley`) — intentional stage structure.
+- `RsBorrowChecker` / `RsTypeCheck` false positives from incomplete Cargo project load in the Docker linter (host `cargo check` / `clippy -D warnings` is authoritative).
+- Prefer fixing real hits: unused deps (`CargoUnusedDependency`), clippy-equivalent nits.
+
 ## Examples smoke
 
 ```bash

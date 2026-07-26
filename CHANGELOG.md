@@ -26,6 +26,7 @@ All notable changes to this project are documented in this file.
 - README now links the new Architecture & Boundaries docs.
 - Added `homepage` and `documentation` fields to `Cargo.toml` for crates.io/docs.rs metadata.
 - Explicit `[profile.bench]` inherits `release` so Criterion runs with the same LTO/codegen settings.
+- Dropped unused direct `serde_json` dependency (serialization uses `serde` derives only).
 
 ## [0.5.0] - 2026-06-20
 

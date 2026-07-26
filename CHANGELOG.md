@@ -18,12 +18,14 @@ All notable changes to this project are documented in this file.
 
 - **Benchmarks:** all four `[[bench]]` targets (`neuron_bench`, `stdp_bench`, `memory_bench`, `modulation_bench`) had `harness = true` in `Cargo.toml`, which left Cargo's default libtest harness attached instead of Criterion's runner — `cargo bench` silently reported `running 0 tests` instead of executing any benchmark. Fixed to `harness = false`.
 - Removed first-person development-log commentary from `src/rm_stdp.rs` doc comments that leaked into `cargo doc`/docs.rs output.
+- **Sentry example:** dropped the info-level `capture_message` probe (issue noise) and set `environment` from `SENTRY_ENVIRONMENT` (default `development`).
 
 ### Changed
 
 - **License:** switched from GPL-3.0 to dual MIT/Apache-2.0 for maximum adoption and ecosystem health.
 - README now links the new Architecture & Boundaries docs.
 - Added `homepage` and `documentation` fields to `Cargo.toml` for crates.io/docs.rs metadata.
+- Explicit `[profile.bench]` inherits `release` so Criterion runs with the same LTO/codegen settings.
 
 ## [0.5.0] - 2026-06-20
 

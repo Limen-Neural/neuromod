@@ -63,3 +63,6 @@ incremental = true
 [profile.release-with-debug]
 inherits = "release"
 debug = true           # for profiling release builds
+
+[profile.bench]
+inherits = "release"   # Criterion wall-clock benches use same LTO/codegen as release

@@ -1,7 +1,7 @@
 //! R-STDP (Reward-modulated Spike-Timing-Dependent Plasticity) parameters.
 //!
 //! This module holds R-STDP constants, `RmStdpConfig`, and a standalone
-//! [`EligibilityTrace`] building block for future or external use.
+//! [`EligibilityTrace`] building block for standalone use.
 //!
 //! **Live engine path:** `SpikingNetwork::apply_stdp` in `src/engine.rs` is
 //! dopamine-gated and updates weights directly from spike timing. It does
@@ -44,8 +44,8 @@ pub struct EligibilityTrace {
 
 /// R-STDP hyperparameters.
 pub struct RmStdpConfig {
-    /// Eligibility trace decay time constant, in steps. Typical values are 50-100.
-    pub tau_eligibility: f32,
+    /// Decay time constant, in steps. Typical values are 50-100.
+    pub tau: f32,
     /// Learning rate for converting an eligibility trace into a weight change
     /// when a reward signal arrives. Typical values are 0.01-0.1.
     pub reward_lr: f32,
@@ -56,7 +56,7 @@ pub struct RmStdpConfig {
 }
 
 impl EligibilityTrace {
-    /// Decay the trace by one step.
+    /// Decay the trace by one step (assumes dt = 1 unit).
     pub fn decay(&mut self) {
         // Guard against non-positive tau, which would cause division by zero
         // or exponential growth instead of decay.

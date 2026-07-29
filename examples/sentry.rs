@@ -24,7 +24,7 @@ fn main() {
                         parsed_dsn,
                         sentry::ClientOptions {
                             release: sentry::release_name!(),
-                            environment: Some(environment),
+                            environment: Some(environment.clone().into()),
                             ..Default::default()
                         },
                     ));

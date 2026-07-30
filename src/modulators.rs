@@ -329,7 +329,7 @@ mod tests {
         let mut weights = vec![1.0, 1.0];
         let mut thresholds = vec![0.20, 0.20];
         apply_neuromodulation(&mods, &mut weights, &mut thresholds);
-        assert!(weights[0] != 1.0);
+        assert_ne!(weights[0], 1.0);
         assert!(thresholds[0] >= 0.05 && thresholds[0] <= 0.50);
     }
 }

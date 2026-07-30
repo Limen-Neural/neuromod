@@ -1,9 +1,46 @@
-/target
-*.crate
-
-# Rust build
-/target/
-.idea/
-.kilo/
+# AI Tool Local/Ephemeral (no clutter)
+# Use `dir/*` + selective re-includes so parent-dir ignores do not block exceptions.
+.kilo/*
+!.kilo/skills/
+!.kilo/skills/**
+!.kilo/tui.jsonc
 .kilocode/
-.mimocode/
+.mimocode/*
+!.mimocode/mimocode.jsonc
+!.mimocode/AGENTS.md
+.devin/cache/
+.worktrees/
+.swarm/
+.beads/
+.cline/
+.claude/
+.codex/
+.opencode/
+
+
+# Compiled output
+/target/
+
+# IDE / editor
+.idea/
+.vscode/
+*.swp
+*~
+.cursor/
+.cursorignore
+.zed/
+
+# Standard dev + your data
+*.log
+.env*
+*.env
+!.env.example
+__pycache__/
+.cache/
+.DS_Store
+neuromorphic_data/
+remotes.txt
+
+# Negations: Force-commit the good stuff
+!.devin/blueprint.yaml
+!.kilocodeignore

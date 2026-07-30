@@ -10,11 +10,25 @@ All notable changes to this project are documented in this file.
   - `docs/org-modularization.md` (standards, workstream index for #35–#43, git/build/beads rules, audit commands)
   - `docs/adr/001-traits-in-neuromod.md` (records decision to host shared traits in neuromod)
   - `docs/neuromod-boundary-matrix.md` (runtime/deployment boundary matrix per LIM-9 / #11 / #25)
+- `CLAUDE.md` architecture/commands reference for AI coding agents.
+- Unit tests for `EligibilityTrace::decay` (`src/rm_stdp.rs`) and `LifNeuron`/`PoissonEncoder` (`src/lif.rs`), previously untested.
+- `REVIEW.md` regression guard against the Criterion benchmark harness reverting to `harness = true`.
+
+### Fixed
+
+- **Benchmarks:** all four `[[bench]]` targets (`neuron_bench`, `stdp_bench`, `memory_bench`, `modulation_bench`) had `harness = true` in `Cargo.toml`, which left Cargo's default libtest harness attached instead of Criterion's runner — `cargo bench` silently reported `running 0 tests` instead of executing any benchmark. Fixed to `harness = false`.
+- Removed first-person development-log commentary from `src/rm_stdp.rs` doc comments that leaked into `cargo doc`/docs.rs output.
+- **Sentry example:** dropped the info-level `capture_message` probe (issue noise) and set `environment` from `SENTRY_ENVIRONMENT` (default `development`).
+- **PoissonEncoder:** full-intensity (probability 1.0) and zero-intensity paths no longer depend on floating-point RNG bounds (avoids flaky all-ones encoding).
+- **`.gitignore`:** restructured AI-tool ignores so selected `.kilo` / `.mimocode` / `.devin` paths can be force-committed.
 
 ### Changed
 
 - **License:** switched from GPL-3.0 to dual MIT/Apache-2.0 for maximum adoption and ecosystem health.
 - README now links the new Architecture & Boundaries docs.
+- Added `homepage` and `documentation` fields to `Cargo.toml` for crates.io/docs.rs metadata.
+- Explicit `[profile.bench]` inherits `release` so Criterion runs with the same LTO/codegen settings.
+- Dropped unused direct `serde_json` dependency (serialization uses `serde` derives only).
 
 ## [0.5.0] - 2026-06-20
 

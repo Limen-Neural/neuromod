@@ -47,6 +47,29 @@ cargo hack check --feature-powerset --exclude-no-default-features --keep-going
 cargo llvm-cov --all-features --lcov --output-path lcov.info
 ```
 
+## Local Qodana (before push)
+
+CLI: `qodana` (see `qodana.yaml`; CI twin is `.github/workflows/qodana_code_quality.yml`).
+
+```bash
+qodana scan --project-dir . --linter qodana-rust --print-problems --save-report
+```
+
+Optional Cloud upload if `QODANA_TOKEN` is set locally (never commit the token):
+
+```bash
+export QODANA_ENDPOINT=https://qodana.cloud
+qodana scan --project-dir . --linter qodana-rust --print-problems --save-report
+```
+
+Do not push while Qodana reports new actionable defects on `src/`, `examples/`, `benches/`, or `tests/`.
+
+**Known noise (do not block on these alone):**
+
+- `DuplicatedCode` in multi-stage RK4 integrators (`fitzhugh_nagumo`, `hodgkin_huxley`) — intentional stage structure.
+- `RsBorrowChecker` / `RsTypeCheck` false positives from incomplete Cargo project load in the Docker linter (host `cargo check` / `clippy -D warnings` is authoritative).
+- Prefer fixing real hits: unused deps (`CargoUnusedDependency`), clippy-equivalent nits.
+
 ## Examples smoke
 
 ```bash
@@ -57,6 +80,13 @@ cargo run --example rstdp_demo
 
 # Optional sentry example (no DSN needed for compilation smoke)
 cargo run --example sentry --features sentry
+
+# Release-mode smoke
+cargo run --example basic --release
+cargo run --example basic_lif --release
+cargo run --example hebbian_learning --release
+cargo run --example rstdp_demo --release
+cargo run --example sentry --release --features sentry
 ```
 
 ## Benchmarks smoke
@@ -64,6 +94,11 @@ cargo run --example sentry --features sentry
 ```bash
 # Compile benchmarks without running long measurements
 cargo bench --no-run --all-features
+
+# Benchmarks use harness = false (Criterion's own runner), so run them via
+# `cargo bench --bench <name>` in a terminal or a plain Cargo run
+# configuration in your IDE -- not a "Run Test" gutter action, which expects
+# the structured libtest protocol these targets don't emit.
 ```
 
 ## Docs and domain hygiene
@@ -97,6 +132,29 @@ grep -R 'pub struct NeuroModulators\|pub struct SignalProfile\|pub struct Observ
 grep -R 'pub trait GenericReward\|pub struct UnitReward' src/
 grep -R 'pub fn apply_classical_stdp\|pub fn apply_neuromodulation' src/
 grep -R 'pub struct EligibilityTrace\|pub struct RmStdpConfig' src/
+```
+
+Verify Criterion benchmarks aren't silently reverted to the default libtest harness (causes `cargo bench` to report `running 0 tests` instead of executing benchmarks). Every `[[bench]]` must explicitly set `harness = false` — omitting the key is as bad as setting `true`:
+
+```bash
+! grep -n 'harness = true' Cargo.toml
+# Fail if any [[bench]] lacks an explicit harness = false in the following lines
+python3 - <<'PY'
+from pathlib import Path
+text = Path("Cargo.toml").read_text()
+blocks = text.split("[[bench]]")[1:]
+assert blocks, "expected at least one [[bench]] target"
+for i, block in enumerate(blocks, 1):
+    # Only the next table section belongs to this bench target
+    section = block.split("\n[")[0]
+    has_harness = any(
+        line.strip().startswith("harness") and "=" in line and "false" in line
+        for line in section.split("\n")
+        if not line.strip().startswith("#")
+    )
+    assert has_harness, f"[[bench]] #{i} missing active harness = false assignment"
+print(f"ok: {len(blocks)} [[bench]] targets declare harness = false")
+PY
 ```
 
 ## Diff hygiene

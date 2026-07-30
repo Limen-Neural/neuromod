@@ -27,11 +27,17 @@ impl PoissonEncoder {
             // Stochastic firing:
             // If the random number (0.0-1.0) is LESS than our intensity, we spike.
             // This mimics the noise inherent in quantum/chemical systems.
-            if rng.random_range(0.0..1.0) < probability {
-                spikes.push(1);
+            //
+            // Handle exact 0.0 / 1.0 without RNG to make edge-case behavior
+            // explicit and avoid RNG calls for deterministic paths.
+            let fire = if probability <= 0.0 {
+                false
+            } else if probability >= 1.0 {
+                true
             } else {
-                spikes.push(0);
-            }
+                rng.random_range(0.0..1.0) < probability
+            };
+            spikes.push(u8::from(fire));
         }
         spikes
     }
@@ -105,5 +111,98 @@ impl LifNeuron {
             return Some(peak);
         }
         None
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn default_neuron_has_expected_initial_state() {
+        let neuron = LifNeuron::new();
+        assert_eq!(neuron.membrane_potential, 0.0);
+        assert_eq!(neuron.decay_rate, 0.15);
+        assert_eq!(neuron.threshold, 0.02);
+        assert_eq!(neuron.base_threshold, 0.02);
+        assert!(!neuron.last_spike);
+        assert!(neuron.weights.is_empty());
+        assert_eq!(neuron.last_spike_time, -1);
+    }
+
+    #[test]
+    fn integrate_charges_then_leaks() {
+        let mut neuron = LifNeuron::new();
+        neuron.integrate(1.0);
+        let expected = 1.0 - 1.0 * neuron.decay_rate;
+        assert!((neuron.membrane_potential - expected).abs() < 1e-6);
+    }
+
+    #[test]
+    fn integrate_accumulates_over_multiple_calls() {
+        let mut neuron = LifNeuron::new();
+        neuron.integrate(0.5);
+        let after_first = neuron.membrane_potential;
+        let expected_after_second = after_first + 0.5 - (after_first + 0.5) * neuron.decay_rate;
+        neuron.integrate(0.5);
+        assert!((neuron.membrane_potential - expected_after_second).abs() < 1e-6);
+    }
+
+    #[test]
+    fn check_fire_below_threshold_returns_none_and_leaves_potential_unchanged() {
+        let mut neuron = LifNeuron::new();
+        neuron.membrane_potential = neuron.threshold - 0.01;
+        let before = neuron.membrane_potential;
+
+        assert_eq!(neuron.check_fire(), None);
+        assert_eq!(neuron.membrane_potential, before);
+    }
+
+    #[test]
+    fn check_fire_at_or_above_threshold_fires_and_hard_resets() {
+        let mut neuron = LifNeuron::new();
+
+        neuron.membrane_potential = neuron.threshold;
+        let expected_peak_exact = neuron.membrane_potential;
+        let fired_exact = neuron.check_fire();
+        assert_eq!(fired_exact, Some(expected_peak_exact));
+        assert_eq!(neuron.membrane_potential, 0.0);
+
+        neuron.membrane_potential = neuron.threshold + 0.05;
+        let expected_peak_above = neuron.membrane_potential;
+        let fired_above = neuron.check_fire();
+        assert_eq!(fired_above, Some(expected_peak_above));
+        assert_eq!(neuron.membrane_potential, 0.0);
+    }
+
+    #[test]
+    fn poisson_encoder_zero_input_yields_all_zero_spike_train() {
+        let encoder = PoissonEncoder::new(50);
+        let spikes = encoder.encode(0.0);
+        assert_eq!(spikes.len(), 50);
+        assert!(spikes.iter().all(|&s| s == 0));
+    }
+
+    #[test]
+    fn poisson_encoder_negative_input_clamps_to_zero_spikes() {
+        let encoder = PoissonEncoder::new(20);
+        let spikes = encoder.encode(-5.0);
+        assert!(spikes.iter().all(|&s| s == 0));
+    }
+
+    #[test]
+    fn poisson_encoder_full_intensity_input_yields_all_ones() {
+        let encoder = PoissonEncoder::new(50);
+        let spikes = encoder.encode(1.0);
+        assert_eq!(spikes.len(), 50);
+        assert!(spikes.iter().all(|&s| s == 1));
+    }
+
+    #[test]
+    fn poisson_encoder_output_length_matches_num_steps() {
+        for steps in [0, 1, 10, 100] {
+            let encoder = PoissonEncoder::new(steps);
+            assert_eq!(encoder.encode(0.5).len(), steps);
+        }
     }
 }

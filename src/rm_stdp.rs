@@ -1,47 +1,133 @@
-/// The actual STDP learning rule was missing from the original codebase. Which was orginally too massive for me to manually extract.  So I had AI Agent cdoer break it down from original codebase into smaller pieces. So I am now making the proper changes.
-/// Orginally the algorithm lived in engine.rs.  The orginal codebase had plascticity but this was missing it. So weights were static and never updated in this codebase, disconnected from learning.
-/// The weights don't change immediately instead it records an eligibility trace of memory.  Once a reward signal arrives (dopamine), you convert the eligibility trace into actual weight changes.
-///
-/// R-STDP (Reward based Spike-Timing-Dependent Plasticity) parameters.
-///
-/// ANALOGY: This is the "learning rule" — like Hebb's Rule on a timer.
-/// "Neurons that fire together wire together" but only if the timing is right.
-pub const RM_STDP_TAU_PLUS: f32 = 20.0; // LTP time constant (ms / steps)
-pub const RM_STDP_TAU_MINUS: f32 = 20.0; // LTD time constant (ms / steps)
-pub const RM_STDP_A_PLUS: f32 = 0.01; // Max LTP amplitude
-pub const RM_STDP_A_MINUS: f32 = 0.012; // Max LTD amplitude (slightly stronger → stability)
-pub const RM_STDP_W_MIN: f32 = 0.0; // Minimum weight (no negative / inhibitory yet)
-pub const RM_STDP_W_MAX: f32 = 2.0; // Maximum weight (prevents runaway excitation)
+//! R-STDP (Reward-modulated Spike-Timing-Dependent Plasticity) parameters.
+//!
+//! This module holds R-STDP constants, `RmStdpConfig`, and a standalone
+//! [`EligibilityTrace`] building block for standalone use.
+//!
+//! **Live engine path:** `SpikingNetwork::apply_stdp` in `src/engine.rs` is
+//! dopamine-gated and updates weights directly from spike timing. It does
+//! **not** currently consume or convert `EligibilityTrace` values.
+//!
+//! Idealized R-STDP (not yet wired in-engine): an eligibility trace accumulates
+//! a "memory" of recent pre/post spike-timing coincidences, then a reward
+//! signal (dopamine) converts that trace into a weight change.
+//!
+//! ANALOGY: Hebb's Rule on a timer — "neurons that fire together wire
+//! together," but only if the timing (and, eventually, reward) is right.
 
-// Newly added struct to track the state of a single synapse's eligibility trace
+/// LTP (potentiation) time constant, in steps.
+pub const RM_STDP_TAU_PLUS: f32 = 20.0;
+/// LTD (depression) time constant, in steps.
+pub const RM_STDP_TAU_MINUS: f32 = 20.0;
+/// Maximum LTP amplitude.
+pub const RM_STDP_A_PLUS: f32 = 0.01;
+/// Maximum LTD amplitude (slightly stronger than LTP for stability).
+pub const RM_STDP_A_MINUS: f32 = 0.012;
+/// Minimum synaptic weight (no negative/inhibitory weights yet).
+pub const RM_STDP_W_MIN: f32 = 0.0;
+/// Maximum synaptic weight (prevents runaway excitation).
+pub const RM_STDP_W_MAX: f32 = 2.0;
+
+const _: () = assert!(RM_STDP_W_MIN < RM_STDP_W_MAX);
+const _: () = assert!(RM_STDP_A_MINUS >= RM_STDP_A_PLUS);
+
+/// Eligibility trace for a single synapse.
+///
+/// Accumulates based on pre/post spike timing and decays exponentially over
+/// time; positive values favor potentiation (LTP), negative values favor
+/// depression (LTD). Each synapse holds its own trace instance.
 pub struct EligibilityTrace {
-    /// The current value of the eligibility trace, which accumulates based on spike timing
-    pub value: f32, // The value can be positive (LTP) or negative (LTD) depending on the timing of pre/post spikes
-    /// The time constant that determines how quickly the eligibility trace decays
-    pub tau: f32, // tau dictates over how fast it decays, so typical values are 50-100ms/steps
-                  // Each synapse would have its own eligibility trace instance, which gets updated based on pre/post spike timing and decays over time.
+    /// Current trace value.
+    pub value: f32,
+    /// Decay time constant, in steps. Typical values are 50-100.
+    pub tau: f32,
 }
 
-// Holds Rm-STDP hyperparameters
+/// R-STDP hyperparameters.
 pub struct RmStdpConfig {
-    /// Eligibility trace decay time constant (ms / steps)
-    pub tau_eligibility: f32, // Determines how long the eligibility trace lasts before it decays back to zero. Typical values are 50-100ms/steps.
-    /// LTP time constant (ms / steps)
-    pub reward_lr: f32, // This dicates the learning rate for converting the eligibility trace into actual weight changes when a reward signal arrives. Typical values are 0.01-0.1.
-    /// Weight clipping bounds
-    pub w_min: f32, // Plays a role in preventing runaway excitation or complete silencing. Typical values are 0.0 (no negative weights) to 1.0 or 2.0 (allowing some potentiation).
-    // Minimum weight (no negative / inhibitory yet)
-    pub w_max: f32, // Maximum weight (prevents runaway excitation)
+    /// Eligibility trace decay time constant, in steps. Typical values are 50-100.
+    pub tau_eligibility: f32,
+    /// Learning rate for converting an eligibility trace into a weight change
+    /// when a reward signal arrives. Typical values are 0.01-0.1.
+    pub reward_lr: f32,
+    /// Minimum weight (no negative/inhibitory weights yet).
+    pub w_min: f32,
+    /// Maximum weight (prevents runaway excitation).
+    pub w_max: f32,
 }
 
-// Makes the trace decay each step on 'EligibilityTrace' struct
 impl EligibilityTrace {
-    // Call this method each time step to decay the eligibility trace
+    /// Decay the trace by one step (assumes dt = 1 unit).
     pub fn decay(&mut self) {
-        // Guard against non-positive tau which would cause division by zero or
-        // exponential growth instead of decay.
+        // Guard against non-positive tau, which would cause division by zero
+        // or exponential growth instead of decay.
         let tau = self.tau.max(f32::EPSILON);
-        // Exponential decay of the eligibility trace over time
-        self.value *= (-1.0 / tau).exp(); // Exponential decay based on tau
+        self.value *= (-1.0 / tau).exp();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn decay_scales_value_by_exp_neg_inv_tau() {
+        let mut trace = EligibilityTrace {
+            value: 1.0,
+            tau: 50.0,
+        };
+        let expected_factor = (-1.0_f32 / 50.0).exp();
+
+        trace.decay();
+
+        assert!((trace.value - expected_factor).abs() < 1e-6);
+    }
+
+    #[test]
+    fn decay_applied_repeatedly_compounds_toward_zero() {
+        let mut trace = EligibilityTrace {
+            value: 1.0,
+            tau: 50.0,
+        };
+        let factor = (-1.0_f32 / 50.0).exp();
+
+        for _ in 0..5 {
+            trace.decay();
+        }
+
+        let expected = factor.powi(5);
+        assert!((trace.value - expected).abs() < 1e-5);
+        assert!(trace.value < 1.0);
+    }
+
+    #[test]
+    fn decay_preserves_sign_for_negative_values() {
+        let mut trace = EligibilityTrace {
+            value: -1.0,
+            tau: 50.0,
+        };
+        trace.decay();
+        assert!(trace.value < 0.0);
+    }
+
+    #[test]
+    fn decay_with_zero_tau_does_not_panic_or_diverge() {
+        let mut trace = EligibilityTrace {
+            value: 1.0,
+            tau: 0.0,
+        };
+        trace.decay();
+        assert!(trace.value.is_finite());
+        assert!(trace.value >= 0.0);
+    }
+
+    #[test]
+    fn decay_with_negative_tau_does_not_panic_or_diverge() {
+        let mut trace = EligibilityTrace {
+            value: 1.0,
+            tau: -10.0,
+        };
+        trace.decay();
+        assert!(trace.value.is_finite());
+        assert!(trace.value >= 0.0);
     }
 }

@@ -2,7 +2,12 @@
 //!
 //! Run with: cargo run --features sentry --example sentry
 //!
-//! Set SENTRY_DSN environment variable to enable real reporting.
+//! Set `SENTRY_DSN` to enable real reporting. Optional `SENTRY_ENVIRONMENT`
+//! tags events (defaults to `development` so demo runs do not look like prod).
+//!
+//! This example only initializes the client and runs a normal neuromod step.
+//! It does **not** send info-level probe messages — those create issue noise
+//! (see instrumentation: errors at the edge only).
 
 fn main() {
     // Guarded initialization - only when the "sentry" feature is enabled.
@@ -13,17 +18,18 @@ fn main() {
             // Validate DSN before initialization
             match dsn.parse::<sentry::types::Dsn>() {
                 Ok(parsed_dsn) => {
+                    let environment = std::env::var("SENTRY_ENVIRONMENT")
+                        .unwrap_or_else(|_| "development".into());
                     let guard = sentry::init((
                         parsed_dsn,
                         sentry::ClientOptions {
                             release: sentry::release_name!(),
+                            environment: Some(environment.clone().into()),
                             ..Default::default()
                         },
                     ));
-                    println!("Sentry initialized for error monitoring (feature enabled)");
-                    sentry::capture_message(
-                        "Sentry integration active in neuromod example",
-                        sentry::Level::Info,
+                    println!(
+                        "Sentry initialized for error monitoring (feature enabled, env={environment})"
                     );
                     Some(guard)
                 }

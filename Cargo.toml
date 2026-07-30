@@ -2,6 +2,7 @@
 name = "neuromod"
 version = "0.5.0"
 edition = "2024"
+rust-version = "1.97.1"
 license = "MIT OR Apache-2.0"
 authors = ["Raul Montoya Cardenas <montoyaraul34@gmail.com>"]
 description = "A high-performance Rust SNN library for neuroscience research and pure spiking neural network library featuring LIF, Izhikevich, Hebbian, Nagumo, Lapicque and Hodgkin-Huxley dynamics."
@@ -10,6 +11,8 @@ repository = "https://github.com/Limen-Neural/neuromod"
 readme = "README.md"
 keywords = ["snn", "neuromorphic", "stdp", "spiking", "neuromodulation"]
 categories = ["science", "algorithms", "simulation"]
+homepage = "https://github.com/Limen-Neural/neuromod"
+documentation = "https://docs.rs/neuromod"
 
 [workspace]
 
@@ -19,7 +22,6 @@ path = "src/lib.rs"
 
 [dependencies]
 serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
 rand = "0.10.1"
 sentry = { version = "0.48", optional = true, default-features = false, features = ["backtrace", "contexts", "panic", "rustls", "transport"] }
 
@@ -52,3 +54,14 @@ sentry = ["dep:sentry"]
 opt-level = 3
 lto = true
 codegen-units = 1
+
+[profile.dev]
+opt-level = 1          # faster-running debug binaries
+incremental = true
+
+[profile.release-with-debug]
+inherits = "release"
+debug = true           # for profiling release builds
+
+[profile.bench]
+inherits = "release"   # Criterion wall-clock benches use same LTO/codegen as release

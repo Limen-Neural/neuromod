@@ -22,8 +22,7 @@ fn main() {
                         .unwrap_or_else(|_| "development".into());
                     // sentry 0.49: ClientOptions is #[non_exhaustive]; use builder setters.
                     // release_name!() returns Option; builder setter wants Into<Cow<'static, str>>.
-                    let mut options =
-                        sentry::ClientOptions::new().environment(environment.clone());
+                    let mut options = sentry::ClientOptions::new().environment(environment.clone());
                     if let Some(release) = sentry::release_name!() {
                         options = options.release(release);
                     }

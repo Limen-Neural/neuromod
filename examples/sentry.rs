@@ -20,14 +20,14 @@ fn main() {
                 Ok(parsed_dsn) => {
                     let environment = std::env::var("SENTRY_ENVIRONMENT")
                         .unwrap_or_else(|_| "development".into());
-                    let guard = sentry::init((
-                        parsed_dsn,
-                        sentry::ClientOptions {
-                            release: sentry::release_name!(),
-                            environment: Some(environment.clone().into()),
-                            ..Default::default()
-                        },
-                    ));
+                    // sentry 0.49: ClientOptions is #[non_exhaustive]; use builder setters.
+                    // release_name!() returns Option; builder setter wants Into<Cow<'static, str>>.
+                    let mut options =
+                        sentry::ClientOptions::new().environment(environment.clone());
+                    if let Some(release) = sentry::release_name!() {
+                        options = options.release(release);
+                    }
+                    let guard = sentry::init((parsed_dsn, options));
                     println!(
                         "Sentry initialized for error monitoring (feature enabled, env={environment})"
                     );

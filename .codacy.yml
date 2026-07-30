@@ -2,6 +2,8 @@
 exclude_paths:
   - "Cargo.lock"
   - "tests/sentry_integration.rs"
+  - ".cubic/wiki/**"
+  - ".cubic/**"
 engines:
   hadolint:
     exclude_paths:

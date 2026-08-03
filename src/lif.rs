@@ -24,9 +24,7 @@ impl PoissonEncoder {
         let probability = input.clamp(0.0, 1.0);
 
         for _ in 0..self.num_steps {
-            // Stochastic firing:
-            // If the random number (0.0-1.0) is LESS than our intensity, we spike.
-            // This mimics the noise inherent in quantum/chemical systems.
+            // Bernoulli trial: spike if U(0,1) < intensity.
             //
             // Handle exact 0.0 / 1.0 without RNG to make edge-case behavior
             // explicit and avoid RNG calls for deterministic paths.

@@ -64,6 +64,10 @@ pub struct HodgkinHuxleyNeuron {
 }
 
 impl HodgkinHuxleyNeuron {
+    /// Shift between absolute mammalian mV and the squid HH relative convention
+    /// (rest = 0 mV ↔ absolute rest = −65 mV).
+    const CORTICAL_VOLTAGE_SHIFT: f32 = 65.0;
+
     fn derivatives(&self, v: f32, m: f32, h: f32, n: f32, i_app: f32) -> (f32, f32, f32, f32) {
         let i_na = self.g_na * m.powi(3) * h * (v - self.e_na);
         let i_k = self.g_k * n.powi(4) * (v - self.e_k);
@@ -73,7 +77,11 @@ impl HodgkinHuxleyNeuron {
         // Gating-rate functions are written in the squid HH relative convention
         // (rest = 0 mV). Cortical parameters use absolute mV (rest = -65 mV), so
         // shift the voltage back to the HH convention before evaluating α/β.
-        let gating_v = if self.temperature > 20.0 { v + 65.0 } else { v };
+        let gating_v = if self.temperature > 20.0 {
+            v + Self::CORTICAL_VOLTAGE_SHIFT
+        } else {
+            v
+        };
         let phi = self.phi();
         let dm = phi * (Self::alpha_m(gating_v) * (1.0 - m) - Self::beta_m(gating_v) * m);
         let dh = phi * (Self::alpha_h(gating_v) * (1.0 - h) - Self::beta_h(gating_v) * h);
@@ -124,7 +132,7 @@ impl HodgkinHuxleyNeuron {
         hh.e_k = -77.0;
         hh.e_l = -54.387;
         hh.temperature = 37.0;
-        let v_rest = -65.0;
+        let v_rest = -Self::CORTICAL_VOLTAGE_SHIFT;
         hh.v = v_rest;
         let (m0, h0, n0) = Self::steady_state_gating_mammalian(v_rest, hh.temperature);
         hh.m = m0;
@@ -198,7 +206,7 @@ impl HodgkinHuxleyNeuron {
 
     /// Steady-state gating for mammalian absolute-mV voltages (shifted into HH convention).
     fn steady_state_gating_mammalian(v: f32, _temperature: f32) -> (f32, f32, f32) {
-        Self::steady_state_gating_raw(v + 65.0)
+        Self::steady_state_gating_raw(v + Self::CORTICAL_VOLTAGE_SHIFT)
     }
 
     /// Advance by `dt_ms` with RK4 sub-steps (default 0.01 ms).
@@ -291,7 +299,11 @@ impl HodgkinHuxleyNeuron {
 
     /// Reset to resting potential and steady-state gates for the current temperature.
     pub fn reset(&mut self) {
-        let v_rest = if self.temperature > 20.0 { -65.0 } else { 0.0 };
+        let v_rest = if self.temperature > 20.0 {
+            -Self::CORTICAL_VOLTAGE_SHIFT
+        } else {
+            0.0
+        };
         let (m0, h0, n0) = if self.temperature > 20.0 {
             Self::steady_state_gating_mammalian(v_rest, self.temperature)
         } else {
@@ -408,6 +420,46 @@ mod tests {
         assert!(
             peak_v > baseline + 5.0,
             "Cortical HH neuron should depolarize substantially under sustained input"
+        );
+    }
+
+    #[test]
+    fn test_cortical_gating_derivatives_at_rest() {
+        // At cortical rest the gates are initialized to their steady-state values.
+        // derivatives() must apply the same +65 mV shift used by new_cortical and reset,
+        // otherwise dm/dh/dn would not be zero at rest.
+        let mut hh = HodgkinHuxleyNeuron::new_cortical();
+        let (_, dm, dh, dn) = hh.derivatives(hh.v, hh.m, hh.h, hh.n, 0.0);
+        assert!(
+            dm.abs() < 1e-6,
+            "dm should be near zero at cortical rest (got {dm})"
+        );
+        assert!(
+            dh.abs() < 1e-6,
+            "dh should be near zero at cortical rest (got {dh})"
+        );
+        assert!(
+            dn.abs() < 1e-6,
+            "dn should be near zero at cortical rest (got {dn})"
+        );
+
+        // Perturb and reset to confirm the shift is also consistent in reset().
+        for _ in 0..100 {
+            hh.step(0.0, 0.05);
+        }
+        hh.reset();
+        let (_, dm, dh, dn) = hh.derivatives(hh.v, hh.m, hh.h, hh.n, 0.0);
+        assert!(
+            dm.abs() < 1e-6,
+            "dm should be near zero after reset (got {dm})"
+        );
+        assert!(
+            dh.abs() < 1e-6,
+            "dh should be near zero after reset (got {dh})"
+        );
+        assert!(
+            dn.abs() < 1e-6,
+            "dn should be near zero after reset (got {dn})"
         );
     }
 

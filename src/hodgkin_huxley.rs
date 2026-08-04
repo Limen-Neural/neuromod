@@ -77,7 +77,7 @@ impl HodgkinHuxleyNeuron {
         // Gating-rate functions are written in the squid HH relative convention
         // (rest = 0 mV). Cortical parameters use absolute mV (rest = -65 mV), so
         // shift the voltage back to the HH convention before evaluating α/β.
-        let gating_v = if self.temperature > 20.0 {
+        let gating_v = if self.is_cortical() {
             v + Self::CORTICAL_VOLTAGE_SHIFT
         } else {
             v
@@ -146,6 +146,13 @@ impl HodgkinHuxleyNeuron {
     /// Q₁₀ temperature scaling factor (squid axon: Q₁₀ = 3).
     fn phi(&self) -> f32 {
         3.0f32.powf((self.temperature - 6.3) / 10.0)
+    }
+
+    /// Cortical/mammalian parameterizations use absolute mV (rest ≈ −65 mV),
+    /// whereas the squid axon uses the HH relative convention (rest = 0 mV).
+    /// We currently distinguish the two by temperature (> 20 °C for cortex).
+    fn is_cortical(&self) -> bool {
+        self.temperature > 20.0
     }
 
     /// α_m(V): Na⁺ activation rate
@@ -299,12 +306,12 @@ impl HodgkinHuxleyNeuron {
 
     /// Reset to resting potential and steady-state gates for the current temperature.
     pub fn reset(&mut self) {
-        let v_rest = if self.temperature > 20.0 {
+        let v_rest = if self.is_cortical() {
             -Self::CORTICAL_VOLTAGE_SHIFT
         } else {
             0.0
         };
-        let (m0, h0, n0) = if self.temperature > 20.0 {
+        let (m0, h0, n0) = if self.is_cortical() {
             Self::steady_state_gating_mammalian(v_rest, self.temperature)
         } else {
             Self::steady_state_gating(v_rest, self.temperature)

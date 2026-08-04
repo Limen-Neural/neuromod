@@ -64,6 +64,19 @@ pub struct HodgkinHuxleyNeuron {
 }
 
 impl HodgkinHuxleyNeuron {
+    /// Compute the rate of change of voltage and the three gating variables at any point (v, m, h, n)
+    fn derivatives(&self, v: f32, m: f32, h: f32, n: f32, i_app: f32) -> (f32, f32, f32, f32) {
+        let i_na = self.g_na * m.powi(3) * h * (v - self.e_na);
+        let i_k = self.g_k * n.powi(4) * (v - self.e_k);
+        let i_l = self.g_l * (v - self.e_l);
+        let dv = (i_app - i_na - i_k - i_l) / self.c_m;
+
+        let phi = self.phi();
+        let dm = phi * (Self::alpha_m(v) * (1.0 - m) - Self::beta_m(v) * m);
+        let dh = phi * (Self::alpha_h(v) * (1.0 - h) - Self::beta_h(v) * h);
+        let dn = phi * (Self::alpha_n(v) * (1.0 - n) - Self::beta_n(v) * n);
+        (dv, dm, dh, dn)
+    }
     /// Create a squid giant axon HH neuron at rest.
     ///
     /// State variables are initialized to their steady-state values at
@@ -164,9 +177,8 @@ impl HodgkinHuxleyNeuron {
         0.125 * (-v / 80.0).exp()
     }
 
-    /// Steady-state gating: x_∞ = α_x / (α_x + β_x). φ cancels at steady state.
-    fn steady_state_gating(v: f32, temperature: f32) -> (f32, f32, f32) {
-        let _phi = 3.0f32.powf((temperature - 6.3) / 10.0);
+    /// Steady-state gating for any voltage in HH relative convention.
+    fn steady_state_gating_raw(v: f32) -> (f32, f32, f32) {
         let am = Self::alpha_m(v);
         let bm = Self::beta_m(v);
         let ah = Self::alpha_h(v);
@@ -174,46 +186,16 @@ impl HodgkinHuxleyNeuron {
         let an = Self::alpha_n(v);
         let bn = Self::beta_n(v);
         (am / (am + bm), ah / (ah + bh), an / (an + bn))
+    }
+
+    /// Steady-state gating: x_∞ = α_x / (α_x + β_x). φ cancels at steady state.
+    fn steady_state_gating(v: f32, _temperature: f32) -> (f32, f32, f32) {
+        Self::steady_state_gating_raw(v)
     }
 
     /// Steady-state gating for mammalian absolute-mV voltages (shifted into HH convention).
-    fn steady_state_gating_mammalian(v: f32, temperature: f32) -> (f32, f32, f32) {
-        let _phi = 2.3f32.powf((temperature - 6.3) / 10.0);
-        let shift = v + 65.0;
-        let am = Self::alpha_m(shift);
-        let bm = Self::beta_m(shift);
-        let ah = Self::alpha_h(shift);
-        let bh = Self::beta_h(shift);
-        let an = Self::alpha_n(shift);
-        let bn = Self::beta_n(shift);
-        (am / (am + bm), ah / (ah + bh), an / (an + bn))
-    }
-
-    /// Gating derivatives: dx/dt = φ · (α_x(1 − x) − β_x · x).
-    fn gating_derivs(&self) -> (f32, f32, f32) {
-        let phi = self.phi();
-        let v = self.v;
-
-        let am = Self::alpha_m(v);
-        let bm = Self::beta_m(v);
-        let ah = Self::alpha_h(v);
-        let bh = Self::beta_h(v);
-        let an = Self::alpha_n(v);
-        let bn = Self::beta_n(v);
-
-        let dm = phi * (am * (1.0 - self.m) - bm * self.m);
-        let dh = phi * (ah * (1.0 - self.h) - bh * self.h);
-        let dn = phi * (an * (1.0 - self.n) - bn * self.n);
-
-        (dm, dh, dn)
-    }
-
-    /// dV/dt = (I_app − I_ion) / C_m
-    fn voltage_deriv(&self, i_app: f32) -> f32 {
-        let i_na = self.g_na * self.m.powi(3) * self.h * (self.v - self.e_na);
-        let i_k = self.g_k * self.n.powi(4) * (self.v - self.e_k);
-        let i_l = self.g_l * (self.v - self.e_l);
-        (i_app - i_na - i_k - i_l) / self.c_m
+    fn steady_state_gating_mammalian(v: f32, _temperature: f32) -> (f32, f32, f32) {
+        Self::steady_state_gating_raw(v + 65.0)
     }
 
     /// Advance by `dt_ms` with RK4 sub-steps (default 0.01 ms).
@@ -256,8 +238,7 @@ impl HodgkinHuxleyNeuron {
     }
 
     fn rk4_stage1(&self, i_app: f32) -> (f32, f32, f32, f32) {
-        let (dm, dh, dn) = self.gating_derivs();
-        (self.voltage_deriv(i_app), dm, dh, dn)
+        self.derivatives(self.v, self.m, self.h, self.n, i_app)
     }
 
     fn rk4_stage2(
@@ -274,17 +255,7 @@ impl HodgkinHuxleyNeuron {
         let m = (self.m + half * km).clamp(0.0, 1.0);
         let h = (self.h + half * kh).clamp(0.0, 1.0);
         let n = (self.n + half * kn).clamp(0.0, 1.0);
-        let dv = {
-            let i_na = self.g_na * m.powi(3) * h * (v - self.e_na);
-            let i_k = self.g_k * n.powi(4) * (v - self.e_k);
-            let i_l = self.g_l * (v - self.e_l);
-            (i_app - i_na - i_k - i_l) / self.c_m
-        };
-        let phi = self.phi();
-        let dm = phi * (Self::alpha_m(v) * (1.0 - m) - Self::beta_m(v) * m);
-        let dh = phi * (Self::alpha_h(v) * (1.0 - h) - Self::beta_h(v) * h);
-        let dn = phi * (Self::alpha_n(v) * (1.0 - n) - Self::beta_n(v) * n);
-        (dv, dm, dh, dn)
+        self.derivatives(v, m, h, n, i_app)
     }
 
     fn rk4_stage3(
@@ -296,22 +267,7 @@ impl HodgkinHuxleyNeuron {
         kh: f32,
         kn: f32,
     ) -> (f32, f32, f32, f32) {
-        let half = dt / 2.0;
-        let v = self.v + half * kv;
-        let m = (self.m + half * km).clamp(0.0, 1.0);
-        let h = (self.h + half * kh).clamp(0.0, 1.0);
-        let n = (self.n + half * kn).clamp(0.0, 1.0);
-        let dv = {
-            let i_na = self.g_na * m.powi(3) * h * (v - self.e_na);
-            let i_k = self.g_k * n.powi(4) * (v - self.e_k);
-            let i_l = self.g_l * (v - self.e_l);
-            (i_app - i_na - i_k - i_l) / self.c_m
-        };
-        let phi = self.phi();
-        let dm = phi * (Self::alpha_m(v) * (1.0 - m) - Self::beta_m(v) * m);
-        let dh = phi * (Self::alpha_h(v) * (1.0 - h) - Self::beta_h(v) * h);
-        let dn = phi * (Self::alpha_n(v) * (1.0 - n) - Self::beta_n(v) * n);
-        (dv, dm, dh, dn)
+        self.rk4_stage2(i_app, dt, kv, km, kh, kn)
     }
 
     fn rk4_stage4(
@@ -327,17 +283,7 @@ impl HodgkinHuxleyNeuron {
         let m = (self.m + dt * km).clamp(0.0, 1.0);
         let h = (self.h + dt * kh).clamp(0.0, 1.0);
         let n = (self.n + dt * kn).clamp(0.0, 1.0);
-        let dv = {
-            let i_na = self.g_na * m.powi(3) * h * (v - self.e_na);
-            let i_k = self.g_k * n.powi(4) * (v - self.e_k);
-            let i_l = self.g_l * (v - self.e_l);
-            (i_app - i_na - i_k - i_l) / self.c_m
-        };
-        let phi = self.phi();
-        let dm = phi * (Self::alpha_m(v) * (1.0 - m) - Self::beta_m(v) * m);
-        let dh = phi * (Self::alpha_h(v) * (1.0 - h) - Self::beta_h(v) * h);
-        let dn = phi * (Self::alpha_n(v) * (1.0 - n) - Self::beta_n(v) * n);
-        (dv, dm, dh, dn)
+        self.derivatives(v, m, h, n, i_app)
     }
 
     /// Reset to resting potential and steady-state gates for the current temperature.

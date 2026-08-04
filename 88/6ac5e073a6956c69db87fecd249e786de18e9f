@@ -1,0 +1,24 @@
+src/hodgkin_huxley.rs
+  s_384f84fe598585::t_04e21a7679dcf8 75
+  s_384f84fe598585::t_2af43de849cbb1 241
+  s_384f84fe598585::t_7b6c70a6bcf08b 270
+  s_384f84fe598585::t_8dc3f518df2db8 286
+  s_384f84fe598585::t_ee45ef57314794 258
+  s_384f84fe598585::t_6c7a1d4b159cc5 180-181,191-193,196-198
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "886ac5e073a6956c69db87fecd249e786de18e9f",
+  "prompts": {},
+  "sessions": {
+    "s_384f84fe598585": {
+      "agent_id": {
+        "tool": "windsurf",
+        "id": "exuberant-brand",
+        "model": "unknown"
+      },
+      "human_author": "Raul Montoya Cardenas <montoyaraul34@gmail.com>"
+    }
+  }
+}

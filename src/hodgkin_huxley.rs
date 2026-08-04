@@ -64,17 +64,20 @@ pub struct HodgkinHuxleyNeuron {
 }
 
 impl HodgkinHuxleyNeuron {
-    /// Compute the rate of change of voltage and the three gating variables at any point (v, m, h, n)
     fn derivatives(&self, v: f32, m: f32, h: f32, n: f32, i_app: f32) -> (f32, f32, f32, f32) {
         let i_na = self.g_na * m.powi(3) * h * (v - self.e_na);
         let i_k = self.g_k * n.powi(4) * (v - self.e_k);
         let i_l = self.g_l * (v - self.e_l);
         let dv = (i_app - i_na - i_k - i_l) / self.c_m;
 
+        // Gating-rate functions are written in the squid HH relative convention
+        // (rest = 0 mV). Cortical parameters use absolute mV (rest = -65 mV), so
+        // shift the voltage back to the HH convention before evaluating α/β.
+        let gating_v = if self.temperature > 20.0 { v + 65.0 } else { v };
         let phi = self.phi();
-        let dm = phi * (Self::alpha_m(v) * (1.0 - m) - Self::beta_m(v) * m);
-        let dh = phi * (Self::alpha_h(v) * (1.0 - h) - Self::beta_h(v) * h);
-        let dn = phi * (Self::alpha_n(v) * (1.0 - n) - Self::beta_n(v) * n);
+        let dm = phi * (Self::alpha_m(gating_v) * (1.0 - m) - Self::beta_m(gating_v) * m);
+        let dh = phi * (Self::alpha_h(gating_v) * (1.0 - h) - Self::beta_h(gating_v) * h);
+        let dn = phi * (Self::alpha_n(gating_v) * (1.0 - n) - Self::beta_n(gating_v) * n);
         (dv, dm, dh, dn)
     }
     /// Create a squid giant axon HH neuron at rest.

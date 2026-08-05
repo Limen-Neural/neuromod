@@ -1,16 +1,16 @@
-[package]
+'[package]
 name = "neuromod"
-version = "0.5.0"
+version = "0.5.1"
 edition = "2024"
 rust-version = "1.97.1"
 license = "MIT OR Apache-2.0"
 authors = ["Raul Montoya Cardenas <montoyaraul34@gmail.com>"]
-description = "Biologically grounded SNN primitives in Rust: LIF/Izhikevich SpikingNetwork, neuromodulators, STDP building blocks, and standalone neuron models."
+description = "Biologically inspired SNN primitives in Rust: LIF/Izhikevich SpikingNetwork, neuromodulators, STDP building blocks, and standalone neuron models."
 exclude = ["docs/"]
 repository = "https://github.com/Limen-Neural/neuromod"
 readme = "README.md"
 keywords = ["snn", "neuromorphic", "stdp", "spiking", "neuromodulation"]
-categories = ["science", "algorithms", "simulation"]
+categories = ["science", "algorithms", "simulation", "experimental"]
 homepage = "https://github.com/Limen-Neural/neuromod"
 documentation = "https://docs.rs/neuromod"
 

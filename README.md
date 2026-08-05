@@ -43,7 +43,7 @@ Use them directly; use `HebbianIzhikevichNetwork` for a small classical-STDP Izh
 
 ```toml
 [dependencies]
-neuromod = "0.5.0"
+neuromod = "0.5.1"
 ```
 
 Links: [crates.io](https://crates.io/crates/neuromod) · [docs.rs](https://docs.rs/neuromod) · [repository](https://github.com/Limen-Neural/neuromod)

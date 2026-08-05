@@ -1,4 +1,4 @@
-'[package]
+[package]
 name = "neuromod"
 version = "0.5.1"
 edition = "2024"
@@ -10,7 +10,7 @@ exclude = ["docs/"]
 repository = "https://github.com/Limen-Neural/neuromod"
 readme = "README.md"
 keywords = ["snn", "neuromorphic", "stdp", "spiking", "neuromodulation"]
-categories = ["science", "algorithms", "simulation", "experimental"]
+categories = ["science", "algorithms", "simulation"]
 homepage = "https://github.com/Limen-Neural/neuromod"
 documentation = "https://docs.rs/neuromod"
 

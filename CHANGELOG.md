@@ -4,14 +4,11 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
-### Changed
-
-- **Docs / packaging honesty:** honest crates.io `description` (no unsubstantiated “high-performance”); README badges and dual-license presentation; crate and README docs state that `SpikingNetwork` wires **LIF + Izhikevich** only, with other models available as standalone types (#66, #67, #69, #70).
-
 ## [0.5.1] - 2026-08-08
 
 ### Changed
 
+- **Docs / packaging honesty:** honest crates.io `description` (no unsubstantiated “high-performance”); README badges and dual-license presentation; crate and README docs state that `SpikingNetwork` wires **LIF + Izhikevich** only, with other models available as standalone types (#66, #67, #69, #70).
 - `src/hodgkin_huxley.rs`: stripped verbose AI-generated commentary and consolidated repeated RK4/gating calculations.
 - `src/lif.rs`: shortened Poisson-spike generation comment.
 - `tests/sentry_integration.rs`: trimmed redundant feature-gate prose.

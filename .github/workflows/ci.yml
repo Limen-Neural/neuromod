@@ -65,6 +65,3 @@ jobs:
           cargo doc --no-deps
           ! grep -riE 'spikenaut|\bhft\b|\bmining\b|\bcrypto\b|eagle-lander' target/doc/neuromod/
 
-      - name: Verify optional sentry feature compiles
-        if: steps.changes.outputs.rust == 'true'
-        run: cargo check --features sentry

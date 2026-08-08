@@ -4,6 +4,10 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+### Removed
+
+- Optional `sentry` Cargo feature, `examples/sentry.rs`, `tests/sentry_integration.rs`, and `.github/workflows/sentry-release.yml`. Observability belongs in application binaries (depend on `sentry` there); the library no longer pulls or demos Sentry (#88, #78).
+
 ### Changed
 
 - Stop tracking `.cubic/wiki` in git; ignore `.cubic/` and exclude it from the crates.io package so regenerated cubic wiki is not a documentation source of truth (#90).

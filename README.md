@@ -188,7 +188,7 @@ cargo hack check --feature-powerset --exclude-no-default-features --keep-going
 
 ## Observability
 
-`neuromod` publishes test coverage to Codecov and release metadata to Sentry.
+`neuromod` publishes test coverage to Codecov. Error monitoring belongs in **application** binaries (depend on the `sentry` crate there), not in this library.
 
 ### Codecov
 
@@ -209,26 +209,6 @@ cargo llvm-cov --all-features --lcov --output-path lcov.info
 - Open `target/llvm-cov/html/index.html` after running the HTML report locally.
 - CI runs the `coverage.yml` workflow on every PR and push to `main`.
 
-### Sentry releases
-
-- Workflow: [`.github/workflows/sentry-release.yml`](.github/workflows/sentry-release.yml)
-
-A Sentry release is created automatically when a `v*` tag is pushed and can be triggered manually via `workflow_dispatch`. The release name follows `neuromod@{version}`.
-
-To enable Sentry at runtime, use the optional `sentry` feature:
-
-```toml
-[dependencies]
-neuromod = { version = "0.5.1", features = ["sentry"] }
-```
-
-```bash
-SENTRY_DSN=... cargo run --example sentry --features sentry
-```
-
-See `examples/sentry.rs`. The feature is optional and is not included in the default build.
-
-View releases and issues in the linked Sentry project. The organization and auth token come from repository secrets; `SENTRY_PROJECT` is set to `rust` in `.github/workflows/sentry-release.yml`.
 
 ## License
 
@@ -246,7 +226,6 @@ This repository uses a comprehensive CI setup for speed, quality, security, and 
 - **Core CI** (`.github/workflows/ci.yml`): `fmt`, `clippy`, build, tests (via `cargo-nextest`), feature-matrix testing (`cargo-hack`), domain-agnostic docs check. Uses `Swatinem/rust-cache` and `dorny/paths-filter` to keep most PR feedback fast.
 - **Qodana** (`.github/workflows/qodana_code_quality.yml`): JetBrains code-quality scans on every PR/push to `main` and `releases/*`; results are published to Qodana Cloud.
 - **Codecov** (`.github/workflows/coverage.yml`): `cargo-llvm-cov` + Test Analytics (stable JUnit via pinned nextest). See [Observability](#observability) for local usage and report links.
-- **Sentry Releases** (`.github/workflows/sentry-release.yml`): Automatic releases on `v*` tags + manual `workflow_dispatch` trigger. See [Observability](#observability) for runtime usage and viewing releases.
 - **reviewdog** (`.github/workflows/reviewdog.yml`): Inline PR comments for clippy and rustfmt.
 - **Security scanning**:
   - CodeQL (`.github/workflows/codeql.yml`)

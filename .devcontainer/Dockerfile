@@ -1,13 +1,5 @@
 FROM rust:1.97.1-slim-bookworm
 
-# OpenSSL headers are only needed when the optional `sentry` feature is enabled.
-# pkg-config is used by `openssl-sys` to locate the system SSL library.
-# hadolint ignore=DL3008
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    libssl-dev \
-    pkg-config \
-    && rm -rf /var/lib/apt/lists/*
-
 # Add components used by CI, local review, and the dev container post-create step.
 RUN rustup component add rustfmt clippy llvm-tools-preview
 

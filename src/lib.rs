@@ -19,7 +19,6 @@
 //!
 //! - Topology-neutral, dynamically sized `SpikingNetwork`
 //! - Neuromodulators: dopamine, serotonin, acetylcholine, norepinephrine
-//! - Optional `sentry` feature (off by default) for application-level reporting
 //!
 //! ```rust
 //! use neuromod::{NeuroModulators, SpikingNetwork};

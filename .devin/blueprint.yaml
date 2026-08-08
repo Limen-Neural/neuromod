@@ -3,10 +3,6 @@
 # Commands run from the repo root.
 
 initialize: |
-  # System dependencies required by openssl-sys when the `sentry` feature is enabled.
-  sudo apt-get update && sudo apt-get install -y --no-install-recommends pkg-config libssl-dev
-  sudo rm -rf /var/lib/apt/lists/*
-
   # Pin and activate the Rust toolchain used by rust-toolchain.toml and CI.
   rustup toolchain install 1.97.1
   rustup default 1.97.1

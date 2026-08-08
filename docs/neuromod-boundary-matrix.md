@@ -38,7 +38,6 @@ It is a pure computation library: no I/O, no hardware, no application orchestrat
 
 - `serde` (with derive) — for serialization of core types
 - `rand` — for stochastic elements inside neuron models
-- `sentry` (optional, feature-gated) — error monitoring only (intentional exception to the no-I/O rule)
 - Minimal std + the above; keep the crate lightweight and portable
 
 ## Forbidden Dependencies / Domains

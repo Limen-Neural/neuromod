@@ -20,7 +20,7 @@ cargo clippy --all-targets --all-features -- -D warnings
 # Build
 cargo build --all-features
 
-# Tests (unit + sentry integration + doctests)
+# Tests (unit + doctests)
 cargo test --all-features
 ```
 
@@ -78,15 +78,11 @@ cargo run --example basic_lif
 cargo run --example hebbian_learning
 cargo run --example rstdp_demo
 
-# Optional sentry example (no DSN needed for compilation smoke)
-cargo run --example sentry --features sentry
-
 # Release-mode smoke
 cargo run --example basic --release
 cargo run --example basic_lif --release
 cargo run --example hebbian_learning --release
 cargo run --example rstdp_demo --release
-cargo run --example sentry --release --features sentry
 ```
 
 ## Benchmarks smoke
@@ -172,7 +168,7 @@ git ls-files .idea .kilo .kilocode .mimocode  # must print nothing
 - `cargo fmt --check` is silent and exits 0
 - `cargo clippy --all-targets --all-features -- -D warnings` reports zero warnings
 - `cargo build --all-features` succeeds
-- `cargo test --all-features` reports all unit tests (48), sentry integration tests (16), and doctests (1) passing
+- `cargo test --all-features` reports all unit tests and doctests passing
 - Examples run without panic
 - `cargo doc` domain-agnostic grep finds no forbidden terms in `target/doc/neuromod/`
 - Docker builder image compiles and tests pass

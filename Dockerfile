@@ -3,9 +3,6 @@
 FROM rust:1.97.1-slim-bookworm AS builder
 WORKDIR /app
 COPY . .
-# hadolint ignore=DL3008
-RUN apt-get update && apt-get install -y --no-install-recommends pkg-config libssl-dev \
-    && rm -rf /var/lib/apt/lists/*
 RUN cargo build --release --examples && \
     mkdir -p /out && \
     find target/release/examples/ -maxdepth 1 -type f -executable -exec cp {} /out/ \;

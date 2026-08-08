@@ -20,12 +20,12 @@ Ownership rules: [docs/neuromod-boundary-matrix.md](docs/neuromod-boundary-matri
 
 ```bash
 # Build
-cargo build                    # default (no optional features)
-cargo build --all-features     # includes `sentry`
+cargo build
+cargo build --all-features
 
 # Test (unit + doctests; crate-level example in src/lib.rs runs as a doctest)
 cargo test
-cargo test --all-features      # also runs tests/sentry_integration.rs (16 tests)
+cargo test --all-features
 
 # Single test
 cargo test <test_name>
@@ -49,7 +49,6 @@ cargo run --example basic
 cargo run --example basic_lif
 cargo run --example hebbian_learning
 cargo run --example rstdp_demo
-SENTRY_DSN=https://...@... cargo run --example sentry --features sentry
 ```
 
 Before pushing changes that touch `src/`, `benches/`, `examples/`, `tests/`, or `Cargo.toml`, run the full gate in [REVIEW.md](REVIEW.md). That gate covers fmt, clippy, build, test, examples smoke, docs domain-hygiene grep, and public-API regression greps.
@@ -105,6 +104,6 @@ Only `LifNeuron` and `IzhikevichNeuron` are wired into `SpikingNetwork`. The oth
 
 `SpikingNetwork` and its neuron banks derive `Serialize`/`Deserialize` (serde) for checkpointing. Fields added after the initial release use `#[serde(default)]` (for example `LifNeuron::weights`, `base_threshold`, `last_spike_time`) so older serialized states still load.
 
-### Optional `sentry` feature
+### Observability
 
-Off by default (`features = []`). When enabled, adds error/panic reporting (`sentry` crate, rustls transport). See the [examples/sentry.rs](examples/sentry.rs) example and [tests/sentry_integration.rs](tests/sentry_integration.rs) integration tests. Requires `pkg-config`/`libssl-dev` system deps only when building with this feature.
+This crate does not ship a `sentry` feature. Downstream binaries that want Sentry should depend on the `sentry` crate directly and initialize it in the application.

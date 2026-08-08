@@ -246,18 +246,10 @@ fn sentry_feature_empty_dsn_uses_fallback_path() {
 // Cargo.toml feature definition: default features must NOT include sentry
 // ---------------------------------------------------------------------------
 
-/// The `default` feature set must not include `sentry`.
-/// We verify this by asserting sentry types are not in scope without the flag.
-/// (If sentry were in `default`, the `#[cfg(not(feature = "sentry"))]` branch
-/// in examples/sentry.rs would never compile on a normal `cargo build`.)
+/// Compiles only when `sentry` is off (default build path).
 #[cfg(not(feature = "sentry"))]
 #[test]
 fn sentry_is_not_a_default_feature() {
-    // This test compiles only when sentry is absent. Running `cargo test`
-    // (without --features sentry) exercises this path, proving the default
-    // feature set does not pull in sentry.
-    //
-    // We also assert the neuromod crate still exposes its full public API.
     assert!(std::mem::size_of::<SpikingNetwork>() > 0);
     assert!(std::mem::size_of::<NeuroModulators>() > 0);
 }

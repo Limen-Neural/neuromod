@@ -219,7 +219,7 @@ To enable Sentry at runtime, use the optional `sentry` feature:
 
 ```toml
 [dependencies]
-neuromod = { version = "0.5.0", features = ["sentry"] }
+neuromod = { version = "0.5.1", features = ["sentry"] }
 ```
 
 ```bash

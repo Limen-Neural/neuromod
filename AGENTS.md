@@ -28,6 +28,8 @@ Part of the [Limen-Neural](https://github.com/Limen-Neural) ecosystem. See [docs
 | `tests/sentry_integration.rs` | Integration tests for the optional `sentry` feature |
 | `docs/` | Architecture docs: boundary matrix, org modularization index, Architecture Decision Records (ADRs) |
 | [rust-toolchain.toml](rust-toolchain.toml) | Pinned Rust toolchain (1.97.1) |
+
+**Docs source of truth:** rustdoc (`src/`) + `README.md` + `docs/`. GitHub Wiki is optional narrative. Do not commit `.cubic/` (gitignored; cubic may regenerate wiki locally).
 | `.devcontainer/` | VS Code dev container configuration |
 | `AGENTS.md` | Agent instructions (this file) |
 | `.github/workflows/` | CI/CD pipelines |

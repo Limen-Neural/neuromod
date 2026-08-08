@@ -44,3 +44,6 @@ remotes.txt
 # Negations: Force-commit the good stuff
 !.devin/blueprint.yaml
 !.kilocodeignore
+
+# cubic AI wiki (regenerated locally; not SoT — use rustdoc/README/docs/ + GH Wiki)
+.cubic/

@@ -30,6 +30,13 @@ All notable changes to this project are documented in this file.
 - Explicit `[profile.bench]` inherits `release` so Criterion runs with the same LTO/codegen settings.
 - Dropped unused direct `serde_json` dependency (serialization uses `serde` derives only).
 
+## [0.5.1] - 2026-08-04
+
+- `src/hodgkin_huxley.rs`: stripped verbose AI-generated commentary and consolidated repeated RK4/gating calculations.
+- `src/lif.rs`: shortened Poisson-spike generation comment.
+- `tests/sentry_integration.rs`: trimmed redundant feature-gate prose.
+- Fixed `HodgkinHuxleyNeuron::derivatives` to shift the membrane potential back to the HH relative convention before evaluating α/β gating rates for cortical (mammalian) parameterizations, matching the shift already used by `steady_state_gating_mammalian` and `reset`.
+
 ## [0.5.0] - 2026-06-20
 
 ### Added

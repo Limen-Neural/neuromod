@@ -4,6 +4,26 @@
 //! [`SpikingNetwork`] engine (LIF + Izhikevich banks), generic neuromodulators,
 //! classical STDP helpers, and reward-modulated STDP types.
 //!
+//! Aimed at **SNN / neuroscience readers learning Rust**: equations and
+//! engine contracts first; idiomatic APIs second.
+//!
+//! ## Requirements
+//!
+//! - **Rust 1.97.1+** (MSRV; also `rust-version` in `Cargo.toml` and
+//!   [`rust-toolchain.toml`](https://github.com/Limen-Neural/neuromod/blob/main/rust-toolchain.toml)).
+//! - Edition **2024**.
+//!
+//! ## Syllabus (reading order on docs.rs)
+//!
+//! 1. This page — engine vs standalone honesty and a quick start.
+//! 2. [`engine`] — [`SpikingNetwork`] and the per-tick [`SpikingNetwork::step`] contract.
+//! 3. [`lif`] / [`izhikevich`] — the two banks the engine actually wires.
+//! 4. [`modulators`] — dopamine / serotonin / acetylcholine / norepinephrine.
+//! 5. [`rm_stdp`] / [`hebbian`] — plasticity building blocks (eligibility traces are
+//!    **not** yet consumed by the live engine path; see those modules).
+//! 6. Standalone models ([`lapicque`], [`gif`], [`fitzhugh_nagumo`], [`hodgkin_huxley`])
+//!    for research use outside the engine.
+//!
 //! ## Engine vs standalone models
 //!
 //! - **`SpikingNetwork`** wires **LIF** and **Izhikevich** neuron banks only
@@ -12,8 +32,8 @@
 //!   `HodgkinHuxleyNeuron`, …) are usable on their own; they are not alternate
 //!   engine banks.
 //! - Plasticity: classical Hebbian STDP utilities plus `EligibilityTrace` /
-//!   `RmStdpConfig` building blocks (see crate docs and examples for current
-//!   integration status).
+//!   `RmStdpConfig` building blocks. Live `step` learning is dopamine-gated and
+//!   updates LIF weights **directly** (not via eligibility conversion).
 //!
 //! ## Features
 //!

@@ -1,3 +1,16 @@
+//! # Neuromodulators and domain-agnostic reward hooks
+//!
+//! Four scalar modulators (dopamine, serotonin, acetylcholine, norepinephrine)
+//! with exponential decay and helpers. [`NeuroModulators`] is the snapshot
+//! passed into [`crate::SpikingNetwork::step`] each tick.
+//!
+//! [`SignalProfile`] maps unitless external signals into those levels.
+//! [`GenericReward`] / [`UnitReward`] let downstream crates shape rewards without
+//! hard-coding domain logic in this crate.
+//!
+//! [`apply_neuromodulation`] tweaks weight/threshold slices without owning a
+//! full network — useful for tests and simple pipelines.
+
 use serde::{Deserialize, Serialize};
 
 const DOPAMINE_DECAY: f32 = 0.95;

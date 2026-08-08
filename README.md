@@ -39,6 +39,16 @@ These types ship in the crate for research and composition, but are **not** wire
 
 Use them directly; use `HebbianIzhikevichNetwork` for a small classical-STDP Izhikevich helper separate from `SpikingNetwork`.
 
+## Requirements
+
+| | |
+|--|--|
+| **MSRV** | **Rust 1.97.1** (`rust-version` in `Cargo.toml`) |
+| **Edition** | 2024 |
+| **Pin** | [`rust-toolchain.toml`](rust-toolchain.toml) (channel `1.97.1`) |
+
+CI installs the same toolchain. Keep `Cargo.toml` `rust-version`, `rust-toolchain.toml`, and the version string in `.github/workflows/ci.yml` identical (the CI job fails if they drift).
+
 ## Installation
 
 ```toml

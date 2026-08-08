@@ -23,6 +23,20 @@ jobs:
           toolchain: 1.97.1
           components: clippy, rustfmt
 
+      # Keep Cargo.toml rust-version, rust-toolchain.toml, and this job's
+      # toolchain: string identical (MSRV single source of truth — #79).
+      - name: Verify MSRV pins agree
+        run: |
+          set -euo pipefail
+          cargo_rv=$(grep -m1 '^rust-version' Cargo.toml | sed -E 's/.*"([^"]+)".*/\1/')
+          toolchain_ch=$(grep -m1 '^channel' rust-toolchain.toml | sed -E 's/.*"([^"]+)".*/\1/')
+          ci_rv='1.97.1'
+          echo "Cargo.toml rust-version=$cargo_rv"
+          echo "rust-toolchain.toml channel=$toolchain_ch"
+          echo "ci.yml pin=$ci_rv"
+          test "$cargo_rv" = "$toolchain_ch"
+          test "$cargo_rv" = "$ci_rv"
+
       - name: Rust Cache
         uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
 

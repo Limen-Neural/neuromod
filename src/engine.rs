@@ -1,3 +1,22 @@
+//! # Engine — LIF + Izhikevich `SpikingNetwork`
+//!
+//! Topology-neutral simulation core. One network owns:
+//!
+//! - a **LIF** bank (`neurons`) driven by multi-channel stimuli and STDP,
+//! - an **Izhikevich** bank (`iz_neurons`) driven from mean LIF membrane potential
+//!   + dopamine (not a second full STDP pipeline),
+//! - a [`NeuroModulators`] snapshot updated each step.
+//!
+//! Construction is blank weights / no domain topology:
+//! [`SpikingNetwork::new`] (16 / 5 / 16) or [`SpikingNetwork::with_dimensions`].
+//!
+//! For classical Hebbian STDP on a small Izhikevich network, see
+//! [`crate::hebbian`] — that path is separate from this engine.
+//!
+//! Plasticity honesty: live reward-modulated updates run inside `step` via
+//! `apply_stdp` (dopamine-gated). [`crate::EligibilityTrace`] is a building
+//! block and is **not** consumed by the engine yet (see [`crate::rm_stdp`]).
+
 use rand::RngExt;
 use serde::{Deserialize, Serialize};
 
@@ -9,12 +28,17 @@ use super::rm_stdp::*;
 /// L1 synaptic weight budget per neuron (total weight sum target).
 const WEIGHT_BUDGET: f32 = 2.0;
 
+/// Errors from [`SpikingNetwork::step`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum StepError {
+    /// `stimuli.len()` did not match the network's `num_channels`.
     InputLenMismatch { expected: usize, got: usize },
 }
 
-/// Core network type integrating LIF and Izhikevich neurons.
+/// Topology-neutral network: LIF bank + Izhikevich bank + neuromodulators.
+///
+/// Only these two neuron types are wired here. Other models in the crate are
+/// standalone (see crate root docs).
 #[derive(Serialize, Deserialize)]
 pub struct SpikingNetwork {
     /// Bank 1: LIF neurons.
@@ -61,7 +85,45 @@ impl SpikingNetwork {
         }
     }
 
-    /// Step the network with input stimuli and modulators.
+    /// Advance the network by one discrete time step.
+    ///
+    /// # Contract
+    ///
+    /// - `stimuli.len()` must equal [`Self::num_channels`], else
+    ///   [`StepError::InputLenMismatch`].
+    /// - Returns the indices of **LIF** neurons that fired this step (Izhikevich
+    ///   spikes are not listed in the return value).
+    ///
+    /// # Order of work
+    ///
+    /// 1. Store `modulators` and derive stress / learning rates.
+    /// 2. Soft-update LIF `decay_rate` and `threshold` from neuromodulators.
+    /// 3. Update per-channel predictive EMA and surprise (`pred_errors`).
+    /// 4. Stochastically stamp `input_spike_times` (Poisson-style from |stimuli|).
+    /// 5. Integrate each LIF neuron (weighted stimuli + surprise), then `check_fire`.
+    /// 6. Lateral inhibition on non-firing LIF cells if anyone spiked.
+    /// 7. Dopamine-gated STDP on LIF weights (`apply_stdp`); skipped if learning
+    ///    rate ≈ 0. Weights are **not** updated via [`crate::EligibilityTrace`].
+    /// 8. Renormalize LIF weights to an L1 budget and clamp to R-STDP bounds.
+    /// 9. Drive each Izhikevich neuron from mean LIF membrane potential + dopamine.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use neuromod::{NeuroModulators, SpikingNetwork, StepError};
+    ///
+    /// let mut net = SpikingNetwork::with_dimensions(8, 2, 4);
+    /// let modulators = NeuroModulators::default();
+    ///
+    /// // Wrong length → structured error
+    /// assert!(matches!(
+    ///     net.step(&[0.1, 0.2], &modulators),
+    ///     Err(StepError::InputLenMismatch { expected: 4, got: 2 })
+    /// ));
+    ///
+    /// let spikes = net.step(&[0.5; 4], &modulators).expect("length matches");
+    /// assert!(spikes.iter().all(|&i| i < 8));
+    /// ```
     pub fn step(
         &mut self,
         stimuli: &[f32],

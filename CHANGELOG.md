@@ -4,8 +4,31 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+## [0.5.1] - 2026-08-08
+
+### Changed
+
+- **Docs / packaging honesty:** honest crates.io `description` (no unsubstantiated “high-performance”); README badges and dual-license presentation; crate and README docs state that `SpikingNetwork` wires **LIF + Izhikevich** only, with other models available as standalone types (#66, #67, #69, #70).
+- `src/hodgkin_huxley.rs`: stripped verbose AI-generated commentary and consolidated repeated RK4/gating calculations.
+- `src/lif.rs`: shortened Poisson-spike generation comment.
+- `tests/sentry_integration.rs`: trimmed redundant feature-gate prose.
+
+### Fixed
+
+- Fixed `HodgkinHuxleyNeuron::derivatives` to shift the membrane potential back to the HH relative convention before evaluating α/β gating rates for cortical (mammalian) parameterizations, matching the shift already used by `steady_state_gating_mammalian` and `reset`.
+
+## [0.5.0] - 2026-07-30
+
+Published to [crates.io](https://crates.io/crates/neuromod/0.5.0).
+
 ### Added
 
+- **Generic neuromodulator API** — `NeuroModulators` now exposes `dopamine`, `serotonin`, `acetylcholine`, and `norepinephrine`
+- **`SignalProfile`** — configurable mapping from external signals to modulator levels (neutral defaults; optional `hardware_calibrated()` for legacy callers)
+- **`GenericReward` trait** and **`Observation`** — domain-agnostic reward shaping interface for downstream crates
+- **`UnitReward`** — simple mean-signal reward implementation for tests and demos
+- **`apply_neuromodulation`** — standalone function to apply modulator effects to weight and threshold slices
+- **GitHub Actions CI** — `fmt`, `clippy`, `build`, and `test` on push/PR to `main`
 - Documentation for org modularization program:
   - `docs/org-modularization.md` (standards, workstream index for #35–#43, git/build/beads rules, audit commands)
   - `docs/adr/001-traits-in-neuromod.md` (records decision to host shared traits in neuromod)
@@ -18,7 +41,7 @@ All notable changes to this project are documented in this file.
 
 - **Benchmarks:** all four `[[bench]]` targets (`neuron_bench`, `stdp_bench`, `memory_bench`, `modulation_bench`) had `harness = true` in `Cargo.toml`, which left Cargo's default libtest harness attached instead of Criterion's runner — `cargo bench` silently reported `running 0 tests` instead of executing any benchmark. Fixed to `harness = false`.
 - Removed first-person development-log commentary from `src/rm_stdp.rs` doc comments that leaked into `cargo doc`/docs.rs output.
-- **Sentry example:** dropped the info-level `capture_message` probe (issue noise) and set `environment` from `SENTRY_ENVIRONMENT` (default `development`).
+- **Sentry example:** dropped the info-level `capture_message` probe (issue noise) and set `environment` from `SENTRY_ENVIRONMENT` (default `development`); non_exhaustive `ClientOptions` builder update for sentry 0.49.
 - **PoissonEncoder:** full-intensity (probability 1.0) and zero-intensity paths no longer depend on floating-point RNG bounds (avoids flaky all-ones encoding).
 - **`.gitignore`:** restructured AI-tool ignores so selected `.kilo` / `.mimocode` / `.devin` paths can be force-committed.
 
@@ -29,27 +52,6 @@ All notable changes to this project are documented in this file.
 - Added `homepage` and `documentation` fields to `Cargo.toml` for crates.io/docs.rs metadata.
 - Explicit `[profile.bench]` inherits `release` so Criterion runs with the same LTO/codegen settings.
 - Dropped unused direct `serde_json` dependency (serialization uses `serde` derives only).
-
-## [0.5.1] - 2026-08-04
-
-- `src/hodgkin_huxley.rs`: stripped verbose AI-generated commentary and consolidated repeated RK4/gating calculations.
-- `src/lif.rs`: shortened Poisson-spike generation comment.
-- `tests/sentry_integration.rs`: trimmed redundant feature-gate prose.
-- Fixed `HodgkinHuxleyNeuron::derivatives` to shift the membrane potential back to the HH relative convention before evaluating α/β gating rates for cortical (mammalian) parameterizations, matching the shift already used by `steady_state_gating_mammalian` and `reset`.
-
-## [0.5.0] - 2026-06-20
-
-### Added
-
-- **Generic neuromodulator API** — `NeuroModulators` now exposes `dopamine`, `serotonin`, `acetylcholine`, and `norepinephrine`
-- **`SignalProfile`** — configurable mapping from external signals to modulator levels (neutral defaults; optional `hardware_calibrated()` for legacy callers)
-- **`GenericReward` trait** and **`Observation`** — domain-agnostic reward shaping interface for downstream crates
-- **`UnitReward`** — simple mean-signal reward implementation for tests and demos
-- **`apply_neuromodulation`** — standalone function to apply modulator effects to weight and threshold slices
-- **GitHub Actions CI** — `fmt`, `clippy`, `build`, and `test` on push/PR to `main`
-
-### Changed
-
 - **Breaking:** removed `cortisol`, `tempo`, and `aux_dopamine` fields from `NeuroModulators`
 - **Breaking:** `from_signals` now requires a `&SignalProfile` as its first argument
 - **Breaking:** `add_stress` renamed to `add_norepinephrine`; `is_stressed` renamed to `is_aroused`

@@ -1,8 +1,13 @@
 # neuromod
 
-A generalized Rust library for spiking neural networks (SNNs), centered on biologically grounded neuron models, neuromodulation, and plasticity.
+[![Crates.io](https://img.shields.io/crates/v/neuromod.svg)](https://crates.io/crates/neuromod)
+[![docs.rs](https://docs.rs/neuromod/badge.svg)](https://docs.rs/neuromod)
+[![License](https://img.shields.io/crates/l/neuromod.svg)](https://github.com/Limen-Neural/neuromod#license)
+[![codecov](https://codecov.io/gh/Limen-Neural/neuromod/branch/main/graph/badge.svg)](https://codecov.io/gh/Limen-Neural/neuromod)
 
-`neuromod` is designed to be a reusable core: topology-neutral at initialization, dynamically sizable at runtime, and strict about input shape validation.
+Biologically grounded spiking neural network (SNN) primitives in Rust: a topology-neutral `SpikingNetwork` engine, generic neuromodulators, STDP building blocks, and standalone neuron models.
+
+`neuromod` is a reusable core library: topology-neutral at initialization, dynamically sizable at runtime, and strict about input shape validation. Dual-licensed MIT OR Apache-2.0.
 
 ## Highlights
 
@@ -12,14 +17,27 @@ A generalized Rust library for spiking neural networks (SNNs), centered on biolo
 - Neutral initialization (blank synaptic weights; no hardcoded domain topology)
 - Generic neuromodulators: dopamine, serotonin, acetylcholine, norepinephrine
 - `GenericReward` trait for domain-specific reward shaping in downstream crates
-- Canonical neuron models included:
-  - Lapicque
-  - LIF
-  - GIF (Generalized Integrate-and-Fire)
-  - Izhikevich
-  - FitzHugh-Nagumo
-  - Hodgkin-Huxley
-- Classical Hebbian STDP utilities and reward-modulated learning components
+- Classical Hebbian STDP utilities and reward-modulated STDP types (`EligibilityTrace`, `RmStdpConfig`)
+
+### Engine (`SpikingNetwork`)
+
+The network engine integrates **two** neuron banks only:
+
+- **LIF** (`LifNeuron`) — primary bank sized by `num_lif`
+- **Izhikevich** (`IzhikevichNeuron`) — secondary bank sized by `num_izh`
+
+Default construction: 16 LIF, 5 Izhikevich, 16 input channels.
+
+### Standalone neuron models
+
+These types ship in the crate for research and composition, but are **not** wired as alternate banks inside `SpikingNetwork`:
+
+- Lapicque (`LapicqueNeuron`)
+- GIF — Generalized Integrate-and-Fire (`GifNeuron`)
+- FitzHugh–Nagumo (`FitzHughNagumoNeuron`)
+- Hodgkin–Huxley (`HodgkinHuxleyNeuron`)
+
+Use them directly; use `HebbianIzhikevichNetwork` for a small classical-STDP Izhikevich helper separate from `SpikingNetwork`.
 
 ## Installation
 
@@ -27,6 +45,8 @@ A generalized Rust library for spiking neural networks (SNNs), centered on biolo
 [dependencies]
 neuromod = "0.5.1"
 ```
+
+Links: [crates.io](https://crates.io/crates/neuromod) · [docs.rs](https://docs.rs/neuromod) · [repository](https://github.com/Limen-Neural/neuromod)
 
 ## Quick Start
 
@@ -117,19 +137,13 @@ For legacy hardware-calibrated signal mapping, use `SignalProfile::hardware_cali
 
 ## Included Components
 
-- `SpikingNetwork`, `StepError`
-- `NeuroModulators`, `SignalProfile`, `Observation`, `GenericReward`, `UnitReward`
-- `apply_neuromodulation`
-- Neuron models:
-  - `LifNeuron`
-  - `GifNeuron`
-  - `IzhikevichNeuron`
-  - `LapicqueNeuron`
-  - `FitzHughNagumoNeuron`
-  - `HodgkinHuxleyNeuron`
+- Engine: `SpikingNetwork`, `StepError` (LIF + Izhikevich banks)
+- Neuromodulation: `NeuroModulators`, `SignalProfile`, `Observation`, `GenericReward`, `UnitReward`, `apply_neuromodulation`
+- Engine neuron types: `LifNeuron`, `IzhikevichNeuron`
+- Standalone neuron types: `GifNeuron`, `LapicqueNeuron`, `FitzHughNagumoNeuron`, `HodgkinHuxleyNeuron`
 - Learning/plasticity:
-  - `apply_classical_stdp`, `StdpParams`, `HebbianIzhikevichNetwork`
-  - `EligibilityTrace`, `RmStdpConfig`
+  - Classical: `apply_classical_stdp`, `StdpParams`, `HebbianIzhikevichNetwork`
+  - Reward-modulated building blocks: `EligibilityTrace`, `RmStdpConfig`
 
 ## Architecture & Boundaries
 
@@ -205,7 +219,7 @@ To enable Sentry at runtime, use the optional `sentry` feature:
 
 ```toml
 [dependencies]
-neuromod = { version = "0.5.0", features = ["sentry"] }
+neuromod = { version = "0.5.1", features = ["sentry"] }
 ```
 
 ```bash

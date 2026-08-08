@@ -1,14 +1,25 @@
-//! # Neuromod - Reward-Modulated Spiking Neural Networks
+//! # neuromod — Spiking neural network primitives
 //!
-//! A lightweight Rust crate for neuromorphic computing with reward-modulated
-//! spiking neural networks and generic neuromodulator control.
+//! Biologically grounded SNN building blocks for Rust: a topology-neutral
+//! [`SpikingNetwork`] engine (LIF + Izhikevich banks), generic neuromodulators,
+//! classical STDP helpers, and reward-modulated STDP types.
+//!
+//! ## Engine vs standalone models
+//!
+//! - **`SpikingNetwork`** wires **LIF** and **Izhikevich** neuron banks only
+//!   (`with_dimensions(num_lif, num_izh, num_channels)`).
+//! - **Standalone** types (`LapicqueNeuron`, `GifNeuron`, `FitzHughNagumoNeuron`,
+//!   `HodgkinHuxleyNeuron`, …) are usable on their own; they are not alternate
+//!   engine banks.
+//! - Plasticity: classical Hebbian STDP utilities plus `EligibilityTrace` /
+//!   `RmStdpConfig` building blocks (see crate docs and examples for current
+//!   integration status).
 //!
 //! ## Features
 //!
-//! - **LIF Neurons**: Fast, reactive leaky integrate-and-fire neurons
-//! - **Izhikevich Neurons**: Complex, adaptive neuron dynamics
-//! - **Reward STDP Learning**: Spike-timing-dependent plasticity with reward modulation
-//! - **Neuromodulators**: Dopamine, serotonin, acetylcholine, and norepinephrine
+//! - Topology-neutral, dynamically sized `SpikingNetwork`
+//! - Neuromodulators: dopamine, serotonin, acetylcholine, norepinephrine
+//! - Optional `sentry` feature (off by default) for application-level reporting
 //!
 //! ```rust
 //! use neuromod::{NeuroModulators, SpikingNetwork};

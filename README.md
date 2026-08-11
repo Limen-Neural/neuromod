@@ -46,8 +46,9 @@ Use them directly; use `HebbianIzhikevichNetwork` for a small classical-STDP Izh
 | **MSRV** | **Rust 1.97.1** (`rust-version` in `Cargo.toml`) |
 | **Edition** | 2024 |
 | **Pin** | [`rust-toolchain.toml`](rust-toolchain.toml) (channel `1.97.1`) |
+| **CI platforms** | **Linux**, **macOS**, and **Windows** (GitHub Actions matrix: `ubuntu-latest`, `macos-latest`, `windows-latest`) |
 
-CI installs the same toolchain. Keep `Cargo.toml` `rust-version`, `rust-toolchain.toml`, and the version string in `.github/workflows/ci.yml` identical (the CI job fails if they drift).
+CI installs the same toolchain on each OS. Keep `Cargo.toml` `rust-version`, `rust-toolchain.toml`, and the version string in `.github/workflows/ci.yml` identical (the CI job fails if they drift).
 
 ## Installation
 
@@ -233,7 +234,7 @@ at your option.
 
 This repository uses a comprehensive CI setup for speed, quality, security, and observability:
 
-- **Core CI** (`.github/workflows/ci.yml`): `fmt`, `clippy`, build, tests (via `cargo-nextest`), feature-matrix testing (`cargo-hack`), domain-agnostic docs check. Uses `Swatinem/rust-cache` and `dorny/paths-filter` to keep most PR feedback fast.
+- **Core CI** (`.github/workflows/ci.yml`): matrix over **Linux / macOS / Windows** (`ubuntu-latest`, `macos-latest`, `windows-latest`). On every OS: MSRV toolchain, `clippy`, build, and tests (via `cargo-nextest`). On Linux only: `fmt`, feature-matrix testing (`cargo-hack`), and domain-agnostic docs check. Uses `Swatinem/rust-cache` and `dorny/paths-filter` to keep most PR feedback fast.
 - **Qodana** (`.github/workflows/qodana_code_quality.yml`): JetBrains code-quality scans on every PR/push to `main` and `releases/*`; results are published to Qodana Cloud.
 - **Codecov** (`.github/workflows/coverage.yml`): `cargo-llvm-cov` + Test Analytics (stable JUnit via pinned nextest). See [Observability](#observability) for local usage and report links.
 - **reviewdog** (`.github/workflows/reviewdog.yml`): Inline PR comments for clippy and rustfmt.

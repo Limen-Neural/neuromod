@@ -12,6 +12,7 @@
 //! - **Rust 1.97.1+** (MSRV; also `rust-version` in `Cargo.toml` and
 //!   [`rust-toolchain.toml`](https://github.com/Limen-Neural/neuromod/blob/main/rust-toolchain.toml)).
 //! - Edition **2024**.
+//! - **CI-tested platforms:** Linux, macOS, and Windows (GitHub Actions matrix).
 //!
 //! ## Syllabus (reading order on docs.rs)
 //!

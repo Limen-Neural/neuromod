@@ -234,7 +234,7 @@ at your option.
 
 This repository uses a comprehensive CI setup for speed, quality, security, and observability:
 
-- **Core CI** (`.github/workflows/ci.yml`): matrix over **Linux / macOS / Windows** (`ubuntu-latest`, `macos-latest`, `windows-latest`). On every OS: MSRV toolchain, `clippy`, build, and tests (via `cargo-nextest`). On Linux only: `fmt`, feature-matrix testing (`cargo-hack`), and domain-agnostic docs check. Uses `Swatinem/rust-cache` and `dorny/paths-filter` to keep most PR feedback fast.
+- **Core CI** (`.github/workflows/ci.yml`): matrix over **Linux / macOS / Windows** (`ubuntu-latest`, `macos-latest`, `windows-latest`). On every OS: MSRV toolchain, `clippy`, and build. When `dorny/paths-filter` detects rust-relevant path changes (`src/`, `tests/`, `examples/`, `benches/`, `Cargo.toml` / `Cargo.lock`): tests via `cargo-nextest` on every OS, and feature-matrix testing (`cargo-hack`) on Linux only. Always on Linux: `fmt` and domain-agnostic docs check. Uses `Swatinem/rust-cache` for faster feedback.
 - **Qodana** (`.github/workflows/qodana_code_quality.yml`): JetBrains code-quality scans on every PR/push to `main` and `releases/*`; results are published to Qodana Cloud.
 - **Codecov** (`.github/workflows/coverage.yml`): `cargo-llvm-cov` + Test Analytics (stable JUnit via pinned nextest). See [Observability](#observability) for local usage and report links.
 - **reviewdog** (`.github/workflows/reviewdog.yml`): Inline PR comments for clippy and rustfmt.

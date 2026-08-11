@@ -97,7 +97,8 @@ impl SpikingNetwork {
     /// # Order of work
     ///
     /// 1. Store `modulators` and derive stress / learning rates.
-    /// 2. Soft-update LIF `decay_rate` and `threshold` from neuromodulators.
+    /// 2. Recompute LIF targets from neuromodulators: assign `decay_rate`
+    ///    directly; soft-update `threshold` toward its target (learning-rate blend).
     /// 3. Update per-channel predictive EMA and surprise (`pred_errors`).
     /// 4. Stochastically stamp `input_spike_times` (Poisson-style from |stimuli|).
     /// 5. Integrate each LIF neuron (weighted stimuli + surprise), then `check_fire`.

@@ -8,6 +8,10 @@ Run these commands before claiming a PR is ready, especially when touching `src/
 - After resolving merges with `main`
 - Before requesting review or merge
 
+## MSRV pin rule
+
+`Cargo.toml` `rust-version`, `rust-toolchain.toml` `channel`, and the toolchain string in `.github/workflows/ci.yml` must stay **identical**. CI enforces this; do not bump one without the others.
+
 ## Mandatory commands
 
 ```bash

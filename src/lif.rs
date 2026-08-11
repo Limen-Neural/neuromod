@@ -1,3 +1,18 @@
+//! # Leaky integrate-and-fire (LIF) neurons
+//!
+//! Primary bank of [`crate::SpikingNetwork`]: each [`LifNeuron`] has a membrane
+//! potential, threshold, decay, and a vector of synaptic weights (one per input
+//! channel). The engine integrates, fires, applies lateral inhibition, and
+//! runs dopamine-gated STDP on these weights.
+//!
+//! [`PoissonEncoder`] is a small helper that turns a scalar intensity into a
+//! binary spike train (Bernoulli trials). It is **not** required by
+//! `SpikingNetwork::step` (the engine encodes stimuli itself), but is useful in
+//! demos and tests.
+//!
+//! For the classical Lapicque root model, see [`crate::lapicque`]. For the
+//! secondary engine bank, see [`crate::izhikevich`].
+
 use rand::RngExt;
 use serde::{Deserialize, Serialize};
 

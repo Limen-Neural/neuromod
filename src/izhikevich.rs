@@ -1,3 +1,13 @@
+//! # Izhikevich neurons
+//!
+//! Secondary bank of [`crate::SpikingNetwork`]. Each tick the engine computes a
+//! scalar drive from **mean LIF membrane potential** and **dopamine**, then
+//! calls [`IzhikevichNeuron::step`] on every unit. This path does **not** run
+//! the LIF STDP / multi-channel weight machinery.
+//!
+//! For classical (unmodulated) Hebbian STDP among Izhikevich cells, use
+//! [`crate::hebbian`] (`HebbianIzhikevichNetwork`) — separate from the engine.
+
 use serde::{Deserialize, Serialize};
 
 /// Biologically plausible neuron model by Eugene M. Izhikevich (2003).

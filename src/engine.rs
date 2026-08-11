@@ -100,7 +100,9 @@ impl SpikingNetwork {
     /// 2. Recompute LIF targets from neuromodulators: assign `decay_rate`
     ///    directly; soft-update `threshold` toward its target (learning-rate blend).
     /// 3. Update per-channel predictive EMA and surprise (`pred_errors`).
-    /// 4. Stochastically stamp `input_spike_times` (Poisson-style from |stimuli|).
+    /// 4. For each channel with `|stimuli| > 0.01`, run a Bernoulli trial
+    ///    with probability `clamp(|stimuli|, 0.0, 1.0)` and stamp
+    ///    `input_spike_times` on success.
     /// 5. Integrate each LIF neuron (weighted stimuli + surprise), then `check_fire`.
     /// 6. Lateral inhibition on non-firing LIF cells if anyone spiked.
     /// 7. Dopamine-gated STDP on LIF weights (`apply_stdp`); skipped if learning

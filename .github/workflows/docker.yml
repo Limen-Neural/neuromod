@@ -1,6 +1,9 @@
 # Docker build + push (Docker Hub + GitHub Container Registry)
 # Third-party Actions are pinned to immutable commit SHAs (Aikido supply-chain policy).
 # Uses local Docker Buildx (no Build Cloud dependency).
+#
+# PR: verify build + load runtime image + run tests in builder stage (contents: read only).
+# main push: publish to Docker Hub + GHCR (packages: write only on that job).
 name: Docker Build & Push
 
 on:
@@ -10,14 +13,17 @@ on:
     branches: [main]
     types: [opened, synchronize, reopened]
 
-# GHCR push needs packages:write; checkout only needs contents:read.
 permissions:
   contents: read
-  packages: write
 
 jobs:
-  docker:
+  # Pull requests / any event: build & smoke-verify without package write.
+  docker-verify:
+    name: docker verify
     runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    permissions:
+      contents: read
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -26,15 +32,73 @@ jobs:
 
       - name: Log in to Docker Hub
         # Dependabot PRs lack secrets; same-repo human PRs keep authenticated pulls.
-        if: github.event_name != 'pull_request' || (github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.user.login != 'dependabot[bot]')
+        if: github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.user.login != 'dependabot[bot]'
         uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
         with:
           username: ${{ vars.DOCKER_USER }}
           password: ${{ secrets.DOCKER_PAT }}
 
-      # Only push to GHCR from main (creates org package under Limen-Neural).
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
+
+      - name: Set image tags
+        id: image
+        run: |
+          set -euo pipefail
+          SHA="${{ github.sha }}"
+          echo "tags=neuromod:pr-${SHA}" >> "$GITHUB_OUTPUT"
+          echo "verify_tag=neuromod:pr-${SHA}" >> "$GITHUB_OUTPUT"
+          echo "builder_tag=neuromod:builder-pr-${SHA}" >> "$GITHUB_OUTPUT"
+
+      - name: Build runtime image (load locally)
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        with:
+          context: .
+          push: false
+          load: true
+          tags: ${{ steps.image.outputs.tags }}
+
+      - name: Verify runtime image contains example binaries
+        run: |
+          set -euo pipefail
+          docker run --rm "${{ steps.image.outputs.verify_tag }}" ls /usr/local/bin/
+
+      - name: Build builder stage and run cargo tests
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        with:
+          context: .
+          push: false
+          load: true
+          target: builder
+          tags: ${{ steps.image.outputs.builder_tag }}
+
+      - name: cargo test --all-features in builder image
+        run: |
+          set -euo pipefail
+          docker run --rm "${{ steps.image.outputs.builder_tag }}" \
+            cargo test --all-features --quiet
+
+  # main only: dual-push to Docker Hub + GHCR.
+  docker-publish:
+    name: docker publish
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          username: ${{ vars.DOCKER_USER }}
+          password: ${{ secrets.DOCKER_PAT }}
+
       - name: Log in to GHCR
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
         with:
           registry: ghcr.io
@@ -49,34 +113,24 @@ jobs:
         run: |
           set -euo pipefail
           SHA="${{ github.sha }}"
-          if [ "${{ github.event_name }}" = "pull_request" ]; then
-            echo "tags=neuromod:pr-${SHA}" >> "$GITHUB_OUTPUT"
-            echo "verify_tag=neuromod:pr-${SHA}" >> "$GITHUB_OUTPUT"
-            echo "push=false" >> "$GITHUB_OUTPUT"
-          else
-            VER=$(grep -m1 '^version' Cargo.toml | sed -E 's/.*"([^"]+)".*/\1/')
-            HUB="${{ vars.DOCKER_USER }}/neuromod"
-            # GHCR owner must be lowercase
-            GHCR="ghcr.io/limen-neural/neuromod"
-            # Hub: commit SHA (existing convention) + version + latest
-            # GHCR: same so the package appears under github.com/orgs/Limen-Neural/packages
-            TAGS="${HUB}:${SHA},${HUB}:${VER},${HUB}:latest"
-            TAGS="${TAGS},${GHCR}:${SHA},${GHCR}:${VER},${GHCR}:latest"
-            echo "tags=${TAGS}" >> "$GITHUB_OUTPUT"
-            echo "verify_tag=${HUB}:${SHA}" >> "$GITHUB_OUTPUT"
-            echo "push=true" >> "$GITHUB_OUTPUT"
-            echo "crate_version=${VER}" >> "$GITHUB_OUTPUT"
+          VER=$(grep -m1 '^version' Cargo.toml | sed -E 's/.*"([^"]+)".*/\1/')
+          if [ -z "${VER}" ] || ! printf '%s' "${VER}" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+'; then
+            echo "::error::Failed to extract a semver from Cargo.toml (got: ${VER:-empty})"
+            exit 1
           fi
+          HUB="${{ vars.DOCKER_USER }}/neuromod"
+          # GHCR owner must be lowercase
+          GHCR="ghcr.io/limen-neural/neuromod"
+          # Hub: commit SHA (existing convention) + version + latest
+          # GHCR: same so the package appears under github.com/orgs/Limen-Neural/packages
+          TAGS="${HUB}:${SHA},${HUB}:${VER},${HUB}:latest"
+          TAGS="${TAGS},${GHCR}:${SHA},${GHCR}:${VER},${GHCR}:latest"
+          echo "tags=${TAGS}" >> "$GITHUB_OUTPUT"
+          echo "crate_version=${VER}" >> "$GITHUB_OUTPUT"
 
       - name: Build and push
         uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
         with:
           context: .
-          push: ${{ steps.image.outputs.push == 'true' }}
-          load: ${{ github.event_name == 'pull_request' }}
+          push: true
           tags: ${{ steps.image.outputs.tags }}
-
-      - name: Verify image builds example binary
-        if: github.event_name == 'pull_request'
-        run: |
-          docker run --rm "${{ steps.image.outputs.verify_tag }}" ls /usr/local/bin/

@@ -254,6 +254,7 @@ This repository uses a comprehensive CI setup for speed, quality, security, and 
   - **GitHub Container Registry:** `ghcr.io/limen-neural/neuromod` (same tags) — listed under [org packages](https://github.com/orgs/Limen-Neural/packages)
 
   Pull (examples only — prefer the crates.io library for embedding):
+
   ```bash
   docker pull ghcr.io/limen-neural/neuromod:0.5.2
   # or Docker Hub:
@@ -262,6 +263,7 @@ This repository uses a comprehensive CI setup for speed, quality, security, and 
   ```
 
   Local usage:
+
   ```bash
   # Runtime image (example binaries only — no cargo toolchain)
   docker build -t neuromod:runtime .

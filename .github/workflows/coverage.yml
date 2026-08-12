@@ -1,5 +1,9 @@
 # Codecov coverage workflow (separate from main CI per observability split).
 # Third-party Actions are pinned to immutable commit SHAs (Aikido supply-chain policy).
+#
+# Badge shows "unknown" until Codecov has an activated repo + successful upload.
+# Activate Limen-Neural/neuromod at https://app.codecov.io/gh/Limen-Neural/neuromod
+# and set repo secret CODECOV_TOKEN to the Codecov upload token for that repo.
 name: Codecov
 
 on:
@@ -52,14 +56,18 @@ jobs:
         uses: codecov/test-results-action@0fa95f0e1eeaafde2c782583b36b28ad0d8c77d3 # v1
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
-          fail_ci_if_error: false
+          files: junit.xml
+          # Fail loudly — silent 404s left the README badge on "unknown".
+          fail_ci_if_error: true
 
-      - name: Codecov
+      - name: Upload coverage to Codecov
+        if: ${{ !cancelled() }}
         uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v7.0.0
-        env:
-          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
         with:
+          token: ${{ secrets.CODECOV_TOKEN }}
           files: lcov.info
+          disable_search: true
           slug: Limen-Neural/neuromod
-          fail_ci_if_error: false
+          # Surface upload failures (e.g. inactive repo / wrong token).
+          fail_ci_if_error: true
           verbose: true

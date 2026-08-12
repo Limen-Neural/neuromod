@@ -3,7 +3,7 @@
 [![Crates.io](https://img.shields.io/crates/v/neuromod.svg)](https://crates.io/crates/neuromod)
 [![docs.rs](https://docs.rs/neuromod/badge.svg)](https://docs.rs/neuromod)
 [![License](https://img.shields.io/crates/l/neuromod.svg)](https://github.com/Limen-Neural/neuromod#license)
-[![codecov](https://codecov.io/gh/Limen-Neural/neuromod/branch/main/graph/badge.svg)](https://codecov.io/gh/Limen-Neural/neuromod)
+[![codecov](https://codecov.io/gh/Limen-Neural/neuromod/graph/badge.svg)](https://app.codecov.io/gh/Limen-Neural/neuromod)
 
 Biologically grounded spiking neural network (SNN) primitives in Rust: a topology-neutral `SpikingNetwork` engine, generic neuromodulators, STDP building blocks, and standalone neuron models.
 
@@ -203,10 +203,17 @@ cargo hack check --feature-powerset --exclude-no-default-features --keep-going
 
 ### Codecov
 
-[![codecov](https://codecov.io/gh/Limen-Neural/neuromod/branch/main/graph/badge.svg)](https://codecov.io/gh/Limen-Neural/neuromod)
+[![codecov](https://codecov.io/gh/Limen-Neural/neuromod/graph/badge.svg)](https://app.codecov.io/gh/Limen-Neural/neuromod)
 
 - Configuration: [`codecov.yml`](codecov.yml)
 - Workflow: [`.github/workflows/coverage.yml`](.github/workflows/coverage.yml)
+- Dashboard: [app.codecov.io/gh/Limen-Neural/neuromod](https://app.codecov.io/gh/Limen-Neural/neuromod)
+
+**Why the badge can show `unknown`:** Codecov has no coverage totals until the repo is **activated** under the `Limen-Neural` org and CI uploads succeed. Recent uploads returned `Repository not found` while the job still “passed” because failures were ignored. Fix:
+
+1. Open [Codecov → Limen-Neural/neuromod](https://app.codecov.io/gh/Limen-Neural/neuromod) and activate the repo (GitHub App install for the org if prompted).
+2. Copy the **repository upload token** into the GitHub Actions secret `CODECOV_TOKEN` for this repo (Settings → Secrets and variables → Actions).
+3. Re-run the **Codecov** workflow on `main` (or merge a PR). Uploads now fail the job if Codecov rejects them (`fail_ci_if_error: true`).
 
 Local coverage (also listed under [Development](#development)):
 
@@ -216,7 +223,6 @@ cargo llvm-cov --all-features --lcov --output-path lcov.info
 # HTML report: cargo llvm-cov --all-features --html
 ```
 
-- View the dashboard at [Codecov](https://codecov.io/gh/Limen-Neural/neuromod).
 - Open `target/llvm-cov/html/index.html` after running the HTML report locally.
 - CI runs the `coverage.yml` workflow on every PR and push to `main`.
 

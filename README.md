@@ -54,7 +54,7 @@ CI installs the same toolchain on each OS. Keep `Cargo.toml` `rust-version`, `ru
 
 ```toml
 [dependencies]
-neuromod = "0.5.1"
+neuromod = "0.5.2"
 ```
 
 Links: [crates.io](https://crates.io/crates/neuromod) · [docs.rs](https://docs.rs/neuromod) · [repository](https://github.com/Limen-Neural/neuromod)

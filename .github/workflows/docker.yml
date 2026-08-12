@@ -123,9 +123,9 @@ jobs:
           set -euo pipefail
           SHA="${{ github.sha }}"
           VER=$(grep -m1 '^version' Cargo.toml | sed -E 's/.*"([^"]+)".*/\1/')
-          # Full match only: X.Y.Z (no trailing junk; +meta would be invalid Docker tags).
-          # Escape $ so YAML/shell do not strip the end-of-string anchor.
-          if [ -z "${VER}" ] || ! printf '%s' "${VER}" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+\$'; then
+          # Full match only: X.Y.Z. Use single-quoted ERE so `$` is end-of-string
+          # (not shell-expanded). Do NOT write `\$` — that matches a literal `$`.
+          if [ -z "${VER}" ] || ! printf '%s' "${VER}" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
             echo "::error::Failed to extract a semver X.Y.Z from Cargo.toml (got: ${VER:-empty})"
             exit 1
           fi

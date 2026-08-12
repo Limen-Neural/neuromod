@@ -13,6 +13,7 @@ All notable changes to this project are documented in this file.
 - Stop tracking `.cubic/wiki` in git; ignore `.cubic/` and exclude it from the crates.io package so regenerated cubic wiki is not a documentation source of truth (#90).
 - **Rustdoc textbook spine:** crate-root syllabus, module docs for `engine` / `lif` / `izhikevich` / `modulators`, and expanded `SpikingNetwork::step` contract (pipeline order, STDP honesty, doctest) (#89).
 - **MSRV policy:** README Requirements + crate docs state Rust **1.97.1**; CI verifies `Cargo.toml` / `rust-toolchain.toml` / workflow pin stay identical (#79).
+- **CI OS matrix:** GitHub Actions core CI runs build/clippy/tests on Linux, macOS, and Windows; README Requirements and CI section document the three-platform matrix (#94).
 
 ## [0.5.1] - 2026-08-08
 

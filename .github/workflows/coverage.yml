@@ -31,10 +31,10 @@ jobs:
           components: clippy, rustfmt, llvm-tools-preview
 
       - name: Rust Cache
-        uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        uses: Swatinem/rust-cache@258712b0b7b1ddf8bddc9fc3b0faca682b2736c3 # v2
 
       - name: Install cargo-llvm-cov
-        uses: taiki-e/install-action@67729d5c413db75907f0ad1e39bb04b9c868ff60 # pinned (taiki-e/install-action v2)
+        uses: taiki-e/install-action@7f4eb899022d8fe70b20c4f3de697aa85c309026 # pinned (taiki-e/install-action v2)
         with:
           tool: cargo-llvm-cov
 
@@ -43,7 +43,7 @@ jobs:
 
       # Generate JUnit XML via nextest ci profile (.config/nextest.toml).
       - name: Install nextest
-        uses: taiki-e/install-action@67729d5c413db75907f0ad1e39bb04b9c868ff60 # pinned (taiki-e/install-action v2)
+        uses: taiki-e/install-action@7f4eb899022d8fe70b20c4f3de697aa85c309026 # pinned (taiki-e/install-action v2)
         with:
           tool: nextest
           version: '0.9.70'

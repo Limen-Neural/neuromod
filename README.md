@@ -3,7 +3,7 @@
 [![Crates.io](https://img.shields.io/crates/v/neuromod.svg)](https://crates.io/crates/neuromod)
 [![docs.rs](https://docs.rs/neuromod/badge.svg)](https://docs.rs/neuromod)
 [![License](https://img.shields.io/crates/l/neuromod.svg)](https://github.com/Limen-Neural/neuromod#license)
-[![codecov](https://codecov.io/gh/Limen-Neural/neuromod/graph/badge.svg)](https://app.codecov.io/gh/Limen-Neural/neuromod)
+[![codecov](https://codecov.io/gh/Limen-Neural/neuromod/graph/badge.svg?token=V0U0K5P6PW)](https://codecov.io/gh/Limen-Neural/neuromod)
 
 Biologically grounded spiking neural network (SNN) primitives in Rust: a topology-neutral `SpikingNetwork` engine, generic neuromodulators, STDP building blocks, and standalone neuron models.
 
@@ -203,17 +203,13 @@ cargo hack check --feature-powerset --exclude-no-default-features --keep-going
 
 ### Codecov
 
-[![codecov](https://codecov.io/gh/Limen-Neural/neuromod/graph/badge.svg)](https://app.codecov.io/gh/Limen-Neural/neuromod)
+[![codecov](https://codecov.io/gh/Limen-Neural/neuromod/graph/badge.svg?token=V0U0K5P6PW)](https://codecov.io/gh/Limen-Neural/neuromod)
 
 - Configuration: [`codecov.yml`](codecov.yml)
 - Workflow: [`.github/workflows/coverage.yml`](.github/workflows/coverage.yml)
-- Dashboard: [app.codecov.io/gh/Limen-Neural/neuromod](https://app.codecov.io/gh/Limen-Neural/neuromod)
+- Dashboard: [codecov.io/gh/Limen-Neural/neuromod](https://codecov.io/gh/Limen-Neural/neuromod)
 
-**Why the badge can show `unknown`:** Codecov has no coverage totals until the repo is **activated** under the `Limen-Neural` org and CI uploads succeed. Recent uploads returned `Repository not found` while the job still “passed” because failures were ignored. Fix:
-
-1. Open [Codecov → Limen-Neural/neuromod](https://app.codecov.io/gh/Limen-Neural/neuromod) and activate the repo (GitHub App install for the org if prompted).
-2. Copy the **repository upload token** into the GitHub Actions secret `CODECOV_TOKEN` for this repo (Settings → Secrets and variables → Actions).
-3. Re-run the **Codecov** workflow on `main` (or merge a PR). Uploads now fail the job if Codecov rejects them (`fail_ci_if_error: true`).
+The badge uses Codecov’s graph token (from **Configuration → Badges & Graphs**). The Limen-Neural Codecov org allows **tokenless uploads**, so CI does not send `CODECOV_TOKEN` (a stale org upload token was causing `Repository not found` and left the badge on `unknown`). After a green **Codecov** job on `main`, the badge shows a coverage %.
 
 Local coverage (also listed under [Development](#development)):
 

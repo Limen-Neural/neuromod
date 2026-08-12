@@ -19,7 +19,7 @@ Docs, CI, and packaging hygiene for the v0.5.2 milestone. Publish with `cargo pu
 - **MSRV policy:** README Requirements + crate docs state Rust **1.97.1**; CI verifies `Cargo.toml` / `rust-toolchain.toml` / workflow pin stay identical (#79).
 - **CI OS matrix:** GitHub Actions core CI runs build/clippy/tests on Linux, macOS, and Windows (`ubuntu-latest`, `macos-latest`, `windows-latest`); README Requirements and CI section document the three-platform matrix and the `paths-filter` gate for nextest/cargo-hack (#94, #95).
 - Domain-agnostic docs check builds with `cargo doc --all-features --no-deps` before the forbidden-term scan.
-- **Codecov:** coverage/test-result uploads fail the job on error (no silent “unknown” badge); README documents repo activation + `CODECOV_TOKEN` for `Limen-Neural/neuromod`.
+- **Codecov:** tokenless uploads (org no longer requires upload tokens); official badge markdown with graph token; uploads fail the job on error so a stale secret cannot hide a broken badge.
 
 ## [0.5.1] - 2026-08-08
 

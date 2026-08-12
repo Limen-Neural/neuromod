@@ -1,10 +1,8 @@
 # Codecov coverage workflow (separate from main CI per observability split).
 # Third-party Actions are pinned to immutable commit SHAs (Aikido supply-chain policy).
 #
-# Limen-Neural Codecov org allows tokenless uploads (no upload token required).
-# Do not pass a stale CODECOV_TOKEN — wrong tokens return "Repository not found"
-# and leave the README badge on "unknown". Optional: set CODECOV_TOKEN only if you
-# re-enable required tokens in Codecov global upload settings.
+# Codecov requires CODECOV_TOKEN for this org (tokenless returns HTTP 400).
+# Pass secrets.CODECOV_TOKEN; uploads are non-blocking (fail_ci_if_error: false).
 name: Codecov
 
 on:
@@ -57,9 +55,10 @@ jobs:
         uses: codecov/test-results-action@0fa95f0e1eeaafde2c782583b36b28ad0d8c77d3 # v1
         with:
           files: junit.xml
-          # Tokenless: org setting allows uploads without a token.
-          # Only pass secrets.CODECOV_TOKEN if required tokens are re-enabled.
-          fail_ci_if_error: true
+          # Codecov no longer accepts tokenless uploads for this org (HTTP 400).
+          # Prefer secrets.CODECOV_TOKEN; do not fail the job if upload is unavailable.
+          token: ${{ secrets.CODECOV_TOKEN }}
+          fail_ci_if_error: false
 
       - name: Upload coverage to Codecov
         if: ${{ !cancelled() }}
@@ -68,5 +67,7 @@ jobs:
           files: lcov.info
           disable_search: true
           slug: Limen-Neural/neuromod
-          fail_ci_if_error: true
+          token: ${{ secrets.CODECOV_TOKEN }}
+          # Upload is observability, not a release gate; tokenless is broken.
+          fail_ci_if_error: false
           verbose: true

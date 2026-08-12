@@ -19,7 +19,7 @@ Docs, CI, and packaging hygiene for the v0.5.2 milestone. Publish with `cargo pu
 - **MSRV policy:** README Requirements + crate docs state Rust **1.97.1**; CI verifies `Cargo.toml` / `rust-toolchain.toml` / workflow pin stay identical (#79).
 - **CI OS matrix:** GitHub Actions core CI runs build/clippy/tests on Linux, macOS, and Windows (`ubuntu-latest`, `macos-latest`, `windows-latest`); README Requirements and CI section document the three-platform matrix and the `paths-filter` gate for nextest/cargo-hack (#94, #95).
 - Domain-agnostic docs check builds with `cargo doc --all-features --no-deps` before the forbidden-term scan.
-- **Codecov:** tokenless uploads (org no longer requires upload tokens); official badge markdown with graph token; uploads fail the job on error so a stale secret cannot hide a broken badge.
+- **Codecov:** official badge markdown with graph token; CI uploads via `CODECOV_TOKEN` (tokenless returns HTTP 400 for this org); upload steps use `fail_ci_if_error: false` so coverage remains non-blocking; coverage workflow declares `permissions: contents: read`.
 
 ## [0.5.1] - 2026-08-08
 

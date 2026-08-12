@@ -11,6 +11,10 @@ on:
   pull_request:
     branches: [main]
 
+# Least privilege: checkout + upload only (no contents write).
+permissions:
+  contents: read
+
 jobs:
   codecov:
     name: Codecov

@@ -209,7 +209,12 @@ cargo hack check --feature-powerset --exclude-no-default-features --keep-going
 - Workflow: [`.github/workflows/coverage.yml`](.github/workflows/coverage.yml)
 - Dashboard: [codecov.io/gh/Limen-Neural/neuromod](https://codecov.io/gh/Limen-Neural/neuromod)
 
-The badge uses Codecov’s graph token (from **Configuration → Badges & Graphs**). The Limen-Neural Codecov org allows **tokenless uploads**, so CI does not send `CODECOV_TOKEN` (a stale org upload token was causing `Repository not found` and left the badge on `unknown`). After a green **Codecov** job on `main`, the badge shows a coverage %.
+The badge uses Codecov’s graph token (from **Configuration → Badges & Graphs**).
+**Uploads** need the repository secret **`CODECOV_TOKEN`** (tokenless uploads return
+HTTP 400 for this org). The coverage workflow passes that token and sets
+`fail_ci_if_error: false`, so a missing/stale token does **not** fail CI—only the
+badge may stay `unknown` until the secret is correct. After a successful upload on
+`main`, the badge shows a coverage %.
 
 Local coverage (also listed under [Development](#development)):
 

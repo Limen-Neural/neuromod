@@ -101,5 +101,5 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          cargo doc --no-deps
+          cargo doc --all-features --no-deps
           ! grep -riE 'spikenaut|\bhft\b|\bmining\b|\bcrypto\b|eagle-lander' target/doc/neuromod/

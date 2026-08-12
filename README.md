@@ -3,7 +3,7 @@
 [![Crates.io](https://img.shields.io/crates/v/neuromod.svg)](https://crates.io/crates/neuromod)
 [![docs.rs](https://docs.rs/neuromod/badge.svg)](https://docs.rs/neuromod)
 [![License](https://img.shields.io/crates/l/neuromod.svg)](https://github.com/Limen-Neural/neuromod#license)
-[![codecov](https://codecov.io/gh/Limen-Neural/neuromod/branch/main/graph/badge.svg)](https://codecov.io/gh/Limen-Neural/neuromod)
+[![codecov](https://codecov.io/gh/Limen-Neural/neuromod/graph/badge.svg?token=V0U0K5P6PW)](https://codecov.io/gh/Limen-Neural/neuromod)
 
 Biologically grounded spiking neural network (SNN) primitives in Rust: a topology-neutral `SpikingNetwork` engine, generic neuromodulators, STDP building blocks, and standalone neuron models.
 
@@ -54,7 +54,7 @@ CI installs the same toolchain on each OS. Keep `Cargo.toml` `rust-version`, `ru
 
 ```toml
 [dependencies]
-neuromod = "0.5.1"
+neuromod = "0.5.2"
 ```
 
 Links: [crates.io](https://crates.io/crates/neuromod) · [docs.rs](https://docs.rs/neuromod) · [repository](https://github.com/Limen-Neural/neuromod)
@@ -203,10 +203,18 @@ cargo hack check --feature-powerset --exclude-no-default-features --keep-going
 
 ### Codecov
 
-[![codecov](https://codecov.io/gh/Limen-Neural/neuromod/branch/main/graph/badge.svg)](https://codecov.io/gh/Limen-Neural/neuromod)
+[![codecov](https://codecov.io/gh/Limen-Neural/neuromod/graph/badge.svg?token=V0U0K5P6PW)](https://codecov.io/gh/Limen-Neural/neuromod)
 
 - Configuration: [`codecov.yml`](codecov.yml)
 - Workflow: [`.github/workflows/coverage.yml`](.github/workflows/coverage.yml)
+- Dashboard: [codecov.io/gh/Limen-Neural/neuromod](https://codecov.io/gh/Limen-Neural/neuromod)
+
+The badge uses Codecov’s graph token (from **Configuration → Badges & Graphs**).
+**Uploads** need the repository secret **`CODECOV_TOKEN`** (tokenless uploads return
+HTTP 400 for this org). The coverage workflow passes that token and sets
+`fail_ci_if_error: false`, so a missing/stale token does **not** fail CI—only the
+badge may stay `unknown` until the secret is correct. After a successful upload on
+`main`, the badge shows a coverage %.
 
 Local coverage (also listed under [Development](#development)):
 
@@ -216,7 +224,6 @@ cargo llvm-cov --all-features --lcov --output-path lcov.info
 # HTML report: cargo llvm-cov --all-features --html
 ```
 
-- View the dashboard at [Codecov](https://codecov.io/gh/Limen-Neural/neuromod).
 - Open `target/llvm-cov/html/index.html` after running the HTML report locally.
 - CI runs the `coverage.yml` workflow on every PR and push to `main`.
 

@@ -4,6 +4,10 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+## [0.5.2] - 2026-08-12
+
+Docs, CI, and packaging hygiene for the v0.5.2 milestone. Publish with `cargo publish` after this tag lands.
+
 ### Removed
 
 - Optional `sentry` Cargo feature, `examples/sentry.rs`, `tests/sentry_integration.rs`, and `.github/workflows/sentry-release.yml`. Observability belongs in application binaries (depend on `sentry` there); the library no longer pulls or demos Sentry (#88, #78).
@@ -13,7 +17,9 @@ All notable changes to this project are documented in this file.
 - Stop tracking `.cubic/wiki` in git; ignore `.cubic/` and exclude it from the crates.io package so regenerated cubic wiki is not a documentation source of truth (#90).
 - **Rustdoc textbook spine:** crate-root syllabus, module docs for `engine` / `lif` / `izhikevich` / `modulators`, and expanded `SpikingNetwork::step` contract (pipeline order, STDP honesty, doctest) (#89).
 - **MSRV policy:** README Requirements + crate docs state Rust **1.97.1**; CI verifies `Cargo.toml` / `rust-toolchain.toml` / workflow pin stay identical (#79).
-- **CI OS matrix:** GitHub Actions core CI runs build/clippy/tests on Linux, macOS, and Windows; README Requirements and CI section document the three-platform matrix (#94).
+- **CI OS matrix:** GitHub Actions core CI runs build/clippy/tests on Linux, macOS, and Windows (`ubuntu-latest`, `macos-latest`, `windows-latest`); README Requirements and CI section document the three-platform matrix and the `paths-filter` gate for nextest/cargo-hack (#94, #95).
+- Domain-agnostic docs check builds with `cargo doc --all-features --no-deps` before the forbidden-term scan.
+- **Codecov:** official badge markdown with graph token; CI uploads via `CODECOV_TOKEN` (tokenless returns HTTP 400 for this org); upload steps use `fail_ci_if_error: false` so coverage remains non-blocking; coverage workflow declares `permissions: contents: read`.
 
 ## [0.5.1] - 2026-08-08
 

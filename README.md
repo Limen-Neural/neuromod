@@ -249,8 +249,21 @@ This repository uses a comprehensive CI setup for speed, quality, security, and 
   - CodeQL (`.github/workflows/codeql.yml`)
   - `rustsec/audit-check` + Trivy (`.github/workflows/audit.yml`)
 - **Dependencies**: Dependabot (`.github/dependabot.yml`) for Cargo, GitHub Actions, Docker.
-- **Docker** (`.github/workflows/docker.yml`, `Dockerfile`): Reproducible builds.
+- **Docker** (`.github/workflows/docker.yml`, `Dockerfile`): Reproducible **example** runtime image (not required for library use). On every push to `main`, CI builds and pushes to:
+  - **Docker Hub:** `pelon23/neuromod` (tags: commit SHA, crate version, `latest`)
+  - **GitHub Container Registry:** `ghcr.io/limen-neural/neuromod` (same tags) — listed under [org packages](https://github.com/orgs/Limen-Neural/packages)
+
+  Pull (examples only — prefer the crates.io library for embedding):
+
+  ```bash
+  docker pull ghcr.io/limen-neural/neuromod:0.5.2
+  # or Docker Hub:
+  docker pull pelon23/neuromod:0.5.2
+  docker run --rm ghcr.io/limen-neural/neuromod:0.5.2 ls /usr/local/bin
+  ```
+
   Local usage:
+
   ```bash
   # Runtime image (example binaries only — no cargo toolchain)
   docker build -t neuromod:runtime .
@@ -266,3 +279,5 @@ This repository uses a comprehensive CI setup for speed, quality, security, and 
 - Crates.io: https://crates.io/crates/neuromod
 - Docs.rs: https://docs.rs/neuromod
 - Repository: https://github.com/Limen-Neural/neuromod
+- GHCR: https://github.com/orgs/Limen-Neural/packages/container/package/neuromod
+- Docker Hub: https://hub.docker.com/r/pelon23/neuromod

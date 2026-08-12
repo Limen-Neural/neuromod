@@ -7,6 +7,8 @@ All notable changes to this project are documented in this file.
 ### Changed
 
 - **Docker:** CI pushes example runtime images to Docker Hub and **GHCR** (`ghcr.io/limen-neural/neuromod` with SHA, version, and `latest` tags) so the image appears under GitHub org packages; README documents pull URLs.
+- **Docker verify:** PR job asserts example binaries exist in the runtime image; publish job requires full `X.Y.Z` crate version for tags.
+- README crates.io / docs.rs badge links point at the **0.5.2** release.
 
 ## [0.5.2] - 2026-08-12
 

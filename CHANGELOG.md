@@ -4,6 +4,10 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+### Changed
+
+- **Docker:** CI pushes example runtime images to Docker Hub and **GHCR** (`ghcr.io/limen-neural/neuromod` with SHA, version, and `latest` tags) so the image appears under GitHub org packages; README documents pull URLs.
+
 ## [0.5.2] - 2026-08-12
 
 Docs, CI, and packaging hygiene for the v0.5.2 milestone. Publish with `cargo publish` after this tag lands.

@@ -1,0 +1,19 @@
+src/engine.rs
+  s_92605211926407::t_6a166b1da08fc8 63-67
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "49801fb5661efc83d58a7dab3d5c3d9e14f86123",
+  "prompts": {},
+  "sessions": {
+    "s_92605211926407": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "77f78bbc-2296-42c8-b7df-d470d0eb364c",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Raul Montoya Cardenas <montoyaraul34@gmail.com>"
+    }
+  }
+}

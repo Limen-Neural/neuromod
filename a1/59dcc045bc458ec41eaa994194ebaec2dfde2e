@@ -1,0 +1,52 @@
+benches/README.md
+  s_92605211926407::t_e98870153639e5 61-62
+examples/rstdp_demo.rs
+  s_92605211926407::t_446a6af18478b3 132-135,149-152,177-179
+  s_92605211926407::t_9dd27022686851 3-7,13-16,18-20,22-28,30-33,35-49,51,53-57,60,62-91,93-99,104-108,111-121,124-126,138-139,142-143,155-156,159,162-163,165,169,171,173-176,180
+src/lib.rs
+  s_92605211926407::t_4daa35613f46ab 23-24
+  s_92605211926407::t_2ddf7170f7bba4 35-38
+REVIEW.md
+  s_92605211926407::t_7a462930e263c9 137-152
+src/rm_stdp.rs
+  s_92605211926407::t_e00dad86d0fb4b 9-12
+  s_92605211926407::t_3701a76d7e504b 182-283
+src/engine.rs
+  s_92605211926407::t_7f85c865dead1a 429-563,567-625
+  s_92605211926407::t_446a6af18478b3 564-566
+Cargo.toml
+  s_92605211926407::t_9622ee95a32565 3
+  s_92605211926407::t_61078eee1c9cee 29
+README.md
+  s_92605211926407::t_d2fc215a7d89bb 20
+  s_92605211926407::t_db21238a92e428 31-44
+  s_92605211926407::t_4ec01b2ce1b320 71
+  s_92605211926407::t_96d946defcf187 171
+CHANGELOG.md
+  s_92605211926407::t_1b9f09a92eb6ff 7-18,21-24,27
+benches/stdp_bench.rs
+  s_92605211926407::t_66a59fc4ce4695 163
+  s_92605211926407::t_25150d5a3a8b7a 47-87
+  s_92605211926407::t_78ec0f462c5aa4 4
+CLAUDE.md
+  s_92605211926407::t_a742341a3a3e9d 77-78
+  s_92605211926407::t_45ae7e4bddeaf9 86-87
+Cargo.lock
+  ai_agent 306,311
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "a159dcc045bc458ec41eaa994194ebaec2dfde2e",
+  "prompts": {},
+  "sessions": {
+    "s_92605211926407": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "77f78bbc-2296-42c8-b7df-d470d0eb364c",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Raul Montoya Cardenas <montoyaraul34@gmail.com>"
+    }
+  }
+}

@@ -28,19 +28,28 @@ fn report(network: &SpikingNetwork, label: &str) {
     println!();
 }
 
-fn main() {
-    println!("=== Reward-Modulated STDP Demo ===\n");
+/// The reward state Scenarios 2 and 5 both drive with.
+fn rewarded_state() -> NeuroModulators {
+    NeuroModulators {
+        dopamine: 0.9,
+        norepinephrine: 0.1,
+        acetylcholine: 0.7,
+        ..Default::default()
+    }
+}
 
+/// Four LIF neurons over four channels, every synapse seeded at an equal share
+/// of the engine's L1 weight budget so the renormalization pass starts neutral
+/// and any drift below is learning.
+fn build_network(seed: f32) -> SpikingNetwork {
     let mut network = SpikingNetwork::with_dimensions(4, 2, STIMULI.len());
-
-    // Seed every synapse at an equal share of the engine's L1 weight budget, so
-    // the renormalization pass starts neutral and any drift below is learning.
-    let seed = 2.0 / STIMULI.len() as f32;
     for neuron in &mut network.neurons {
         neuron.weights = vec![seed; STIMULI.len()];
     }
+    network
+}
 
-    let config = RmStdpConfig::default();
+fn print_setup(network: &SpikingNetwork, config: &RmStdpConfig, seed: f32) {
     println!("Network initialized:");
     println!("  LIF neurons:        {}", network.neurons.len());
     println!("  Izhikevich neurons: {}", network.iz_neurons.len());
@@ -54,33 +63,32 @@ fn main() {
         config.w_min, config.w_max
     );
     println!("\nStimuli: {STIMULI:?}  (channels 0-1 driven, 2-3 silent)\n");
+}
 
-    println!("=== Simulation Scenarios ===\n");
-
+/// Dopamine off: the driven synapses bank credit they are not paid for.
+fn scenario_no_reward(network: &mut SpikingNetwork, config: &RmStdpConfig, seed: f32) {
     println!("--- Scenario 1: No Reward — credit is earned, not yet paid ---");
     let no_reward = NeuroModulators::default();
     println!("  dopamine={:.2}\n", no_reward.dopamine);
-    report(&network, "before");
+    report(network, "before");
     for _ in 0..10 {
         network
             .step(&STIMULI, &no_reward)
             .expect("stimuli length must match network channels");
     }
-    report(&network, "after 10 steps");
+    report(network, "after 10 steps");
     println!(
         "  Weights held at {seed:.4}: the dopamine gate is shut. The driven\n  \
          synapses still banked eligibility (e > 0) — that credit stays claimable\n  \
          for roughly {:.0} steps.\n",
         config.tau_eligibility
     );
+}
 
+/// Dopamine on: the banked traces convert into weight changes.
+fn scenario_reward(network: &mut SpikingNetwork, config: &RmStdpConfig) {
     println!("--- Scenario 2: Reward State (High Dopamine) — the trace is cashed in ---");
-    let rewarded = NeuroModulators {
-        dopamine: 0.9,
-        norepinephrine: 0.1,
-        acetylcholine: 0.7,
-        ..Default::default()
-    };
+    let rewarded = rewarded_state();
     println!(
         "  dopamine={:.2}, norepinephrine={:.2}, ach={:.2}",
         rewarded.dopamine, rewarded.norepinephrine, rewarded.acetylcholine
@@ -97,7 +105,7 @@ fn main() {
             .step(&STIMULI, &rewarded)
             .expect("stimuli length must match network channels");
     }
-    report(&network, "after 10 steps");
+    report(network, "after 10 steps");
     print!("  Weight deltas:        ");
     for (ch, (&now, &then)) in network.neurons[0]
         .weights
@@ -114,7 +122,9 @@ fn main() {
          renormalization pass — which is why channels 2 and 3 moved at all despite\n  \
          holding no trace: the driven synapses took share of a fixed budget.\n"
     );
+}
 
+fn scenario_stress(network: &mut SpikingNetwork) {
     println!("--- Scenario 3: Stress State (High Norepinephrine) ---");
     let stressed = NeuroModulators {
         dopamine: 0.2,
@@ -136,7 +146,9 @@ fn main() {
          accumulation.\n",
         (1.0 - stressed.norepinephrine).max(0.1)
     );
+}
 
+fn scenario_focus(network: &mut SpikingNetwork) {
     println!("--- Scenario 4: Focus State (High Acetylcholine) ---");
     let focused = NeuroModulators {
         dopamine: 0.6,
@@ -160,7 +172,11 @@ fn main() {
         "  Firing threshold:    {:.3}\n",
         network.neurons[0].threshold
     );
+}
 
+/// A/B the reconfigured network against an otherwise identical twin left on the
+/// defaults, so the effect of `RmStdpConfig` is measured rather than asserted.
+fn scenario_slow_traces(network: &mut SpikingNetwork) {
     println!("--- Scenario 5: Slower Traces via `RmStdpConfig` ---");
     // Snapshot the network before touching its config. The twin inherits this
     // exact state and keeps the defaults, then sees the identical stimuli and
@@ -193,6 +209,7 @@ fn main() {
     );
 
     // Same 10 rewarded steps Scenario 2 used, run on both networks.
+    let rewarded = rewarded_state();
     for _ in 0..10 {
         network
             .step(&STIMULI, &rewarded)
@@ -201,7 +218,7 @@ fn main() {
             .step(&STIMULI, &rewarded)
             .expect("stimuli length must match network channels");
     }
-    report(&network, "slow config");
+    report(network, "slow config");
     report(&default_twin, "default config");
 
     let slow_gain = network.neurons[0].weights[0] - entry_weight;
@@ -223,7 +240,10 @@ fn main() {
         per_step_loss(network.stdp_config.tau_eligibility),
         per_step_loss(default_twin.stdp_config.tau_eligibility),
     );
+}
 
+/// The modulator helpers, independent of the engine.
+fn modulator_operations() {
     println!("=== Modulator Operations Demo ===\n");
 
     let mut mods = NeuroModulators::default();
@@ -258,7 +278,9 @@ fn main() {
         "  After decay - Dopamine: {:.2}, Norepinephrine: {:.2}, Ach: {:.2}, Serotonin: {:.2}",
         mods.dopamine, mods.norepinephrine, mods.acetylcholine, mods.serotonin
     );
+}
 
+fn print_takeaways() {
     println!("\n=== Demo Complete ===");
     println!("Key takeaways:");
     println!("  • Eligibility traces accumulate every step, dopamine or not");
@@ -270,4 +292,23 @@ fn main() {
     println!("  • `RmStdpConfig` tunes trace decay, reward rate, and weight bounds");
     println!("  • GenericReward allows domain-specific reward shaping upstream");
     println!("  • Decay provides homeostasis (modulators return to baseline)");
+}
+
+fn main() {
+    println!("=== Reward-Modulated STDP Demo ===\n");
+
+    let seed = 2.0 / STIMULI.len() as f32;
+    let mut network = build_network(seed);
+    let config = RmStdpConfig::default();
+    print_setup(&network, &config, seed);
+
+    println!("=== Simulation Scenarios ===\n");
+    scenario_no_reward(&mut network, &config, seed);
+    scenario_reward(&mut network, &config);
+    scenario_stress(&mut network);
+    scenario_focus(&mut network);
+    scenario_slow_traces(&mut network);
+
+    modulator_operations();
+    print_takeaways();
 }

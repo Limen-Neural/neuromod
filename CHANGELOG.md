@@ -36,6 +36,14 @@ All notable changes to this project are documented in this file.
   `stdp_config` rather than the `RM_STDP_W_MIN` / `RM_STDP_W_MAX` constants directly, in both
   `apply_stdp` and the L1 renormalization pass (the constants remain public and are the
   defaults) (#72, #73).
+- **Breaking (source, targets 0.6.0):** `LifNeuron` and `SpikingNetwork` have public fields
+  and are not `#[non_exhaustive]`, so the new `eligibility` / `stdp_config` fields break
+  downstream struct literals that spell out every field. Serialized state is unaffected.
+  Fill the remainder from `..LifNeuron::new()` / `..Default::default()`, or build through the
+  constructors; see the README migration notes (#72, #73).
+- Weight bounds now take documented precedence over the engine's L1 weight budget: `step`
+  scales toward the budget and then clamps, so a narrowed `w_min` / `w_max` leaves the sum
+  off budget. The defaults cannot bind, so the budget still holds exactly under them.
 - `examples/rstdp_demo.rs` prints real trace and weight numbers read back from the network
   instead of narrating hardcoded claims about learning.
 - Docs no longer carry the "eligibility traces are not wired" caveat: crate root, `engine`,

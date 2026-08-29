@@ -152,8 +152,12 @@ impl SpikingNetwork {
     ///    [`crate::EligibilityTrace`] regardless of dopamine, then convert traces
     ///    into weight changes only when the dopamine-derived learning rate is
     ///    above ≈ 0.
-    /// 8. Renormalize LIF weights to an L1 budget and clamp to the
-    ///    [`RmStdpConfig`] bounds.
+    /// 8. Renormalize LIF weights toward an L1 budget, then clamp to the
+    ///    [`RmStdpConfig`] bounds. **Bounds take precedence over the budget.**
+    ///    Under the default bounds the clamp provably cannot bind — weights are
+    ///    non-negative and `w_max` equals the budget — so the L1 sum lands on
+    ///    budget exactly. Narrowed bounds are still enforced, and the sum then
+    ///    settles off budget by however much they bind.
     /// 9. Drive each Izhikevich neuron from mean LIF membrane potential + dopamine.
     ///
     /// # Examples
@@ -260,6 +264,10 @@ impl SpikingNetwork {
 
         self.apply_stdp(learning_rate);
 
+        // Scale toward the L1 budget, then enforce the configured bounds. The
+        // bounds win where the two disagree: under the defaults they cannot
+        // bind here, so the budget holds exactly; a narrowed range is honored
+        // and leaves the sum off budget. See the `step` contract, item 8.
         let (w_min, w_max) = self.stdp_config.weight_bounds();
         for neuron in &mut self.neurons {
             let total: f32 = neuron.weights.iter().sum();
@@ -727,10 +735,35 @@ mod tests {
     }
 
     #[test]
-    fn test_config_weight_bounds_are_enforced_by_step() {
+    fn test_default_bounds_keep_the_l1_sum_on_budget() {
+        let mut network = rstdp_test_network();
+        let reward = NeuroModulators {
+            dopamine: 0.9,
+            ..Default::default()
+        };
+
+        for _ in 0..40 {
+            network
+                .step(&DRIVEN_AND_SILENT, &reward)
+                .expect("length matches");
+        }
+
+        for neuron in &network.neurons {
+            let total: f32 = neuron.weights.iter().sum();
+            assert!(
+                (total - WEIGHT_BUDGET).abs() < 1e-4,
+                "the default clamp cannot bind, so the budget holds: got {total}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_configured_bounds_take_precedence_over_the_l1_budget() {
+        // Four channels capped at 0.4 cannot reach the budget of 2.0 — the
+        // documented precedence is that the bound wins and the sum sits under.
         let mut network = rstdp_test_network();
         network.set_rm_stdp_config(RmStdpConfig {
-            w_max: 0.55,
+            w_max: 0.4,
             ..RmStdpConfig::default()
         });
         let reward = NeuroModulators {
@@ -738,7 +771,7 @@ mod tests {
             ..Default::default()
         };
 
-        for _ in 0..60 {
+        for _ in 0..40 {
             network
                 .step(&DRIVEN_AND_SILENT, &reward)
                 .expect("length matches");
@@ -746,9 +779,14 @@ mod tests {
 
         for neuron in &network.neurons {
             assert!(
-                neuron.weights.iter().all(|&w| w <= 0.55 + 1e-6),
+                neuron.weights.iter().all(|&w| w <= 0.4 + 1e-6),
                 "weights must respect the configured w_max: {:?}",
                 neuron.weights
+            );
+            let total: f32 = neuron.weights.iter().sum();
+            assert!(
+                total < WEIGHT_BUDGET,
+                "a binding w_max holds the L1 sum under budget: got {total}"
             );
         }
     }

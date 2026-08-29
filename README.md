@@ -196,6 +196,52 @@ without the trace fields and keeps stepping), and `cargo run --example rstdp_dem
 the real trace and weight numbers. Rationale for wiring the types in rather than demoting
 them: [ADR 002](docs/adr/002-wire-eligibility-traces.md).
 
+## Migration Notes
+
+### Unreleased (targets 0.6.0) — eligibility traces wired into the engine
+
+**Serialized state is unaffected.** `LifNeuron::eligibility` and
+`SpikingNetwork::stdp_config` are `#[serde(default)]`, and `apply_stdp` resizes a missing
+trace vector, so checkpoints written by 0.5.x still deserialize and step.
+
+**Struct literals need updating.** Both types have public fields and are not
+`#[non_exhaustive]`, so adding a field is a source-level break: any downstream
+`LifNeuron { .. }` or `SpikingNetwork { .. }` literal that spells out every field now fails
+to compile. Fill the remainder from the constructor or `Default`:
+
+```rust
+use neuromod::LifNeuron;
+
+// Before (0.5.x) — breaks in 0.6
+// let neuron = LifNeuron {
+//     membrane_potential: 0.0,
+//     decay_rate: 0.15,
+//     threshold: 0.02,
+//     base_threshold: 0.02,
+//     last_spike: false,
+//     weights: vec![0.0; 16],
+//     last_spike_time: -1,
+// };
+
+// After — forward-compatible with future field additions
+let neuron = LifNeuron {
+    weights: vec![0.0; 16],
+    ..LifNeuron::new()
+};
+```
+
+Callers that already build through `LifNeuron::new()`, `SpikingNetwork::new()`, or
+`SpikingNetwork::with_dimensions(..)` need no change.
+
+**Weight trajectories change.** Updates now flow through a decaying eligibility trace
+instead of being recomputed from raw spike times each step, so a 0.6 run will not reproduce
+0.5.x weights on the same inputs. Learning gained memory: reward arriving after a
+coincidence still pays for it.
+
+**Weight bounds moved into `RmStdpConfig`.** `RM_STDP_W_MIN` / `RM_STDP_W_MAX` remain public
+and are the defaults. Bounds take precedence over the engine's L1 weight budget, so
+narrowing them leaves each neuron's weight sum below budget by however much they bind.
+
 ## Included Components
 
 - Engine: `SpikingNetwork`, `StepError` (LIF + Izhikevich banks)

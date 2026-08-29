@@ -91,6 +91,12 @@ impl Default for EligibilityTrace {
 /// Held by `SpikingNetwork::stdp_config`; see
 /// [`SpikingNetwork::set_rm_stdp_config`](crate::SpikingNetwork::set_rm_stdp_config)
 /// to change it on a live network.
+///
+/// `w_min` / `w_max` take precedence over the engine's L1 weight budget: the
+/// renormalization pass in `step` scales toward the budget and then clamps, so
+/// narrowing this range leaves each neuron's weight sum off budget by however
+/// much the clamp binds. The defaults cannot bind (weights are non-negative and
+/// `w_max` equals the budget), so the budget holds exactly under them.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct RmStdpConfig {
     /// Eligibility trace decay time constant, in steps. Typical values are 50-100.

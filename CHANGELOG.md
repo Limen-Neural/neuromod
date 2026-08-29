@@ -35,7 +35,10 @@ All notable changes to this project are documented in this file.
   post-before-pre depresses and clamps at `w_min`, one spike pair is counted once, and a
   pre-0.6 checkpoint without the new fields still deserializes and steps (#74).
 - Benchmarks for trace accumulation, the trace → weight conversion, and rewarded vs
-  unrewarded engine steps (`benches/stdp_bench.rs`).
+  unrewarded engine steps (`benches/stdp_bench.rs`). The engine-step benches warm the network
+  to steady state first: `apply_stdp` skips the decay `exp` while a trace is still exactly
+  zero, so timing from a blank network would measure that transient instead of the per-step
+  cost of a running one.
 - [ADR 002](docs/adr/002-wire-eligibility-traces.md) recording the wire-vs-demote decision.
 
 ### Changed

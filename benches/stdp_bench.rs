@@ -90,7 +90,17 @@ fn bench_reward_conversion(c: &mut Criterion) {
 /// End-to-end engine step, which now carries trace bookkeeping for every
 /// synapse. Rewarded and unrewarded are separate: only the rewarded path pays
 /// for the trace -> weight conversion.
+///
+/// The network is warmed to steady state before timing. `apply_stdp` skips both
+/// the decay `exp` and the weight conversion while a trace is still exactly
+/// zero, so a freshly built network makes the first samples cheaper than every
+/// later one — timing from a blank state would measure that transient rather
+/// than the per-step cost of a running network. Warming up is preferable to
+/// rebuilding per iteration here: `SpikingNetwork` is not `Clone`, and steady
+/// state is the condition worth reporting.
 fn bench_engine_step_with_traces(c: &mut Criterion) {
+    const WARMUP_STEPS: usize = 200; // >> tau_eligibility, so traces settle
+
     let mut group = c.benchmark_group("engine_step");
 
     for (label, dopamine) in [("unrewarded", 0.0_f32), ("rewarded", 0.9)] {
@@ -104,6 +114,11 @@ fn bench_engine_step_with_traces(c: &mut Criterion) {
                 ..Default::default()
             };
             let stimuli = vec![0.5_f32; 64];
+
+            for _ in 0..WARMUP_STEPS {
+                let _ = network.step(&stimuli, &modulators);
+            }
+
             b.iter(|| {
                 let _ = network.step(black_box(&stimuli), black_box(&modulators));
             });

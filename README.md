@@ -55,8 +55,12 @@ CI installs the same toolchain on each OS. Keep `Cargo.toml` `rust-version`, `ru
 
 ```toml
 [dependencies]
-neuromod = "0.5.2"
+neuromod = "0.6.0"
 ```
+
+> `0.6.0` reaches crates.io when its tag lands. Until then the newest published release is
+> `0.5.2`, which predates the wired R-STDP API below — depend on the git repository if you
+> need it before the release.
 
 Links: [crates.io](https://crates.io/crates/neuromod) · [docs.rs](https://docs.rs/neuromod) · [repository](https://github.com/Limen-Neural/neuromod)
 
@@ -149,11 +153,10 @@ For legacy hardware-calibrated signal mapping, use `SignalProfile::hardware_cali
 
 ## Reward-Modulated STDP
 
-> **Not in the pinned release.** `EligibilityTrace`, `RmStdpConfig`,
-> `SpikingNetwork::set_rm_stdp_config`, and `LifNeuron::eligibility` are unreleased; the
-> Installation pin above (`0.5.2`) does not carry them, and the code below will not compile
-> against it. They arrive in 0.6.0 — see [Migration Notes](#migration-notes), or depend on the
-> git branch until then.
+> **New in 0.6.0.** `EligibilityTrace`, `RmStdpConfig`, `SpikingNetwork::set_rm_stdp_config`,
+> and `LifNeuron::eligibility` do not exist in `0.5.2`, so the code below will not compile
+> against the last published release — see [Installation](#installation) and
+> [Migration Notes](#migration-notes).
 
 `SpikingNetwork` learns *through* eligibility traces, not around them. Each `LifNeuron`
 carries one `EligibilityTrace` per input channel, indexed like `weights`:
@@ -204,7 +207,7 @@ them: [ADR 002](docs/adr/002-wire-eligibility-traces.md).
 
 ## Migration Notes
 
-### Unreleased (targets 0.6.0) — eligibility traces wired into the engine
+### 0.6.0 — eligibility traces wired into the engine
 
 **Serialized state survives in self-describing formats.** `LifNeuron::eligibility` and
 `SpikingNetwork::stdp_config` are `#[serde(default)]`, and `apply_stdp` resizes a missing
@@ -371,10 +374,10 @@ This repository uses a comprehensive CI setup for speed, quality, security, and 
   Pull (examples only — prefer the crates.io library for embedding):
 
   ```bash
-  docker pull ghcr.io/limen-neural/neuromod:0.5.2
+  docker pull ghcr.io/limen-neural/neuromod:0.6.0
   # or Docker Hub:
-  docker pull pelon23/neuromod:0.5.2
-  docker run --rm ghcr.io/limen-neural/neuromod:0.5.2 ls /usr/local/bin
+  docker pull pelon23/neuromod:0.6.0
+  docker run --rm ghcr.io/limen-neural/neuromod:0.6.0 ls /usr/local/bin
   ```
 
   Local usage:

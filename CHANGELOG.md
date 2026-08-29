@@ -2,7 +2,11 @@
 
 All notable changes to this project are documented in this file.
 
-## [Unreleased]
+## [0.6.0] - 2026-08-29
+
+Reward-modulated STDP wired into the engine learning path. Breaking for downstream struct
+literals and for weight trajectories; see the README migration notes. Publish with
+`cargo publish` after this tag lands.
 
 ### Added
 
@@ -19,11 +23,13 @@ All notable changes to this project are documented in this file.
 - `RmStdpConfig::weight_bounds` — ordered, non-negative `(min, max)` accessor that falls back
   to `RM_STDP_W_MIN` / `RM_STDP_W_MAX` when the public bound fields are left reversed or
   non-finite (either would panic `f32::clamp` inside `step`), or when `w_min` is negative.
-  This crate does not support inhibitory weights: a negative floor lets a rewarded depression
-  flip a synapse's sign, and the L1 renormalization pass then skips that neuron for as long as
-  its weights sum non-positive. A wholly negative range such as `(-2.0, -1.0)` makes that
-  permanent — every update clamps back inside it, so the total can never climb — while a range
-  merely straddling zero stalls normalization until later potentiation restores a positive
+  Because of that fallback a negative bound never reaches `clamp`; the rest of this entry
+  describes what the guard prevents, not live behavior. This crate does not support inhibitory
+  weights: an honored negative floor would let a rewarded depression flip a synapse's sign, and
+  the L1 renormalization pass would then skip that neuron for as long as its weights summed
+  non-positive. A wholly negative range such as `(-2.0, -1.0)` would make that permanent —
+  every update clamps back inside it, so the total could never climb — while a range merely
+  straddling zero would stall normalization until later potentiation restored a positive
   total.
 - `RmStdpConfig::effective_reward_lr` — same guard for a non-finite `reward_lr`. A `NaN`
   rate would poison a weight on the first rewarded step and never clear, because the L1
@@ -59,14 +65,14 @@ All notable changes to this project are documented in this file.
 
 ### Changed
 
-- **Breaking (targets 0.6.0):** weight updates flow through a decaying eligibility trace
+- **Breaking:** weight updates flow through a decaying eligibility trace
   instead of being recomputed from raw spike times each step, so same-input runs will not
   reproduce pre-0.6 weight trajectories. `apply_stdp` no longer early-returns when dopamine
   is ~0 — only the trace → weight conversion is gated. Weight bounds now come from
   `stdp_config` rather than the `RM_STDP_W_MIN` / `RM_STDP_W_MAX` constants directly, in both
   `apply_stdp` and the L1 renormalization pass (the constants remain public and are the
   defaults) (#72, #73).
-- **Breaking (source, targets 0.6.0):** `LifNeuron` and `SpikingNetwork` have public fields
+- **Breaking (source):** `LifNeuron` and `SpikingNetwork` have public fields
   and are not `#[non_exhaustive]`, so the new `eligibility` / `stdp_config` fields break
   downstream struct literals that spell out every field. Fill the remainder from
   `..LifNeuron::new()` / `..Default::default()`, or build through the constructors. Serialized
@@ -101,7 +107,7 @@ All notable changes to this project are documented in this file.
   guards describe (and guard) the wired path.
 - **Docker:** CI pushes example runtime images to Docker Hub and **GHCR** (`ghcr.io/limen-neural/neuromod` with SHA, version, and `latest` tags) so the image appears under GitHub org packages; README documents pull URLs.
 - **Docker verify:** PR job asserts example binaries exist in the runtime image; publish job requires full `X.Y.Z` crate version for tags.
-- README crates.io / docs.rs badges stay version-agnostic (latest); install pin documents **0.5.2**.
+- README crates.io / docs.rs badges stay version-agnostic (latest); install pin documents **0.6.0**.
 
 ## [0.5.2] - 2026-08-12
 

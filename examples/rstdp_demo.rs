@@ -227,14 +227,18 @@ fn scenario_slow_traces(network: &mut SpikingNetwork) {
     let per_step_loss = |tau: f32| 100.0 * (1.0 - (-1.0 / tau).exp());
     println!(
         "  Over those 10 steps ch0 gained {slow_gain:+.4} under the slow config \
-         against\n  {default_gain:+.4} under the defaults — {:.2}x the payout, \
-         because `reward_lr` scales\n  every conversion. The trace itself ran \
-         the other way: {:+.4} against\n  {:+.4}, since the longer tau discards \
-         {:.2}% of it per step instead of\n  {:.2}%. That 4x is the decay \
-         constant, not the trace value — both networks\n  are still taking in \
-         fresh coincidences every step, so the gap compounds rather\n  \
-         than arriving at 4x.\n",
+         against\n  {default_gain:+.4} under the defaults: a net weight-gain \
+         ratio of {:.2}x. That is\n  an end-to-end figure, not a payout factor \
+         — both config changes and the L1\n  pass feed into it. `reward_lr` \
+         alone accounts for {:.2}x; the slow config's\n  larger trace pulls the \
+         other way.\n  \
+         That trace is {:+.4} against {:+.4}, since the longer tau discards \
+         {:.2}%\n  of it per step instead of {:.2}%. The 4x there is the ratio \
+         of decay\n  constants, not of trace values — both networks keep taking \
+         in fresh\n  coincidences every step, so the gap compounds rather than \
+         arriving at 4x.\n",
         slow_gain / default_gain,
+        network.stdp_config.reward_lr / default_twin.stdp_config.reward_lr,
         network.neurons[0].eligibility[0].value,
         default_twin.neurons[0].eligibility[0].value,
         per_step_loss(network.stdp_config.tau_eligibility),

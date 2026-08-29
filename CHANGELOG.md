@@ -20,8 +20,11 @@ All notable changes to this project are documented in this file.
   to `RM_STDP_W_MIN` / `RM_STDP_W_MAX` when the public bound fields are left reversed or
   non-finite (either would panic `f32::clamp` inside `step`), or when `w_min` is negative.
   This crate does not support inhibitory weights: a negative floor lets a rewarded depression
-  flip a synapse's sign, and once a neuron's weights sum negative the L1 renormalization pass
-  skips it permanently, since `total > 1e-6` is never true again.
+  flip a synapse's sign, and the L1 renormalization pass then skips that neuron for as long as
+  its weights sum non-positive. A wholly negative range such as `(-2.0, -1.0)` makes that
+  permanent — every update clamps back inside it, so the total can never climb — while a range
+  merely straddling zero stalls normalization until later potentiation restores a positive
+  total.
 - `RmStdpConfig::effective_reward_lr` — same guard for a non-finite `reward_lr`. A `NaN`
   rate would poison a weight on the first rewarded step and never clear, because the L1
   renormalization pass skips any neuron whose total is not `> 1e-6` and `NaN > 1e-6` is

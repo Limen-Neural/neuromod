@@ -385,14 +385,23 @@ impl SpikingNetwork {
 
                 if rewarding && trace.value != 0.0 {
                     let dw = reward_lr * dopamine_lr * trace.value;
-                    // No update, nothing to clamp. Writing anyway would let the
-                    // bounds move a weight on their own: `reward_lr = 0.0`
-                    // disables conversion, yet a positive `w_min` would still
-                    // lift an unconnected synapse to the floor, and the L1 pass
-                    // then scales that fabricated weight toward the budget.
-                    // Bounds are enforced where a weight actually changes.
-                    if dw != 0.0 {
-                        neuron.weights[ch] = (neuron.weights[ch] + dw).clamp(w_min, w_max);
+                    let w = neuron.weights[ch];
+                    // The bounds must never move a weight on their own. Writing
+                    // unconditionally lets them do exactly that on a synapse
+                    // left at exactly zero -- unconnected, the state the L1 pass
+                    // below is careful to preserve -- in two ways:
+                    //
+                    // - `reward_lr = 0.0` disables conversion, yet a `dw` of
+                    //   zero still clamps the synapse up to a positive `w_min`.
+                    // - Depression (`dw < 0`) has nothing to take away, and its
+                    //   negative result clamps up to `w_min` too, connecting a
+                    //   synapse by weakening it.
+                    //
+                    // Potentiation is the one update that may bring a synapse
+                    // online, and it still lands on the floor where `w_min`
+                    // binds. Everywhere else the L1 pass re-clamps each step.
+                    if dw > 0.0 || (dw < 0.0 && w != 0.0) {
+                        neuron.weights[ch] = (w + dw).clamp(w_min, w_max);
                     }
                 }
             }
@@ -742,6 +751,65 @@ mod tests {
             "post-before-pre is depression, got {}",
             network.neurons[0].eligibility[0].value
         );
+        assert_eq!(
+            network.neurons[0].weights[0],
+            network.stdp_config.weight_bounds().0,
+            "depression must clamp at w_min, not go negative"
+        );
+    }
+    #[test]
+    fn test_rewarded_depression_does_not_connect_a_zero_weight_synapse() {
+        // Depression on an unconnected synapse: `(0.0 + dw).clamp(w_min, w_max)`
+        // with a negative `dw` and a positive floor returns `w_min`, so paying
+        // out a negative trace would *create* the connection depression is
+        // supposed to weaken. Skipping a zero update is not enough here -- `dw`
+        // is genuinely non-zero, it just points the wrong way.
+        let mut network = SpikingNetwork::with_dimensions(1, 1, 2);
+        network.neurons[0].weights = vec![0.0, WEIGHT_BUDGET];
+        network.set_rm_stdp_config(RmStdpConfig {
+            w_min: 0.1,
+            ..RmStdpConfig::default()
+        });
+        // Zero weight on channel 0 means no drive from it, so the neuron cannot
+        // fire and keeps the post spike planted here -- strictly before the pre
+        // spike channel 0 emits on the step below.
+        network.neurons[0].last_spike_time = 0;
+        let reward = NeuroModulators {
+            dopamine: 0.9,
+            ..Default::default()
+        };
+
+        network.step(&[1.0, 0.0], &reward).expect("length matches");
+
+        assert_eq!(network.neurons[0].last_spike_time, 0, "must not have fired");
+        assert!(
+            network.neurons[0].eligibility[0].value < 0.0,
+            "expected a depressing trace, got {}",
+            network.neurons[0].eligibility[0].value
+        );
+        assert_eq!(
+            network.neurons[0].weights[0], 0.0,
+            "depression must not lift an unconnected synapse to the floor"
+        );
+    }
+    #[test]
+    fn test_depression_clamps_a_connected_synapse_at_w_min() {
+        // The floor still binds wherever an update actually applies: a
+        // *connected* synapse depressed past `w_min` stops there instead of
+        // going negative. This is the other half of the test above, which
+        // covers the synapse that must not be connected in the first place.
+        let mut network = SpikingNetwork::with_dimensions(1, 1, 2);
+        network.neurons[0].weights = vec![0.001, WEIGHT_BUDGET];
+        network.neurons[0].eligibility[0].value = -0.5;
+        let reward = NeuroModulators {
+            dopamine: 0.9,
+            ..Default::default()
+        };
+
+        // Zero stimuli: nothing spikes, so the banked trace is the only input
+        // to the update and its sign is not in doubt.
+        network.step(&[0.0, 0.0], &reward).expect("length matches");
+
         assert_eq!(
             network.neurons[0].weights[0],
             network.stdp_config.weight_bounds().0,

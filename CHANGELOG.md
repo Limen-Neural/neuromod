@@ -46,10 +46,12 @@ All notable changes to this project are documented in this file.
   post-before-pre depresses and clamps at `w_min`, one spike pair is counted once, and a
   pre-0.6 checkpoint without the new fields still deserializes and steps (#74).
 - Benchmarks for trace accumulation, the trace → weight conversion, and rewarded vs
-  unrewarded engine steps (`benches/stdp_bench.rs`). The engine-step benches warm the network
-  to steady state first: `apply_stdp` skips the decay `exp` while a trace is still exactly
-  zero, so timing from a blank network would measure that transient instead of the per-step
-  cost of a running one.
+  unrewarded engine steps (`benches/stdp_bench.rs`), listed in `benches/README.md`. The
+  engine-step benches warm the network to steady state first: `apply_stdp` skips the decay
+  `exp` while a trace is still exactly zero, so timing from a blank network would measure that
+  transient instead of the per-step cost of a running one. The conversion bench is batched
+  rather than carrying its weight across iterations, which would pin it at `w_max` within a
+  couple of hundred samples and time a saturated synapse.
 - [ADR 002](docs/adr/002-wire-eligibility-traces.md) recording the wire-vs-demote decision.
 
 ### Changed
@@ -75,10 +77,13 @@ All notable changes to this project are documented in this file.
   off budget. The defaults cannot bind, so the budget still holds exactly under them. The
   renormalization pass leaves a synapse at exactly zero alone, so a positive `w_min` cannot
   conjure a connection on an unrewarded step; learning raises a synapse to the floor in the
-  reward-gated `apply_stdp` instead. `apply_stdp` in turn writes only when the update is
-  non-zero, so `reward_lr = 0.0` really disables conversion: without that check a positive
-  `w_min` clamped an unconnected synapse up to the floor even though no credit was converted,
-  and the L1 pass then scaled the fabricated weight toward the budget.
+  reward-gated `apply_stdp` instead, and only through potentiation. Both paths that touch a
+  weight now agree that exactly zero means unconnected and that the bounds never move a weight
+  on their own. Writing unconditionally let them do so twice over on a zero-weight synapse:
+  `reward_lr = 0.0` disables conversion, yet a `dw` of zero still clamped up to a positive
+  `w_min`; and a depressing update (`dw < 0`) clamped up to `w_min` as well, connecting a
+  synapse by weakening it. Either way the L1 pass then scaled the fabricated weight toward the
+  budget. The floor still binds wherever an update actually applies.
 - `examples/rstdp_demo.rs` prints real trace and weight numbers read back from the network
   instead of narrating hardcoded claims about learning. Its `RmStdpConfig` scenario runs the
   reconfigured network and an otherwise identical default-config twin through the same

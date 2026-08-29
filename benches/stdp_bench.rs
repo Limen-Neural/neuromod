@@ -1,4 +1,4 @@
-use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
+use criterion::{BatchSize, BenchmarkId, Criterion, criterion_group, criterion_main};
 use neuromod::rm_stdp::{
     EligibilityTrace, RM_STDP_A_MINUS, RM_STDP_A_PLUS, RM_STDP_TAU_MINUS, RM_STDP_TAU_PLUS,
     RmStdpConfig,
@@ -71,19 +71,35 @@ fn bench_eligibility_trace_accumulate(c: &mut Criterion) {
 
 /// The wired path: decay, accumulate, then convert the trace into a weight
 /// change under the dopamine gate — one synapse's worth of `apply_stdp`.
+///
+/// Batched rather than carried across iterations. Every conversion here is a
+/// potentiation, so a persistent `weight` climbs to `w_max` within a couple of
+/// hundred iterations and stays pinned: from then on `clamp` returns the bound
+/// and the bench times a saturated synapse instead of a converting one. Each
+/// sample starts from a mid-range weight and a representative banked trace, so
+/// the measured work is the same on the first sample and the last.
 fn bench_reward_conversion(c: &mut Criterion) {
     let config = RmStdpConfig::default();
 
     c.bench_function("rm_stdp_trace_to_weight", |b| {
-        let mut trace = EligibilityTrace::new(config.tau_eligibility);
-        let mut weight = 0.5_f32;
-        b.iter(|| {
-            trace.decay();
-            trace.accumulate(black_box(1.0));
-            let dw = config.reward_lr * black_box(0.45_f32) * trace.value;
-            weight = (weight + dw).clamp(config.w_min, config.w_max);
-            black_box(weight);
-        });
+        b.iter_batched(
+            || {
+                (
+                    EligibilityTrace {
+                        value: 0.5,
+                        tau: config.tau_eligibility,
+                    },
+                    0.5_f32,
+                )
+            },
+            |(mut trace, weight)| {
+                trace.decay();
+                trace.accumulate(black_box(1.0));
+                let dw = config.reward_lr * black_box(0.45_f32) * trace.value;
+                (weight + dw).clamp(config.w_min, config.w_max)
+            },
+            BatchSize::SmallInput,
+        );
     });
 }
 

@@ -956,6 +956,38 @@ mod tests {
     }
 
     #[test]
+    fn test_negative_w_min_cannot_make_weights_inhibitory() {
+        // Ordered and finite, but inhibitory — unsupported by this crate. Left
+        // unguarded, a rewarded depression drives weights negative and the L1
+        // pass then skips the neuron forever, since a negative total never
+        // satisfies its `> 1e-6` guard.
+        let mut network = SpikingNetwork::with_dimensions(1, 1, 2);
+        network.neurons[0].weights = vec![0.5, 0.5];
+        network.set_rm_stdp_config(RmStdpConfig {
+            w_min: -2.0,
+            w_max: -1.0,
+            ..RmStdpConfig::default()
+        });
+        let reward = NeuroModulators {
+            dopamine: 0.9,
+            ..Default::default()
+        };
+
+        for _ in 0..5 {
+            network.step(&[1.0, 1.0], &reward).expect("length matches");
+        }
+
+        for neuron in &network.neurons {
+            assert!(
+                neuron.weights.iter().all(|&w| w >= 0.0),
+                "weights must stay excitatory: {:?}",
+                neuron.weights
+            );
+        }
+        assert_eq!(network.stdp_config.weight_bounds(), (0.0, 2.0));
+    }
+
+    #[test]
     fn test_pre_0_6_state_without_new_fields_loads_and_steps() {
         let mut network = SpikingNetwork::with_dimensions(2, 1, 3);
         for neuron in &mut network.neurons {

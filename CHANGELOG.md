@@ -16,9 +16,12 @@ All notable changes to this project are documented in this file.
 - `EligibilityTrace::new` / `kernel` / `accumulate` / `reset`, plus `Default` impls for
   `EligibilityTrace` and `RmStdpConfig`, and the `RM_STDP_TAU_ELIGIBILITY` /
   `RM_STDP_REWARD_LR` constants behind those defaults.
-- `RmStdpConfig::weight_bounds` — ordered `(min, max)` accessor that falls back to
-  `RM_STDP_W_MIN` / `RM_STDP_W_MAX` when the public bound fields are left reversed or
-  non-finite, so a hand-edited config cannot panic `f32::clamp` inside `step`.
+- `RmStdpConfig::weight_bounds` — ordered, non-negative `(min, max)` accessor that falls back
+  to `RM_STDP_W_MIN` / `RM_STDP_W_MAX` when the public bound fields are left reversed or
+  non-finite (either would panic `f32::clamp` inside `step`), or when `w_min` is negative.
+  This crate does not support inhibitory weights: a negative floor lets a rewarded depression
+  flip a synapse's sign, and once a neuron's weights sum negative the L1 renormalization pass
+  skips it permanently, since `total > 1e-6` is never true again.
 - `RmStdpConfig::effective_reward_lr` — same guard for a non-finite `reward_lr`. A `NaN`
   rate would poison a weight on the first rewarded step and never clear, because the L1
   renormalization pass skips any neuron whose total is not `> 1e-6` and `NaN > 1e-6` is

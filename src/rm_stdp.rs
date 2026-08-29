@@ -133,13 +133,21 @@ impl Default for RmStdpConfig {
 }
 
 impl RmStdpConfig {
-    /// Weight bounds as an ordered `(min, max)` pair, safe to hand to
-    /// [`f32::clamp`].
+    /// Weight bounds as an ordered, non-negative `(min, max)` pair, safe to hand
+    /// to [`f32::clamp`].
     ///
-    /// `w_min` and `w_max` are public fields, so a caller can leave them
-    /// reversed or non-finite — which would make `clamp` panic. This falls back
-    /// to [`RM_STDP_W_MIN`] / [`RM_STDP_W_MAX`] in that case rather than taking
-    /// the engine down mid-step.
+    /// `w_min` and `w_max` are public fields, so a caller can leave them in
+    /// three states the engine cannot honor. Each falls back to
+    /// [`RM_STDP_W_MIN`] / [`RM_STDP_W_MAX`]:
+    ///
+    /// - **Non-finite** — `clamp` panics on a `NaN` bound, inside a
+    ///   `Result`-returning `step`.
+    /// - **Reversed** (`w_min > w_max`) — `clamp` panics on that too.
+    /// - **Negative `w_min`** — this crate does not support inhibitory weights
+    ///   (see [`RM_STDP_W_MIN`]). A negative floor lets a rewarded depression
+    ///   drive a synapse below zero, flipping its sign during integration, and
+    ///   once a neuron's weights sum negative the L1 renormalization pass skips
+    ///   it forever — its `total > 1e-6` guard is never true again.
     ///
     /// ```
     /// use neuromod::RmStdpConfig;
@@ -149,9 +157,16 @@ impl RmStdpConfig {
     ///
     /// let reversed = RmStdpConfig { w_min: 1.5, w_max: 0.2, ..RmStdpConfig::default() };
     /// assert_eq!(reversed.weight_bounds(), (0.0, 2.0));
+    ///
+    /// let inhibitory = RmStdpConfig { w_min: -2.0, w_max: -1.0, ..RmStdpConfig::default() };
+    /// assert_eq!(inhibitory.weight_bounds(), (0.0, 2.0));
     /// ```
     pub fn weight_bounds(&self) -> (f32, f32) {
-        if !self.w_min.is_finite() || !self.w_max.is_finite() || self.w_min > self.w_max {
+        if !self.w_min.is_finite()
+            || !self.w_max.is_finite()
+            || self.w_min < RM_STDP_W_MIN
+            || self.w_min > self.w_max
+        {
             return (RM_STDP_W_MIN, RM_STDP_W_MAX);
         }
         (self.w_min, self.w_max)
@@ -313,6 +328,9 @@ mod tests {
             (f32::NAN, 1.0),
             (0.0, f32::NAN),
             (f32::NEG_INFINITY, f32::INFINITY),
+            // Inhibitory ranges: ordered and finite, but unsupported.
+            (-2.0, -1.0),
+            (-0.5, 2.0),
         ] {
             let config = RmStdpConfig {
                 w_min,

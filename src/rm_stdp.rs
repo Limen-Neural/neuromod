@@ -211,6 +211,16 @@ impl RmStdpConfig {
     /// negative tau gives `exp(1/|tau|) > 1`, growing the trace without bound.
     /// Each falls back to [`RM_STDP_TAU_ELIGIBILITY`].
     ///
+    /// [`EligibilityTrace::decay`] applies the same fallback to its own `tau`
+    /// field, so none of the above can actually reach the arithmetic. The two
+    /// guards cover different layers: `decay` protects a trace that already
+    /// holds a bad `tau`, while this accessor protects the value that *becomes*
+    /// one — `tau_eligibility` seeds every newly resized trace and is stamped
+    /// onto all of them by
+    /// [`SpikingNetwork::set_rm_stdp_config`](crate::SpikingNetwork::set_rm_stdp_config).
+    /// Guarding here keeps the stored `tau` correct and inspectable instead of
+    /// leaving each decay to paper over it.
+    ///
     /// A *tiny positive* tau is not rejected: it is a legitimate setting that
     /// means "no memory", and it does erase the trace within a step.
     ///

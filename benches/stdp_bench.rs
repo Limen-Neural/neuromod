@@ -51,6 +51,10 @@ fn bench_eligibility_trace_accumulate(c: &mut Criterion) {
         let mut trace = EligibilityTrace::new(50.0);
         b.iter(|| {
             trace.accumulate(black_box(5.0));
+            // Observe the result: `accumulate` only writes `self.value`, so
+            // without this the kernel and the add are dead stores and the
+            // bench times an empty loop.
+            black_box(trace.value);
             trace.value = 0.0;
         });
     });
@@ -59,6 +63,7 @@ fn bench_eligibility_trace_accumulate(c: &mut Criterion) {
         let mut trace = EligibilityTrace::new(50.0);
         b.iter(|| {
             trace.accumulate(black_box(-5.0));
+            black_box(trace.value);
             trace.value = 0.0;
         });
     });

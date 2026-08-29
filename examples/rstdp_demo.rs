@@ -4,8 +4,9 @@
 //! per-synapse eligibility traces accumulate spike-timing coincidences on
 //! every step, and dopamine converts those traces into weight changes.
 //!
-//! Every number below is read back out of the network after `step` — nothing
-//! here is narrated from a constant.
+//! The weight and eligibility reports are read back out of the network after
+//! `step`, not narrated from constants. Setup lines, stimuli, and modulator
+//! levels print the inputs used to drive it.
 //!
 //! Run with: cargo run --example rstdp_demo
 
@@ -84,7 +85,12 @@ fn main() {
         "  dopamine={:.2}, norepinephrine={:.2}, ach={:.2}",
         rewarded.dopamine, rewarded.norepinephrine, rewarded.acetylcholine
     );
-    println!("  learning rate: {:.3}\n", 0.5 * rewarded.dopamine);
+    let dopamine_lr = 0.5 * rewarded.dopamine;
+    println!(
+        "  dopamine_lr: {dopamine_lr:.3}  (trace payout factor \
+         reward_lr x dopamine_lr = {:.4})\n",
+        config.reward_lr * dopamine_lr
+    );
     let before = network.neurons[0].weights.clone();
     for _ in 0..10 {
         network
@@ -103,9 +109,10 @@ fn main() {
     }
     println!();
     println!(
-        "  Driven synapses potentiated; silent ones lost share of the fixed L1\n  \
-         budget. No hand-written rule ran here — the deltas are\n  \
-         reward_lr x dopamine_lr x eligibility.\n"
+        "  The trace payout itself is reward_lr x dopamine_lr x eligibility, applied\n  \
+         per synapse. These printed deltas are that payout *after* the L1\n  \
+         renormalization pass — which is why channels 2 and 3 moved at all despite\n  \
+         holding no trace: the driven synapses took share of a fixed budget.\n"
     );
 
     println!("--- Scenario 3: Stress State (High Norepinephrine) ---");

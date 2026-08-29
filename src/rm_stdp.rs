@@ -105,6 +105,12 @@ pub struct RmStdpConfig {
     /// when a reward signal arrives. Typical values are 0.01-0.1.
     pub reward_lr: f32,
     /// Minimum weight (no negative/inhibitory weights yet).
+    ///
+    /// Bounds weight *updates* — the clamp in `apply_stdp` and the L1
+    /// renormalization pass. It is not a floor imposed on untouched weights: a
+    /// network starts with blank (zero) weights by design, and renormalization
+    /// skips a neuron whose weights still sum to ~0, so a positive `w_min`
+    /// never seeds one.
     pub w_min: f32,
     /// Maximum weight (prevents runaway excitation).
     pub w_max: f32,
@@ -144,6 +150,34 @@ impl RmStdpConfig {
             return (RM_STDP_W_MIN, RM_STDP_W_MAX);
         }
         (self.w_min, self.w_max)
+    }
+
+    /// Reward learning rate, guarded against a non-finite value.
+    ///
+    /// `reward_lr` is public too, and a `NaN` rate is worse than a bad clamp: it
+    /// poisons a weight on the first rewarded step, and the L1 renormalization
+    /// pass then skips that neuron forever, because a `NaN` total is not
+    /// `> 1e-6`. The corruption would never clear. Falls back to
+    /// [`RM_STDP_REWARD_LR`].
+    ///
+    /// A finite negative rate is passed through — inverting the sign of learning
+    /// is a legitimate (if unusual) choice, unlike `NaN`.
+    ///
+    /// ```
+    /// use neuromod::RmStdpConfig;
+    ///
+    /// let poisoned = RmStdpConfig { reward_lr: f32::NAN, ..RmStdpConfig::default() };
+    /// assert_eq!(poisoned.effective_reward_lr(), 0.05);
+    ///
+    /// let tuned = RmStdpConfig { reward_lr: 0.02, ..RmStdpConfig::default() };
+    /// assert_eq!(tuned.effective_reward_lr(), 0.02);
+    /// ```
+    pub fn effective_reward_lr(&self) -> f32 {
+        if self.reward_lr.is_finite() {
+            self.reward_lr
+        } else {
+            RM_STDP_REWARD_LR
+        }
     }
 }
 
@@ -249,6 +283,28 @@ mod tests {
             assert_eq!((lo, hi), fallback);
             // The contract that matters: `clamp` must not panic on the result.
             assert!(0.5_f32.clamp(lo, hi).is_finite());
+        }
+    }
+
+    #[test]
+    fn effective_reward_lr_passes_through_finite_rates() {
+        for rate in [0.0, 0.02, RM_STDP_REWARD_LR, -0.03] {
+            let config = RmStdpConfig {
+                reward_lr: rate,
+                ..RmStdpConfig::default()
+            };
+            assert_eq!(config.effective_reward_lr(), rate);
+        }
+    }
+
+    #[test]
+    fn effective_reward_lr_falls_back_for_non_finite_rates() {
+        for rate in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY] {
+            let config = RmStdpConfig {
+                reward_lr: rate,
+                ..RmStdpConfig::default()
+            };
+            assert_eq!(config.effective_reward_lr(), RM_STDP_REWARD_LR);
         }
     }
 

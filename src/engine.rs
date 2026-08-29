@@ -310,6 +310,7 @@ impl SpikingNetwork {
         let now = self.global_step;
         let config = self.stdp_config;
         let (w_min, w_max) = config.weight_bounds();
+        let reward_lr = config.effective_reward_lr();
         let rewarding = dopamine_lr >= 1e-6;
         let input_times = &self.input_spike_times;
 
@@ -342,7 +343,7 @@ impl SpikingNetwork {
                 }
 
                 if rewarding && trace.value != 0.0 {
-                    let dw = config.reward_lr * dopamine_lr * trace.value;
+                    let dw = reward_lr * dopamine_lr * trace.value;
                     neuron.weights[ch] = (neuron.weights[ch] + dw).clamp(w_min, w_max);
                 }
             }
@@ -787,6 +788,60 @@ mod tests {
             assert!(
                 total < WEIGHT_BUDGET,
                 "a binding w_max holds the L1 sum under budget: got {total}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_non_finite_reward_lr_cannot_poison_weights() {
+        // A NaN weight would survive forever: renormalization skips a neuron
+        // whose total is not `> 1e-6`, and `NaN > 1e-6` is false.
+        let mut network = rstdp_test_network();
+        network.stdp_config.reward_lr = f32::NAN;
+        let reward = NeuroModulators {
+            dopamine: 0.9,
+            ..Default::default()
+        };
+
+        for _ in 0..10 {
+            network
+                .step(&DRIVEN_AND_SILENT, &reward)
+                .expect("length matches");
+        }
+
+        for neuron in &network.neurons {
+            assert!(
+                neuron.weights.iter().all(|w| w.is_finite()),
+                "a non-finite reward_lr must not poison weights: {:?}",
+                neuron.weights
+            );
+        }
+    }
+
+    #[test]
+    fn test_positive_w_min_does_not_seed_a_blank_network() {
+        // Blank weights are the documented neutral initialization. Bounds gate
+        // weight *updates*; they do not fabricate synaptic weight where the
+        // network deliberately has none.
+        let mut network = SpikingNetwork::with_dimensions(2, 1, 4);
+        network.set_rm_stdp_config(RmStdpConfig {
+            w_min: 0.1,
+            ..RmStdpConfig::default()
+        });
+        let reward = NeuroModulators {
+            dopamine: 0.9,
+            ..Default::default()
+        };
+
+        for _ in 0..5 {
+            network.step(&[1.0; 4], &reward).expect("length matches");
+        }
+
+        for neuron in &network.neurons {
+            assert!(
+                neuron.weights.iter().all(|&w| w == 0.0),
+                "a positive w_min must not seed blank weights: {:?}",
+                neuron.weights
             );
         }
     }

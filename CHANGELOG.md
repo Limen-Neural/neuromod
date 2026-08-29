@@ -19,6 +19,10 @@ All notable changes to this project are documented in this file.
 - `RmStdpConfig::weight_bounds` — ordered `(min, max)` accessor that falls back to
   `RM_STDP_W_MIN` / `RM_STDP_W_MAX` when the public bound fields are left reversed or
   non-finite, so a hand-edited config cannot panic `f32::clamp` inside `step`.
+- `RmStdpConfig::effective_reward_lr` — same guard for a non-finite `reward_lr`. A `NaN`
+  rate would poison a weight on the first rewarded step and never clear, because the L1
+  renormalization pass skips any neuron whose total is not `> 1e-6` and `NaN > 1e-6` is
+  false. Finite negative rates still pass through.
 - Tests proving the reward-gated path: traces accumulate with dopamine off while weights
   hold, dopamine converts the banked trace (and more dopamine buys more learning),
   post-before-pre depresses and clamps at `w_min`, one spike pair is counted once, and a

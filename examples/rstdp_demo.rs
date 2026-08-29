@@ -162,19 +162,66 @@ fn main() {
     );
 
     println!("--- Scenario 5: Slower Traces via `RmStdpConfig` ---");
+    // Snapshot the network before touching its config. The twin inherits this
+    // exact state and keeps the defaults, then sees the identical stimuli and
+    // modulators below — so the only thing separating the two runs is
+    // `RmStdpConfig`. `SpikingNetwork` is not `Clone`, but it is serde
+    // round-trippable, which is the same mechanism used for checkpointing.
+    let mut default_twin: SpikingNetwork =
+        serde_json::from_str(&serde_json::to_string(&network).expect("network must serialize"))
+            .expect("snapshot must deserialize");
+
+    let entry_weight = network.neurons[0].weights[0];
+    let entry_trace = network.neurons[0].eligibility[0].value;
+
     network.set_rm_stdp_config(RmStdpConfig {
         tau_eligibility: 200.0,
         reward_lr: 0.02,
         ..RmStdpConfig::default()
     });
     println!(
-        "  tau_eligibility -> {:.1}, reward_lr -> {:.3}",
-        network.stdp_config.tau_eligibility, network.stdp_config.reward_lr
+        "  tau_eligibility {:.1} -> {:.1}, reward_lr {:.3} -> {:.3}",
+        default_twin.stdp_config.tau_eligibility,
+        network.stdp_config.tau_eligibility,
+        default_twin.stdp_config.reward_lr,
+        network.stdp_config.reward_lr
     );
     println!(
-        "  Traces now hold credit ~4x longer and pay out more slowly; existing\n  \
-         traces keep their accumulated value and adopt the new tau: {:.1}\n",
-        network.neurons[0].eligibility[0].tau
+        "  ch0 trace across the switch: {entry_trace:+.4} -> {:+.4} (kept), now\n  \
+         decaying with tau={:.1}\n",
+        network.neurons[0].eligibility[0].value, network.neurons[0].eligibility[0].tau
+    );
+
+    // Same 10 rewarded steps Scenario 2 used, run on both networks.
+    for _ in 0..10 {
+        network
+            .step(&STIMULI, &rewarded)
+            .expect("stimuli length must match network channels");
+        default_twin
+            .step(&STIMULI, &rewarded)
+            .expect("stimuli length must match network channels");
+    }
+    report(&network, "slow config");
+    report(&default_twin, "default config");
+
+    let slow_gain = network.neurons[0].weights[0] - entry_weight;
+    let default_gain = default_twin.neurons[0].weights[0] - entry_weight;
+    // Fraction of a trace discarded per step, read off each network's live tau.
+    let per_step_loss = |tau: f32| 100.0 * (1.0 - (-1.0 / tau).exp());
+    println!(
+        "  Over those 10 steps ch0 gained {slow_gain:+.4} under the slow config \
+         against\n  {default_gain:+.4} under the defaults — {:.2}x the payout, \
+         because `reward_lr` scales\n  every conversion. The trace itself ran \
+         the other way: {:+.4} against\n  {:+.4}, since the longer tau discards \
+         {:.2}% of it per step instead of\n  {:.2}%. That 4x is the decay \
+         constant, not the trace value — both networks\n  are still taking in \
+         fresh coincidences every step, so the gap compounds rather\n  \
+         than arriving at 4x.\n",
+        slow_gain / default_gain,
+        network.neurons[0].eligibility[0].value,
+        default_twin.neurons[0].eligibility[0].value,
+        per_step_loss(network.stdp_config.tau_eligibility),
+        per_step_loss(default_twin.stdp_config.tau_eligibility),
     );
 
     println!("=== Modulator Operations Demo ===\n");

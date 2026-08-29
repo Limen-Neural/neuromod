@@ -75,9 +75,15 @@ All notable changes to this project are documented in this file.
   off budget. The defaults cannot bind, so the budget still holds exactly under them. The
   renormalization pass leaves a synapse at exactly zero alone, so a positive `w_min` cannot
   conjure a connection on an unrewarded step; learning raises a synapse to the floor in the
-  reward-gated `apply_stdp` instead.
+  reward-gated `apply_stdp` instead. `apply_stdp` in turn writes only when the update is
+  non-zero, so `reward_lr = 0.0` really disables conversion: without that check a positive
+  `w_min` clamped an unconnected synapse up to the floor even though no credit was converted,
+  and the L1 pass then scaled the fabricated weight toward the budget.
 - `examples/rstdp_demo.rs` prints real trace and weight numbers read back from the network
-  instead of narrating hardcoded claims about learning.
+  instead of narrating hardcoded claims about learning. Its `RmStdpConfig` scenario runs the
+  reconfigured network and an otherwise identical default-config twin through the same
+  rewarded steps, so the slower payout and the longer-held trace are measured rather than
+  asserted.
 - Docs no longer carry the "eligibility traces are not wired" caveat: crate root, `engine`,
   `lif`, and `rm_stdp` rustdoc, `README.md`, `CLAUDE.md`, and the `REVIEW.md` regression
   guards describe (and guard) the wired path.

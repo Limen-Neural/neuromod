@@ -301,7 +301,8 @@ impl SpikingNetwork {
                     // positive `w_min` must not conjure a connection here: this
                     // loop runs every step, dopamine or not, and an unrewarded
                     // step must leave weights alone. Learning raises a synapse
-                    // to the floor in `apply_stdp`, which is reward-gated.
+                    // to the floor in `apply_stdp`, and only on a step where it
+                    // actually applies an update.
                     if *w == 0.0 {
                         continue;
                     }
@@ -384,7 +385,15 @@ impl SpikingNetwork {
 
                 if rewarding && trace.value != 0.0 {
                     let dw = reward_lr * dopamine_lr * trace.value;
-                    neuron.weights[ch] = (neuron.weights[ch] + dw).clamp(w_min, w_max);
+                    // No update, nothing to clamp. Writing anyway would let the
+                    // bounds move a weight on their own: `reward_lr = 0.0`
+                    // disables conversion, yet a positive `w_min` would still
+                    // lift an unconnected synapse to the floor, and the L1 pass
+                    // then scales that fabricated weight toward the budget.
+                    // Bounds are enforced where a weight actually changes.
+                    if dw != 0.0 {
+                        neuron.weights[ch] = (neuron.weights[ch] + dw).clamp(w_min, w_max);
+                    }
                 }
             }
         }
@@ -676,6 +685,40 @@ mod tests {
             "deferred credit: reward converts the banked trace with no new spikes"
         );
         assert!(network.neurons[0].weights[0] > network.neurons[0].weights[1]);
+    }
+    #[test]
+    fn test_zero_reward_rate_leaves_an_unconnected_synapse_at_zero() {
+        // `reward_lr = 0.0` turns trace conversion off. A positive `w_min` must
+        // not then stand in for it: with no update applied there is nothing to
+        // clamp, and raising an unconnected synapse to the floor would let a
+        // disabled learning rate change connectivity. The renormalization pass
+        // would then scale that fabricated weight toward the budget.
+        let mut network = SpikingNetwork::with_dimensions(1, 1, 2);
+        network.neurons[0].weights = vec![0.0, WEIGHT_BUDGET];
+        network.set_rm_stdp_config(RmStdpConfig {
+            reward_lr: 0.0,
+            w_min: 0.1,
+            ..RmStdpConfig::default()
+        });
+        // Credit is banked, so the conversion branch is entered every step.
+        network.neurons[0].eligibility[0].value = 0.5;
+
+        let reward = NeuroModulators {
+            dopamine: 0.9,
+            ..Default::default()
+        };
+        for _ in 0..5 {
+            network.step(&[0.0, 0.0], &reward).expect("length matches");
+        }
+
+        assert!(
+            network.neurons[0].eligibility[0].value > 0.0,
+            "the trace should still be banked, so the branch really ran"
+        );
+        assert_eq!(
+            network.neurons[0].weights[0], 0.0,
+            "a zero learning rate applied no update, so the floor must not connect this synapse"
+        );
     }
 
     #[test]

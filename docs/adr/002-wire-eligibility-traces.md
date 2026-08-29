@@ -33,8 +33,12 @@ experimental.
   constant, the reward learning rate, and the weight bounds.
 - `SpikingNetwork::apply_stdp` decays and accumulates traces **every step, independent of
   dopamine**, and gates only the trace → weight conversion on dopamine.
-- Both new fields are `#[serde(default)]`, so pre-0.6 checkpoints still deserialize; the
-  engine resizes a missing or stale trace vector to match `weights` before use.
+- Both new fields are `#[serde(default)]`, so a pre-0.6 checkpoint written in a
+  self-describing format (JSON, YAML, RON, map-encoded MessagePack) still deserializes; the
+  engine resizes a missing or stale trace vector to match `weights` before use. Positional
+  binary formats such as `bincode` and `postcard` encode a struct as a bare sequence, so old
+  bytes reach end-of-input before the new fields and `#[serde(default)]` never applies —
+  those checkpoints must be re-serialized from 0.5.x. See the README migration notes.
 
 Trace accumulation is **event-gated**: a coincidence is recorded only on the step where the
 post neuron or the pre channel actually spiked, never re-recorded from a stale pair on

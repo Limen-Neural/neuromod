@@ -247,8 +247,11 @@ instead of being recomputed from raw spike times each step, so a 0.6 run will no
 coincidence still pays for it.
 
 **Weight bounds moved into `RmStdpConfig`.** `RM_STDP_W_MIN` / `RM_STDP_W_MAX` remain public
-and are the defaults. Bounds take precedence over the engine's L1 weight budget, so
-narrowing them leaves each neuron's weight sum below budget by however much they bind.
+and are the defaults. Bounds take precedence over the engine's L1 weight budget: `step`
+scales toward the budget and then clamps, so a binding bound leaves the sum **off** budget in
+whichever direction it binds — a lowered `w_max` caps weights and leaves the sum short, while
+a raised `w_min` lifts weights after scaling and can push the sum past it. The defaults cannot
+bind, so the budget holds exactly under them.
 
 ## Included Components
 

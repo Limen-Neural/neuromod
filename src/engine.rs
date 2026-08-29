@@ -104,6 +104,14 @@ impl SpikingNetwork {
     /// Replace the R-STDP hyperparameters, re-`tau`-ing every existing
     /// eligibility trace so traces and config stay consistent.
     ///
+    /// The config is **normalized on the way in**: each field passes through its
+    /// guard ([`RmStdpConfig::weight_bounds`],
+    /// [`RmStdpConfig::effective_reward_lr`],
+    /// [`RmStdpConfig::effective_tau_eligibility`]), so a reversed or non-finite
+    /// value is replaced by the published default rather than stored and worked
+    /// around later. Assigning [`Self::stdp_config`] directly bypasses this; the
+    /// engine still reads through the same guards, so it stays safe either way.
+    ///
     /// Accumulated trace *values* are preserved — only the decay time constant
     /// changes. Use [`Self::reset`] to clear them.
     ///
@@ -122,8 +130,15 @@ impl SpikingNetwork {
     /// assert_eq!(net.neurons[0].eligibility[0].tau, 100.0);
     /// ```
     pub fn set_rm_stdp_config(&mut self, config: RmStdpConfig) {
-        self.stdp_config = config;
+        let (w_min, w_max) = config.weight_bounds();
         let tau = config.effective_tau_eligibility();
+        self.stdp_config = RmStdpConfig {
+            tau_eligibility: tau,
+            reward_lr: config.effective_reward_lr(),
+            w_min,
+            w_max,
+        };
+
         for neuron in &mut self.neurons {
             for trace in &mut neuron.eligibility {
                 trace.tau = tau;
@@ -156,11 +171,15 @@ impl SpikingNetwork {
     ///    into weight changes only when the dopamine-derived learning rate is
     ///    above ≈ 0.
     /// 8. Renormalize LIF weights toward an L1 budget, then clamp to the
-    ///    [`RmStdpConfig`] bounds. **Bounds take precedence over the budget.**
-    ///    Under the default bounds the clamp provably cannot bind — weights are
-    ///    non-negative and `w_max` equals the budget — so the L1 sum lands on
-    ///    budget exactly. Narrowed bounds are still enforced, and the sum then
-    ///    settles off budget by however much they bind.
+    ///    [`RmStdpConfig`] bounds. Applies only to a neuron whose weights already
+    ///    sum above `1e-6`; a blank neuron stays blank rather than being scaled
+    ///    up to the budget, and a synapse at exactly zero is left alone so a
+    ///    positive `w_min` cannot conjure a connection on an unrewarded step.
+    ///    **Bounds take precedence over the budget.** Under the default bounds
+    ///    the clamp provably cannot bind — weights are non-negative and `w_max`
+    ///    equals the budget — so the L1 sum lands on budget exactly. A binding
+    ///    bound is still enforced, leaving the sum off budget in whichever
+    ///    direction it binds.
     /// 9. Drive each Izhikevich neuron from mean LIF membrane potential + dopamine.
     ///
     /// # Examples
@@ -725,6 +744,30 @@ mod tests {
                     .eligibility
                     .iter()
                     .all(|t| t.tau == network.stdp_config.tau_eligibility)
+            );
+        }
+    }
+
+    #[test]
+    fn test_set_rm_stdp_config_normalizes_what_it_stores() {
+        let mut network = rstdp_test_network();
+
+        network.set_rm_stdp_config(RmStdpConfig {
+            tau_eligibility: f32::NAN,
+            reward_lr: f32::INFINITY,
+            w_min: 1.5,
+            w_max: 0.2, // reversed
+        });
+
+        // The setter installs guarded values rather than storing nonsense and
+        // working around it at every read.
+        assert_eq!(network.stdp_config, RmStdpConfig::default());
+        for neuron in &network.neurons {
+            assert!(
+                neuron
+                    .eligibility
+                    .iter()
+                    .all(|t| t.tau == RmStdpConfig::default().tau_eligibility)
             );
         }
     }

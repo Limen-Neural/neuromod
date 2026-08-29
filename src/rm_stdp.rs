@@ -93,10 +93,15 @@ impl Default for EligibilityTrace {
 /// to change it on a live network.
 ///
 /// `w_min` / `w_max` take precedence over the engine's L1 weight budget: the
-/// renormalization pass in `step` scales toward the budget and then clamps, so
-/// narrowing this range leaves each neuron's weight sum off budget by however
-/// much the clamp binds. The defaults cannot bind (weights are non-negative and
-/// `w_max` equals the budget), so the budget holds exactly under them.
+/// renormalization pass in `step` scales toward the budget and then clamps, so a
+/// binding bound leaves the weight sum off budget in whichever direction it
+/// binds — a lowered `w_max` leaves it short, a raised `w_min` can lift it past.
+/// Under the defaults the clamp cannot bind (weights are non-negative and
+/// `w_max` equals the budget), so the budget holds exactly.
+///
+/// All of that applies only to a neuron the renormalization pass actually
+/// reaches — one whose weights already sum above its `1e-6` threshold. A blank
+/// neuron stays at zero: nothing scales a zero vector up to the budget.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct RmStdpConfig {
     /// Eligibility trace decay time constant, in steps. Typical values are 50-100.

@@ -48,9 +48,11 @@ All notable changes to this project are documented in this file.
   and are not `#[non_exhaustive]`, so the new `eligibility` / `stdp_config` fields break
   downstream struct literals that spell out every field. Fill the remainder from
   `..LifNeuron::new()` / `..Default::default()`, or build through the constructors. Serialized
-  state survives in self-describing formats (JSON, YAML, RON, map-encoded MessagePack) via
-  `#[serde(default)]`; positional binary formats such as `bincode` / `postcard` cannot use
-  those defaults and will not load pre-0.6 bytes. See the README migration notes (#72, #73).
+  state written by 0.5.x stays *deserializable* in self-describing formats (JSON, YAML, RON,
+  map-encoded MessagePack) via `#[serde(default)]`; positional binary formats such as
+  `bincode` / `postcard` cannot use those defaults and will not load pre-0.6 bytes. The
+  serialized shape does change — checkpoints written by 0.6 carry `eligibility` and
+  `stdp_config`, so they will not load into 0.5.x. See the README migration notes (#72, #73).
 - Weight bounds now take documented precedence over the engine's L1 weight budget: `step`
   scales toward the budget and then clamps, so a narrowed `w_min` / `w_max` leaves the sum
   off budget. The defaults cannot bind, so the budget still holds exactly under them. The

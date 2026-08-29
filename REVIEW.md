@@ -140,12 +140,14 @@ quietly reverts to an inline rule and leaves the eligibility types decorative:
 
 Chained with `&&` so the block exits non-zero on the **first** missing invariant. Run as
 separate commands, an early failure would be masked by a later success and the guard would
-report a pass on a half-unwired engine.
+report a pass on a half-unwired engine. Decay and accumulation are checked separately rather
+than as one alternation, so dropping either one fails the guard.
 
 ```bash
 grep -q 'pub eligibility: Vec<EligibilityTrace>' src/lif.rs \
   && grep -q 'pub stdp_config: RmStdpConfig' src/engine.rs \
-  && grep -qE 'trace\.decay\(\)|trace\.accumulate\(' src/engine.rs \
+  && grep -q 'trace.decay()' src/engine.rs \
+  && grep -q 'trace.accumulate(' src/engine.rs \
   && grep -q 'pub fn set_rm_stdp_config' src/engine.rs \
   && echo "ok: R-STDP still wired into the engine"
 ```

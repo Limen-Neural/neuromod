@@ -84,7 +84,20 @@ Returns the indices of LIF neurons that fired this step.
 
 - **Classical/unmodulated Hebbian STDP** — `src/hebbian/classical.rs` (`apply_classical_stdp`, `StdpParams`, `HebbianIzhikevichNetwork`). Pure Hebb's rule, no reward gating; the "biological root."
 - **Reward-modulated STDP (R-STDP)** — constants, `EligibilityTrace`, and `RmStdpConfig` live in `src/rm_stdp.rs`; the live per-step rule is `SpikingNetwork::apply_stdp` (`src/engine.rs`).
-- Eligibility traces **are** live. Each `LifNeuron` holds `eligibility: Vec<EligibilityTrace>` indexed like `weights`; `SpikingNetwork` holds an `stdp_config: RmStdpConfig`. Every step decays each trace and accumulates a coincidence *only on the step a spike occurs* (post fired now → `Δt ≥ 0`, potentiation; pre fired now after an earlier post → `Δt < 0`, depression). Dopamine gates only `w += reward_lr · dopamine_lr · trace`. Both fields are `#[serde(default)]`, and `apply_stdp` resizes a missing trace vector, so pre-0.6 checkpoints still load. See [docs/adr/002-wire-eligibility-traces.md](docs/adr/002-wire-eligibility-traces.md).
+- Eligibility traces **are** live — wired into the engine, not decorative.
+
+Where the R-STDP state lives:
+
+- `LifNeuron` holds `eligibility: Vec<EligibilityTrace>`, indexed like `weights`.
+- `SpikingNetwork` holds an `stdp_config: RmStdpConfig`.
+
+What `apply_stdp` does each step:
+
+- Decays every trace.
+- Accumulates a coincidence *only on the step a spike occurs*. Post fired now → `Δt ≥ 0`, potentiation. Pre fired now after an earlier post → `Δt < 0`, depression.
+- Converts traces to weights only when dopamine is present: `w += reward_lr · dopamine_lr · trace`.
+
+Both new fields are `#[serde(default)]`. `apply_stdp` resizes a missing trace vector, so pre-0.6 checkpoints still load. Rationale: [docs/adr/002-wire-eligibility-traces.md](docs/adr/002-wire-eligibility-traces.md).
 
 ### Neuromodulators are domain-agnostic by design
 

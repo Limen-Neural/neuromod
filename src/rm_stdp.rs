@@ -244,7 +244,16 @@ impl EligibilityTrace {
     ///
     /// Magnitude is largest at `delta_t == 0` and falls off exponentially as
     /// the two spikes drift apart.
+    ///
+    /// A non-finite `delta_t` yields `0.0` — no usable timing means no credit.
+    /// The engine cannot produce one (it subtracts two `i64` step counters), but
+    /// this is public API, and `NaN` would otherwise take the depression branch
+    /// (`NaN >= 0.0` is false) and poison the trace it lands in. `±∞` already
+    /// degrade to zero through `exp`.
     pub fn kernel(delta_t: f32) -> f32 {
+        if !delta_t.is_finite() {
+            return 0.0;
+        }
         if delta_t >= 0.0 {
             RM_STDP_A_PLUS * (-delta_t / RM_STDP_TAU_PLUS).exp()
         } else {
@@ -395,6 +404,20 @@ mod tests {
         let mut trace = EligibilityTrace::new(50.0);
         trace.accumulate(3.0);
         assert!((trace.value - EligibilityTrace::kernel(3.0)).abs() < 1e-9);
+    }
+
+    #[test]
+    fn kernel_yields_no_credit_for_non_finite_timing() {
+        for bad in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY] {
+            assert_eq!(EligibilityTrace::kernel(bad), 0.0, "kernel({bad})");
+
+            let mut trace = EligibilityTrace::new(50.0);
+            trace.accumulate(bad);
+            assert_eq!(
+                trace.value, 0.0,
+                "accumulate({bad}) must not poison the trace"
+            );
+        }
     }
 
     #[test]

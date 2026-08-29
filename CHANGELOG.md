@@ -29,6 +29,10 @@ All notable changes to this project are documented in this file.
   rate would poison a weight on the first rewarded step and never clear, because the L1
   renormalization pass skips any neuron whose total is not `> 1e-6` and `NaN > 1e-6` is
   false. Finite negative rates still pass through.
+- `EligibilityTrace::kernel` returns `0.0` for a non-finite `delta_t` — no usable timing means
+  no credit. The engine cannot produce one (it subtracts two `i64` step counters), but `kernel`
+  and `accumulate` are public: `NaN` took the depression branch (`NaN >= 0.0` is false) and
+  poisoned whichever trace it landed in.
 - `apply_stdp` clears a non-finite `EligibilityTrace::value` instead of paying it out.
   `value` is public and deserializable, so a `NaN` can arrive without passing through
   `accumulate`; converting it produced a `NaN` weight (`f32::clamp` preserves `NaN`) and the

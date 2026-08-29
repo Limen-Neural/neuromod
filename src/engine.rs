@@ -80,8 +80,10 @@ impl SpikingNetwork {
             .map(|_| {
                 let mut n = LifNeuron::new();
                 n.weights = vec![0.0; num_channels];
-                n.eligibility =
-                    vec![EligibilityTrace::new(stdp_config.tau_eligibility); num_channels];
+                n.eligibility = vec![
+                    EligibilityTrace::new(stdp_config.effective_tau_eligibility());
+                    num_channels
+                ];
                 n.last_spike_time = -1;
                 n
             })
@@ -121,9 +123,10 @@ impl SpikingNetwork {
     /// ```
     pub fn set_rm_stdp_config(&mut self, config: RmStdpConfig) {
         self.stdp_config = config;
+        let tau = config.effective_tau_eligibility();
         for neuron in &mut self.neurons {
             for trace in &mut neuron.eligibility {
-                trace.tau = config.tau_eligibility;
+                trace.tau = tau;
             }
         }
     }
@@ -274,6 +277,15 @@ impl SpikingNetwork {
             if total > 1e-6 {
                 let scale = WEIGHT_BUDGET / total;
                 for w in &mut neuron.weights {
+                    // A synapse at exactly zero is unconnected. Rescaling and
+                    // capping the connected ones is this pass's job, but a
+                    // positive `w_min` must not conjure a connection here: this
+                    // loop runs every step, dopamine or not, and an unrewarded
+                    // step must leave weights alone. Learning raises a synapse
+                    // to the floor in `apply_stdp`, which is reward-gated.
+                    if *w == 0.0 {
+                        continue;
+                    }
                     *w *= scale;
                     *w = w.clamp(w_min, w_max);
                 }
@@ -320,7 +332,7 @@ impl SpikingNetwork {
             if neuron.eligibility.len() != neuron.weights.len() {
                 neuron.eligibility.resize(
                     neuron.weights.len(),
-                    EligibilityTrace::new(config.tau_eligibility),
+                    EligibilityTrace::new(config.effective_tau_eligibility()),
                 );
             }
 
@@ -842,6 +854,60 @@ mod tests {
                 neuron.weights.iter().all(|&w| w == 0.0),
                 "a positive w_min must not seed blank weights: {:?}",
                 neuron.weights
+            );
+        }
+    }
+
+    #[test]
+    fn test_positive_w_min_does_not_seed_untouched_zero_weights() {
+        // A partially connected neuron: channel 0 carries the whole budget,
+        // channel 1 is unconnected. The nonzero total clears the `> 1e-6` guard,
+        // so this reaches the clamp that a fully blank network never does.
+        let mut network = SpikingNetwork::with_dimensions(1, 1, 2);
+        network.neurons[0].weights = vec![WEIGHT_BUDGET, 0.0];
+        network.set_rm_stdp_config(RmStdpConfig {
+            w_min: 0.1,
+            ..RmStdpConfig::default()
+        });
+        let no_reward = NeuroModulators::default();
+
+        network
+            .step(&[0.0, 0.0], &no_reward)
+            .expect("length matches");
+
+        assert_eq!(
+            network.neurons[0].weights[1], 0.0,
+            "an unrewarded step must not conjure a connection out of w_min"
+        );
+        assert_eq!(network.neurons[0].weights[0], WEIGHT_BUDGET);
+    }
+
+    #[test]
+    fn test_non_finite_tau_eligibility_neither_erases_nor_freezes_traces() {
+        for bad_tau in [f32::NAN, f32::INFINITY, 0.0, -5.0] {
+            let mut network = rstdp_test_network();
+            network.set_rm_stdp_config(RmStdpConfig {
+                tau_eligibility: bad_tau,
+                ..RmStdpConfig::default()
+            });
+            let no_reward = NeuroModulators::default();
+
+            for _ in 0..10 {
+                network
+                    .step(&DRIVEN_AND_SILENT, &no_reward)
+                    .expect("length matches");
+            }
+
+            // The default tau is installed instead, so credit is neither wiped
+            // (NaN) nor held forever (+inf): it banks like any other run.
+            let trace = network.neurons[0].eligibility[0].value;
+            assert!(
+                trace > 0.0 && trace.is_finite(),
+                "tau {bad_tau} should fall back to the default, got trace {trace}"
+            );
+            assert_eq!(
+                network.neurons[0].eligibility[0].tau,
+                RmStdpConfig::default().tau_eligibility
             );
         }
     }

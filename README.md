@@ -200,9 +200,17 @@ them: [ADR 002](docs/adr/002-wire-eligibility-traces.md).
 
 ### Unreleased (targets 0.6.0) — eligibility traces wired into the engine
 
-**Serialized state is unaffected.** `LifNeuron::eligibility` and
+**Serialized state survives in self-describing formats.** `LifNeuron::eligibility` and
 `SpikingNetwork::stdp_config` are `#[serde(default)]`, and `apply_stdp` resizes a missing
-trace vector, so checkpoints written by 0.5.x still deserialize and step.
+trace vector, so a 0.5.x checkpoint written with a format that names its fields — JSON,
+YAML, TOML, RON, map-encoded MessagePack — still deserializes and steps. This is covered by
+`test_pre_0_6_state_without_new_fields_loads_and_steps`, which strips both fields from
+serialized JSON and drives the restored network.
+
+`#[serde(default)]` cannot help positional binary formats such as `bincode` or `postcard`:
+they encode a struct as a bare sequence of fields, so old bytes hit end-of-input before the
+new fields are reached. If you checkpoint with one of those, re-serialize from 0.5.x before
+upgrading, or read through a versioned wrapper of your own.
 
 **Struct literals need updating.** Both types have public fields and are not
 `#[non_exhaustive]`, so adding a field is a source-level break: any downstream

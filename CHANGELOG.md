@@ -23,6 +23,10 @@ All notable changes to this project are documented in this file.
   rate would poison a weight on the first rewarded step and never clear, because the L1
   renormalization pass skips any neuron whose total is not `> 1e-6` and `NaN > 1e-6` is
   false. Finite negative rates still pass through.
+- `RmStdpConfig::effective_tau_eligibility` — same guard for `tau_eligibility`, and
+  `EligibilityTrace::decay` now falls back the same way. A `NaN` tau used to erase every
+  banked trace on the next step (`exp(-1/f32::EPSILON) == 0`) and `+∞` disabled decay
+  entirely; both now degrade to `RM_STDP_TAU_ELIGIBILITY`.
 - Tests proving the reward-gated path: traces accumulate with dopamine off while weights
   hold, dopamine converts the banked trace (and more dopamine buys more learning),
   post-before-pre depresses and clamps at `w_min`, one spike pair is counted once, and a
@@ -42,12 +46,17 @@ All notable changes to this project are documented in this file.
   defaults) (#72, #73).
 - **Breaking (source, targets 0.6.0):** `LifNeuron` and `SpikingNetwork` have public fields
   and are not `#[non_exhaustive]`, so the new `eligibility` / `stdp_config` fields break
-  downstream struct literals that spell out every field. Serialized state is unaffected.
-  Fill the remainder from `..LifNeuron::new()` / `..Default::default()`, or build through the
-  constructors; see the README migration notes (#72, #73).
+  downstream struct literals that spell out every field. Fill the remainder from
+  `..LifNeuron::new()` / `..Default::default()`, or build through the constructors. Serialized
+  state survives in self-describing formats (JSON, YAML, RON, map-encoded MessagePack) via
+  `#[serde(default)]`; positional binary formats such as `bincode` / `postcard` cannot use
+  those defaults and will not load pre-0.6 bytes. See the README migration notes (#72, #73).
 - Weight bounds now take documented precedence over the engine's L1 weight budget: `step`
   scales toward the budget and then clamps, so a narrowed `w_min` / `w_max` leaves the sum
-  off budget. The defaults cannot bind, so the budget still holds exactly under them.
+  off budget. The defaults cannot bind, so the budget still holds exactly under them. The
+  renormalization pass leaves a synapse at exactly zero alone, so a positive `w_min` cannot
+  conjure a connection on an unrewarded step; learning raises a synapse to the floor in the
+  reward-gated `apply_stdp` instead.
 - `examples/rstdp_demo.rs` prints real trace and weight numbers read back from the network
   instead of narrating hardcoded claims about learning.
 - Docs no longer carry the "eligibility traces are not wired" caveat: crate root, `engine`,

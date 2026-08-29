@@ -179,6 +179,33 @@ impl RmStdpConfig {
             RM_STDP_REWARD_LR
         }
     }
+
+    /// Eligibility time constant, guarded against a non-finite or non-positive
+    /// value.
+    ///
+    /// Both failure modes are silent rather than loud: a `NaN` tau degrades
+    /// [`EligibilityTrace::decay`] to `exp(-1/f32::EPSILON) == 0`, erasing every
+    /// banked trace on the next step, and `+∞` gives `exp(-0) == 1`, disabling
+    /// decay altogether. Either falls back to [`RM_STDP_TAU_ELIGIBILITY`].
+    ///
+    /// ```
+    /// use neuromod::RmStdpConfig;
+    ///
+    /// let slow = RmStdpConfig { tau_eligibility: 200.0, ..RmStdpConfig::default() };
+    /// assert_eq!(slow.effective_tau_eligibility(), 200.0);
+    ///
+    /// for bad in [f32::NAN, f32::INFINITY, 0.0, -10.0] {
+    ///     let config = RmStdpConfig { tau_eligibility: bad, ..RmStdpConfig::default() };
+    ///     assert_eq!(config.effective_tau_eligibility(), 50.0);
+    /// }
+    /// ```
+    pub fn effective_tau_eligibility(&self) -> f32 {
+        if self.tau_eligibility.is_finite() && self.tau_eligibility > 0.0 {
+            self.tau_eligibility
+        } else {
+            RM_STDP_TAU_ELIGIBILITY
+        }
+    }
 }
 
 impl EligibilityTrace {
@@ -215,10 +242,18 @@ impl EligibilityTrace {
     }
 
     /// Decay the trace by one step (assumes dt = 1 unit).
+    ///
+    /// A non-finite or non-positive `tau` falls back to
+    /// [`RM_STDP_TAU_ELIGIBILITY`]. Clamping to `f32::EPSILON` instead would
+    /// make `NaN` erase the trace outright (`exp(-1/ε) == 0`), and `+∞` would
+    /// leave `exp(-0) == 1`, disabling decay — both silent corruptions of
+    /// banked credit rather than honest degradation.
     pub fn decay(&mut self) {
-        // Guard against non-positive tau, which would cause division by zero
-        // or exponential growth instead of decay.
-        let tau = self.tau.max(f32::EPSILON);
+        let tau = if self.tau.is_finite() && self.tau > 0.0 {
+            self.tau
+        } else {
+            RM_STDP_TAU_ELIGIBILITY
+        };
         self.value *= (-1.0 / tau).exp();
     }
 
@@ -406,6 +441,25 @@ mod tests {
         };
         trace.decay();
         assert!(trace.value < 0.0);
+    }
+
+    #[test]
+    fn decay_with_non_finite_tau_falls_back_to_the_default() {
+        let expected = (-1.0_f32 / RM_STDP_TAU_ELIGIBILITY).exp();
+        for bad_tau in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY, 0.0, -10.0] {
+            let mut trace = EligibilityTrace {
+                value: 1.0,
+                tau: bad_tau,
+            };
+            trace.decay();
+            assert!(
+                (trace.value - expected).abs() < 1e-6,
+                "tau {bad_tau} should decay at the default rate, got {}",
+                trace.value
+            );
+            // Neither erased outright nor frozen in place.
+            assert!(trace.value > 0.0 && trace.value < 1.0);
+        }
     }
 
     #[test]

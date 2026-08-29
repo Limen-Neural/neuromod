@@ -78,10 +78,10 @@ fn scenario_no_reward(network: &mut SpikingNetwork, config: &RmStdpConfig, seed:
     }
     report(network, "after 10 steps");
     println!(
-        "  Weights held at {seed:.4}: the dopamine gate is shut. The driven\n  \
-         synapses still banked eligibility (e > 0) — that credit stays claimable\n  \
-         for roughly {:.0} steps.\n",
-        config.tau_eligibility
+        "  Weights held at {:.4}, still the {seed:.4} they were seeded with: the\n  \
+         dopamine gate is shut. The driven synapses did bank eligibility (e > 0)\n  \
+         — that credit stays claimable for roughly {:.0} steps.\n",
+        network.neurons[0].weights[0], config.tau_eligibility
     );
 }
 

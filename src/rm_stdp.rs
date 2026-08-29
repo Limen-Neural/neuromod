@@ -203,10 +203,16 @@ impl RmStdpConfig {
     /// Eligibility time constant, guarded against a non-finite or non-positive
     /// value.
     ///
-    /// Both failure modes are silent rather than loud: a `NaN` tau degrades
-    /// [`EligibilityTrace::decay`] to `exp(-1/f32::EPSILON) == 0`, erasing every
-    /// banked trace on the next step, and `+∞` gives `exp(-0) == 1`, disabling
-    /// decay altogether. Either falls back to [`RM_STDP_TAU_ELIGIBILITY`].
+    /// Every rejected value fails silently rather than loudly. Left unguarded,
+    /// [`EligibilityTrace::decay`] multiplies by `exp(-1/tau)`, so `NaN`
+    /// propagates (`-1/NaN` is `NaN`, `exp(NaN)` is `NaN`) and poisons the
+    /// banked value; `+∞` gives `exp(-0) == 1`, disabling decay altogether;
+    /// `0.0` gives `exp(-∞) == 0`, erasing every banked trace at once; and a
+    /// negative tau gives `exp(1/|tau|) > 1`, growing the trace without bound.
+    /// Each falls back to [`RM_STDP_TAU_ELIGIBILITY`].
+    ///
+    /// A *tiny positive* tau is not rejected: it is a legitimate setting that
+    /// means "no memory", and it does erase the trace within a step.
     ///
     /// ```
     /// use neuromod::RmStdpConfig;
@@ -242,8 +248,12 @@ impl EligibilityTrace {
     /// - `delta_t < 0` (post fired first, so pre cannot have caused it):
     ///   depression, `−A₋·exp(Δt/τ₋)`.
     ///
-    /// Magnitude is largest at `delta_t == 0` and falls off exponentially as
-    /// the two spikes drift apart.
+    /// Each branch peaks at its own zero boundary and falls off exponentially
+    /// as the two spikes drift apart: `A₊` at `Δt == 0`, and `A₋` as `Δt`
+    /// approaches zero from below. The two peaks are deliberately unequal —
+    /// [`RM_STDP_A_MINUS`] exceeds [`RM_STDP_A_PLUS`], the usual asymmetry that
+    /// makes uncorrelated pairs net-depressing — so the largest magnitude the
+    /// kernel returns is on the depression side, not at `Δt == 0`.
     ///
     /// A non-finite `delta_t` yields `0.0` — no usable timing means no credit.
     /// The engine cannot produce one (it subtracts two `i64` step counters), but
@@ -273,10 +283,12 @@ impl EligibilityTrace {
     /// Decay the trace by one step (assumes dt = 1 unit).
     ///
     /// A non-finite or non-positive `tau` falls back to
-    /// [`RM_STDP_TAU_ELIGIBILITY`]. Clamping to `f32::EPSILON` instead would
-    /// make `NaN` erase the trace outright (`exp(-1/ε) == 0`), and `+∞` would
-    /// leave `exp(-0) == 1`, disabling decay — both silent corruptions of
-    /// banked credit rather than honest degradation.
+    /// [`RM_STDP_TAU_ELIGIBILITY`] rather than being used as-is: `NaN` would
+    /// propagate into the banked value, `+∞` would leave `exp(-0) == 1` and
+    /// disable decay, `0.0` would erase the trace outright, and a negative tau
+    /// would grow it without bound — all silent corruptions of banked credit
+    /// rather than honest degradation. See
+    /// [`RmStdpConfig::effective_tau_eligibility`].
     pub fn decay(&mut self) {
         let tau = if self.tau.is_finite() && self.tau > 0.0 {
             self.tau

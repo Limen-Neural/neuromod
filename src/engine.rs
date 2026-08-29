@@ -405,6 +405,19 @@ impl SpikingNetwork {
                     }
                 }
             }
+
+            // A caller can hand a neuron more weights than the network has
+            // channels. Those synapses have no input that could spike, so they
+            // only ever decay — but the loop above stops at the last channel,
+            // which would leave a planted or deserialized trace frozen there
+            // forever. Empty in the usual case, where the two lengths agree.
+            for trace in neuron.eligibility.iter_mut().skip(input_times.len()) {
+                if !trace.value.is_finite() {
+                    trace.reset();
+                } else if trace.value != 0.0 {
+                    trace.decay();
+                }
+            }
         }
     }
 
@@ -814,6 +827,30 @@ mod tests {
             network.neurons[0].weights[0],
             network.stdp_config.weight_bounds().0,
             "depression must clamp at w_min, not go negative"
+        );
+    }
+    #[test]
+    fn test_traces_past_the_last_channel_still_decay() {
+        // Two channels, but a caller widened this neuron to four synapses. The
+        // extra two have no input that could ever spike, so decay is all they
+        // can do — and the per-channel loop stops before reaching them, which
+        // left a planted trace frozen there across every step.
+        let mut network = SpikingNetwork::with_dimensions(1, 1, 2);
+        network.neurons[0].weights = vec![WEIGHT_BUDGET / 4.0; 4];
+        network.neurons[0].eligibility = vec![EligibilityTrace::new(50.0); 4];
+        network.neurons[0].eligibility[3].value = 0.5;
+
+        let no_reward = NeuroModulators::default();
+        for _ in 0..5 {
+            network
+                .step(&[0.0, 0.0], &no_reward)
+                .expect("length matches");
+        }
+
+        let orphan = network.neurons[0].eligibility[3].value;
+        assert!(
+            orphan > 0.0 && orphan < 0.5,
+            "a trace past the last channel should decay toward zero, got {orphan}"
         );
     }
 

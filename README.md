@@ -149,6 +149,12 @@ For legacy hardware-calibrated signal mapping, use `SignalProfile::hardware_cali
 
 ## Reward-Modulated STDP
 
+> **Not in the pinned release.** `EligibilityTrace`, `RmStdpConfig`,
+> `SpikingNetwork::set_rm_stdp_config`, and `LifNeuron::eligibility` are unreleased; the
+> Installation pin above (`0.5.2`) does not carry them, and the code below will not compile
+> against it. They arrive in 0.6.0 — see [Migration Notes](#migration-notes), or depend on the
+> git branch until then.
+
 `SpikingNetwork` learns *through* eligibility traces, not around them. Each `LifNeuron`
 carries one `EligibilityTrace` per input channel, indexed like `weights`:
 

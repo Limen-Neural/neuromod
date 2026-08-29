@@ -38,9 +38,12 @@ All notable changes to this project are documented in this file.
   `accumulate`; converting it produced a `NaN` weight (`f32::clamp` preserves `NaN`) and the
   L1 pass then skipped that neuron permanently. Clearing lets the synapse learn again.
 - `RmStdpConfig::effective_tau_eligibility` — same guard for `tau_eligibility`, and
-  `EligibilityTrace::decay` now falls back the same way. A `NaN` tau used to erase every
-  banked trace on the next step (`exp(-1/f32::EPSILON) == 0`) and `+∞` disabled decay
-  entirely; both now degrade to `RM_STDP_TAU_ELIGIBILITY`.
+  `EligibilityTrace::decay` now falls back the same way. `decay` multiplies by
+  `exp(-1/tau)`, so a `NaN` tau used to propagate `NaN` into every banked trace on the next
+  step (which is what left `apply_stdp` with non-finite values to clear), `+∞` disabled decay
+  entirely, `0.0` erased every trace at once, and a negative tau grew them without bound. All
+  four now degrade to `RM_STDP_TAU_ELIGIBILITY`; a tiny *positive* tau is still honored, since
+  "no memory" is a legitimate setting.
 - Tests proving the reward-gated path: traces accumulate with dopamine off while weights
   hold, dopamine converts the banked trace (and more dopamine buys more learning),
   post-before-pre depresses and clamps at `w_min`, one spike pair is counted once, and a
@@ -84,6 +87,10 @@ All notable changes to this project are documented in this file.
   `w_min`; and a depressing update (`dw < 0`) clamped up to `w_min` as well, connecting a
   synapse by weakening it. Either way the L1 pass then scaled the fabricated weight toward the
   budget. The floor still binds wherever an update actually applies.
+- `apply_stdp` decays eligibility traces past the last input channel as well. A caller can
+  give a neuron more weights than the network has channels; those synapses have no input that
+  could ever spike, and the per-channel loop stopped before reaching them, so a planted or
+  deserialized trace stayed frozen there across every step.
 - `examples/rstdp_demo.rs` prints real trace and weight numbers read back from the network
   instead of narrating hardcoded claims about learning. Its `RmStdpConfig` scenario runs the
   reconfigured network and an otherwise identical default-config twin through the same

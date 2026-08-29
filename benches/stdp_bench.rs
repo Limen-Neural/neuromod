@@ -136,7 +136,10 @@ fn bench_engine_step_with_traces(c: &mut Criterion) {
             }
 
             b.iter(|| {
-                let _ = network.step(black_box(&stimuli), black_box(&modulators));
+                // Observe the returned spike list: `step` mutates `network`, but
+                // dropping its result lets the optimizer elide the work that
+                // builds that list.
+                black_box(network.step(black_box(&stimuli), black_box(&modulators)))
             });
         });
     }

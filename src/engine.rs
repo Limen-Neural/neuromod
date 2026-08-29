@@ -360,9 +360,18 @@ impl SpikingNetwork {
             for (ch, &pre_time) in input_times.iter().enumerate().take(neuron.weights.len()) {
                 let trace = &mut neuron.eligibility[ch];
 
-                // An untouched trace decays to itself; skip the `exp` so a blank
-                // or unrewarded network stays cheap at large channel counts.
-                if trace.value != 0.0 {
+                // A non-finite trace carries no credit, and paying it out would
+                // poison the weight — `clamp` preserves NaN, and the L1 pass then
+                // skips this neuron forever because a NaN total is never
+                // `> 1e-6`. Clear it so the synapse can learn again. `value` is
+                // public and deserializable, so this is reachable without ever
+                // going through `accumulate`.
+                if !trace.value.is_finite() {
+                    trace.reset();
+                } else if trace.value != 0.0 {
+                    // An untouched trace decays to itself; skip the `exp` so a
+                    // blank or unrewarded network stays cheap at large channel
+                    // counts.
                     trace.decay();
                 }
 
@@ -953,6 +962,37 @@ mod tests {
                 RmStdpConfig::default().tau_eligibility
             );
         }
+    }
+
+    #[test]
+    fn test_non_finite_trace_value_cannot_poison_weights() {
+        // `EligibilityTrace::value` is public and deserializable, so a NaN can
+        // arrive without ever passing through `accumulate`.
+        let mut network = SpikingNetwork::with_dimensions(1, 1, 2);
+        network.neurons[0].weights = vec![1.0, 1.0];
+        network.neurons[0].eligibility[0].value = f32::NAN;
+        network.neurons[0].eligibility[1].value = f32::INFINITY;
+        let reward = NeuroModulators {
+            dopamine: 0.9,
+            ..Default::default()
+        };
+
+        for _ in 0..5 {
+            network.step(&[1.0, 1.0], &reward).expect("length matches");
+        }
+
+        assert!(
+            network.neurons[0].weights.iter().all(|w| w.is_finite()),
+            "a non-finite trace must not poison weights: {:?}",
+            network.neurons[0].weights
+        );
+        assert!(
+            network.neurons[0]
+                .eligibility
+                .iter()
+                .all(|t| t.value.is_finite()),
+            "the trace itself should be cleared, not left non-finite"
+        );
     }
 
     #[test]

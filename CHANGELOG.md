@@ -26,6 +26,10 @@ All notable changes to this project are documented in this file.
   rate would poison a weight on the first rewarded step and never clear, because the L1
   renormalization pass skips any neuron whose total is not `> 1e-6` and `NaN > 1e-6` is
   false. Finite negative rates still pass through.
+- `apply_stdp` clears a non-finite `EligibilityTrace::value` instead of paying it out.
+  `value` is public and deserializable, so a `NaN` can arrive without passing through
+  `accumulate`; converting it produced a `NaN` weight (`f32::clamp` preserves `NaN`) and the
+  L1 pass then skipped that neuron permanently. Clearing lets the synapse learn again.
 - `RmStdpConfig::effective_tau_eligibility` — same guard for `tau_eligibility`, and
   `EligibilityTrace::decay` now falls back the same way. A `NaN` tau used to erase every
   banked trace on the next step (`exp(-1/f32::EPSILON) == 0`) and `+∞` disabled decay

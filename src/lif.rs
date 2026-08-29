@@ -2,8 +2,9 @@
 //!
 //! Primary bank of [`crate::SpikingNetwork`]: each [`LifNeuron`] has a membrane
 //! potential, threshold, decay, and a vector of synaptic weights (one per input
-//! channel). The engine integrates, fires, applies lateral inhibition, and
-//! runs dopamine-gated STDP on these weights.
+//! channel), each weight paired with an [`EligibilityTrace`]. The engine
+//! integrates, fires, applies lateral inhibition, then decays and accumulates
+//! the traces and converts them into weight changes under a dopamine gate.
 //!
 //! [`PoissonEncoder`] is a small helper that turns a scalar intensity into a
 //! binary spike train (Bernoulli trials). It is **not** required by
@@ -15,6 +16,8 @@
 
 use rand::RngExt;
 use serde::{Deserialize, Serialize};
+
+use crate::rm_stdp::EligibilityTrace;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct PoissonEncoder {
@@ -81,6 +84,16 @@ pub struct LifNeuron {
     /// Uses a global step counter maintained by the engine.
     #[serde(default)]
     pub last_spike_time: i64,
+    /// Per-synapse eligibility traces — one per input channel, indexed exactly
+    /// like [`Self::weights`].
+    ///
+    /// The engine decays these every step and accumulates a pre/post
+    /// coincidence on the step a spike occurs, then converts them into weight
+    /// changes when dopamine is present. Empty on a neuron built outside the
+    /// engine (and on pre-0.6 deserialized state); the engine resizes it to
+    /// match `weights` before use.
+    #[serde(default)]
+    pub eligibility: Vec<EligibilityTrace>,
 }
 
 impl Default for LifNeuron {
@@ -93,6 +106,7 @@ impl Default for LifNeuron {
             last_spike: false,
             weights: Vec::new(),
             last_spike_time: -1,
+            eligibility: Vec::new(),
         }
     }
 }
@@ -141,6 +155,7 @@ mod tests {
         assert!(!neuron.last_spike);
         assert!(neuron.weights.is_empty());
         assert_eq!(neuron.last_spike_time, -1);
+        assert!(neuron.eligibility.is_empty());
     }
 
     #[test]

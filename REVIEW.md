@@ -134,6 +134,17 @@ grep -R 'pub fn apply_classical_stdp\|pub fn apply_neuromodulation' src/
 grep -R 'pub struct EligibilityTrace\|pub struct RmStdpConfig' src/
 ```
 
+R-STDP must stay **wired into the engine**, not merely exported (GH#72; see
+[ADR 002](docs/adr/002-wire-eligibility-traces.md)). These guard against a refactor that
+quietly reverts to an inline rule and leaves the eligibility types decorative:
+
+```bash
+grep -n 'pub eligibility: Vec<EligibilityTrace>' src/lif.rs
+grep -n 'pub stdp_config: RmStdpConfig' src/engine.rs
+grep -n 'trace.decay()\|trace.accumulate(' src/engine.rs
+grep -n 'pub fn set_rm_stdp_config' src/engine.rs
+```
+
 Verify Criterion benchmarks aren't silently reverted to the default libtest harness (causes `cargo bench` to report `running 0 tests` instead of executing benchmarks). Every `[[bench]]` must explicitly set `harness = false` — omitting the key is as bad as setting `true`:
 
 ```bash

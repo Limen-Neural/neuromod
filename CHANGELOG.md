@@ -4,8 +4,43 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+### Added
+
+- **R-STDP is wired into the engine.** `LifNeuron` gains `eligibility: Vec<EligibilityTrace>`
+  (one trace per input channel, indexed like `weights`) and `SpikingNetwork` gains
+  `stdp_config: RmStdpConfig`. `SpikingNetwork::apply_stdp` now decays and accumulates those
+  traces on every step and converts them into weight changes under the dopamine gate, so
+  reward arriving *after* a coincidence still pays for it (#72, #73).
+- `SpikingNetwork::set_rm_stdp_config` — replace the R-STDP hyperparameters and re-`tau`
+  existing traces in one call.
+- `EligibilityTrace::new` / `kernel` / `accumulate` / `reset`, plus `Default` impls for
+  `EligibilityTrace` and `RmStdpConfig`, and the `RM_STDP_TAU_ELIGIBILITY` /
+  `RM_STDP_REWARD_LR` constants behind those defaults.
+- `RmStdpConfig::weight_bounds` — ordered `(min, max)` accessor that falls back to
+  `RM_STDP_W_MIN` / `RM_STDP_W_MAX` when the public bound fields are left reversed or
+  non-finite, so a hand-edited config cannot panic `f32::clamp` inside `step`.
+- Tests proving the reward-gated path: traces accumulate with dopamine off while weights
+  hold, dopamine converts the banked trace (and more dopamine buys more learning),
+  post-before-pre depresses and clamps at `w_min`, one spike pair is counted once, and a
+  pre-0.6 checkpoint without the new fields still deserializes and steps (#74).
+- Benchmarks for trace accumulation, the trace → weight conversion, and rewarded vs
+  unrewarded engine steps (`benches/stdp_bench.rs`).
+- [ADR 002](docs/adr/002-wire-eligibility-traces.md) recording the wire-vs-demote decision.
+
 ### Changed
 
+- **Breaking (targets 0.6.0):** weight updates flow through a decaying eligibility trace
+  instead of being recomputed from raw spike times each step, so same-input runs will not
+  reproduce pre-0.6 weight trajectories. `apply_stdp` no longer early-returns when dopamine
+  is ~0 — only the trace → weight conversion is gated. Weight bounds now come from
+  `stdp_config` rather than the `RM_STDP_W_MIN` / `RM_STDP_W_MAX` constants directly, in both
+  `apply_stdp` and the L1 renormalization pass (the constants remain public and are the
+  defaults) (#72, #73).
+- `examples/rstdp_demo.rs` prints real trace and weight numbers read back from the network
+  instead of narrating hardcoded claims about learning.
+- Docs no longer carry the "eligibility traces are not wired" caveat: crate root, `engine`,
+  `lif`, and `rm_stdp` rustdoc, `README.md`, `CLAUDE.md`, and the `REVIEW.md` regression
+  guards describe (and guard) the wired path.
 - **Docker:** CI pushes example runtime images to Docker Hub and **GHCR** (`ghcr.io/limen-neural/neuromod` with SHA, version, and `latest` tags) so the image appears under GitHub org packages; README documents pull URLs.
 - **Docker verify:** PR job asserts example binaries exist in the runtime image; publish job requires full `X.Y.Z` crate version for tags.
 - README crates.io / docs.rs badges stay version-agnostic (latest); install pin documents **0.5.2**.

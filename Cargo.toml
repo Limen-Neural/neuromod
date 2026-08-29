@@ -26,6 +26,9 @@ rand = "0.10.1"
 
 [dev-dependencies]
 criterion = "0.8.2"
+# Backward-compatibility tests deserialize pre-0.6 checkpoints that predate the
+# `eligibility` / `stdp_config` fields. Already in the tree via criterion.
+serde_json = "1.0"
 
 [[bench]]
 name = "neuron_bench"

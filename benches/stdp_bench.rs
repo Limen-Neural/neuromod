@@ -1,8 +1,11 @@
 use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
 use neuromod::rm_stdp::{
     EligibilityTrace, RM_STDP_A_MINUS, RM_STDP_A_PLUS, RM_STDP_TAU_MINUS, RM_STDP_TAU_PLUS,
+    RmStdpConfig,
 };
-use neuromod::{HebbianIzhikevichNetwork, StdpParams, apply_classical_stdp};
+use neuromod::{
+    HebbianIzhikevichNetwork, NeuroModulators, SpikingNetwork, StdpParams, apply_classical_stdp,
+};
 use std::hint::black_box;
 
 fn bench_classical_stdp(c: &mut Criterion) {
@@ -41,6 +44,68 @@ fn bench_eligibility_trace_decay(c: &mut Criterion) {
             trace.decay();
         });
     });
+}
+
+fn bench_eligibility_trace_accumulate(c: &mut Criterion) {
+    c.bench_function("eligibility_trace_accumulate_ltp", |b| {
+        let mut trace = EligibilityTrace::new(50.0);
+        b.iter(|| {
+            trace.accumulate(black_box(5.0));
+            trace.value = 0.0;
+        });
+    });
+
+    c.bench_function("eligibility_trace_accumulate_ltd", |b| {
+        let mut trace = EligibilityTrace::new(50.0);
+        b.iter(|| {
+            trace.accumulate(black_box(-5.0));
+            trace.value = 0.0;
+        });
+    });
+}
+
+/// The wired path: decay, accumulate, then convert the trace into a weight
+/// change under the dopamine gate — one synapse's worth of `apply_stdp`.
+fn bench_reward_conversion(c: &mut Criterion) {
+    let config = RmStdpConfig::default();
+
+    c.bench_function("rm_stdp_trace_to_weight", |b| {
+        let mut trace = EligibilityTrace::new(config.tau_eligibility);
+        let mut weight = 0.5_f32;
+        b.iter(|| {
+            trace.decay();
+            trace.accumulate(black_box(1.0));
+            let dw = config.reward_lr * black_box(0.45_f32) * trace.value;
+            weight = (weight + dw).clamp(config.w_min, config.w_max);
+            black_box(weight);
+        });
+    });
+}
+
+/// End-to-end engine step, which now carries trace bookkeeping for every
+/// synapse. Rewarded and unrewarded are separate: only the rewarded path pays
+/// for the trace -> weight conversion.
+fn bench_engine_step_with_traces(c: &mut Criterion) {
+    let mut group = c.benchmark_group("engine_step");
+
+    for (label, dopamine) in [("unrewarded", 0.0_f32), ("rewarded", 0.9)] {
+        group.bench_function(label, |b| {
+            let mut network = SpikingNetwork::with_dimensions(64, 5, 64);
+            for neuron in &mut network.neurons {
+                neuron.weights = vec![2.0 / 64.0; 64];
+            }
+            let modulators = NeuroModulators {
+                dopamine,
+                ..Default::default()
+            };
+            let stimuli = vec![0.5_f32; 64];
+            b.iter(|| {
+                let _ = network.step(black_box(&stimuli), black_box(&modulators));
+            });
+        });
+    }
+
+    group.finish();
 }
 
 fn bench_stdp_weight_update(c: &mut Criterion) {
@@ -118,6 +183,9 @@ criterion_group!(
     benches,
     bench_classical_stdp,
     bench_eligibility_trace_decay,
+    bench_eligibility_trace_accumulate,
+    bench_reward_conversion,
+    bench_engine_step_with_traces,
     bench_stdp_weight_update,
     bench_hebbian_network_update,
     bench_stdp_delta_t_calculation,

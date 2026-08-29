@@ -17,7 +17,8 @@ Biologically grounded spiking neural network (SNN) primitives in Rust: a topolog
 - Neutral initialization (blank synaptic weights; no hardcoded domain topology)
 - Generic neuromodulators: dopamine, serotonin, acetylcholine, norepinephrine
 - `GenericReward` trait for domain-specific reward shaping in downstream crates
-- Classical Hebbian STDP utilities and reward-modulated STDP types (`EligibilityTrace`, `RmStdpConfig`)
+- Reward-modulated STDP wired into the engine: per-synapse `EligibilityTrace` accumulation with a dopamine-gated payout, tuned by `RmStdpConfig`
+- Classical (unmodulated) Hebbian STDP utilities for the biological root case
 
 ### Engine (`SpikingNetwork`)
 
@@ -146,6 +147,55 @@ fn main() {
 
 For legacy hardware-calibrated signal mapping, use `SignalProfile::hardware_calibrated()`.
 
+## Reward-Modulated STDP
+
+`SpikingNetwork` learns *through* eligibility traces, not around them. Each `LifNeuron`
+carries one `EligibilityTrace` per input channel, indexed like `weights`:
+
+1. Every step, each trace decays and — on the step a spike actually occurs — accumulates the
+   pre/post timing kernel. This happens **whether or not dopamine is present**.
+2. Dopamine gates only the payout: `w += reward_lr × dopamine_lr × trace`, clamped to the
+   `RmStdpConfig` bounds.
+
+Splitting it that way is what buys credit assignment: reward can arrive several steps after
+the coincidence it pays for, and still find the credit waiting.
+
+```rust
+use neuromod::{NeuroModulators, RmStdpConfig, SpikingNetwork};
+
+fn main() {
+    let mut network = SpikingNetwork::with_dimensions(4, 1, 4);
+    for neuron in &mut network.neurons {
+        neuron.weights = vec![0.5; 4]; // sums to the engine's L1 weight budget
+    }
+
+    // Bank coincidences with reward switched off: traces grow, weights do not.
+    let unrewarded = NeuroModulators::default();
+    let stimuli = [1.0, 1.0, 0.0, 0.0];
+    for _ in 0..10 {
+        network.step(&stimuli, &unrewarded).unwrap();
+    }
+    println!("trace: {:.4}", network.neurons[0].eligibility[0].value); // > 0
+    println!("weight: {:.4}", network.neurons[0].weights[0]); // still 0.5
+
+    // Reward converts the banked trace into a weight change.
+    let rewarded = NeuroModulators { dopamine: 0.9, ..Default::default() };
+    for _ in 0..10 {
+        network.step(&stimuli, &rewarded).unwrap();
+    }
+    println!("weight: {:.4}", network.neurons[0].weights[0]); // driven synapse potentiated
+
+    // Retune decay, payout rate, and weight bounds at any time.
+    network.set_rm_stdp_config(RmStdpConfig { tau_eligibility: 100.0, ..Default::default() });
+}
+```
+
+Proof, not promise: the behavior above is covered by unit and multi-step tests in
+`src/rm_stdp.rs` and `src/engine.rs` (including a pre-0.6 checkpoint that deserializes
+without the trace fields and keeps stepping), and `cargo run --example rstdp_demo` prints
+the real trace and weight numbers. Rationale for wiring the types in rather than demoting
+them: [ADR 002](docs/adr/002-wire-eligibility-traces.md).
+
 ## Included Components
 
 - Engine: `SpikingNetwork`, `StepError` (LIF + Izhikevich banks)
@@ -153,8 +203,9 @@ For legacy hardware-calibrated signal mapping, use `SignalProfile::hardware_cali
 - Engine neuron types: `LifNeuron`, `IzhikevichNeuron`
 - Standalone neuron types: `GifNeuron`, `LapicqueNeuron`, `FitzHughNagumoNeuron`, `HodgkinHuxleyNeuron`
 - Learning/plasticity:
-  - Classical: `apply_classical_stdp`, `StdpParams`, `HebbianIzhikevichNetwork`
-  - Reward-modulated building blocks: `EligibilityTrace`, `RmStdpConfig`
+  - Classical (unmodulated): `apply_classical_stdp`, `StdpParams`, `HebbianIzhikevichNetwork`
+  - Reward-modulated, wired into `SpikingNetwork`: `EligibilityTrace`, `RmStdpConfig`,
+    `LifNeuron::eligibility`, `SpikingNetwork::set_rm_stdp_config`
 
 ## Architecture & Boundaries
 
@@ -165,6 +216,7 @@ See the full planning documents:
 - [Org Modularization Standards](docs/org-modularization.md) — workstream index (#35–#43), cross-cutting git/build/beads standards, and audit commands.
 - [neuromod Boundary Matrix](docs/neuromod-boundary-matrix.md) — runtime/deployment role, owns/does-not-own, allowed/forbidden dependencies vs. limbic-critic, brainstem-daemon, axon-encoder, synaptic-mesh, silicon-bridge, Spikenaut-Hardware, plasticity-lab, etc. (LIM-9).
 - [ADR 001: Shared traits live in neuromod](docs/adr/001-traits-in-neuromod.md) — why traits are hosted here.
+- [ADR 002: Wire eligibility traces into the engine](docs/adr/002-wire-eligibility-traces.md) — why R-STDP is wired rather than demoted, and what changed in the learning path.
 
 ## Examples
 

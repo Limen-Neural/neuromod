@@ -1,18 +1,28 @@
 //! R-STDP (Reward-modulated Spike-Timing-Dependent Plasticity) parameters.
 //!
-//! This module holds R-STDP constants, `RmStdpConfig`, and a standalone
-//! [`EligibilityTrace`] building block for standalone use.
+//! This module holds the R-STDP constants, [`RmStdpConfig`], and the
+//! [`EligibilityTrace`] building block that the engine learns through.
 //!
-//! **Live engine path:** `SpikingNetwork::apply_stdp` in `src/engine.rs` is
-//! dopamine-gated and updates weights directly from spike timing. It does
-//! **not** currently consume or convert `EligibilityTrace` values.
+//! R-STDP in one sentence: an eligibility trace accumulates a "memory" of
+//! recent pre/post spike-timing coincidences, then a reward signal (dopamine)
+//! converts that trace into a weight change.
 //!
-//! Idealized R-STDP (not yet wired in-engine): an eligibility trace accumulates
-//! a "memory" of recent pre/post spike-timing coincidences, then a reward
-//! signal (dopamine) converts that trace into a weight change.
+//! **Live engine path:** `SpikingNetwork::apply_stdp` (`src/engine.rs`) keeps
+//! one [`EligibilityTrace`] per synapse in [`crate::LifNeuron::eligibility`]. Every
+//! step it decays each trace and accumulates a coincidence on the step where the
+//! post neuron or the pre channel actually spiked — **regardless of dopamine**.
+//! Only the trace → weight conversion is dopamine-gated. Weight updates therefore
+//! flow *through* the trace, not around it, so a coincidence recorded during a
+//! reward-free step can still be paid out when reward arrives later.
+//!
+//! Decision record (wire, not demote): [ADR 002][adr].
+//!
+//! [adr]: https://github.com/Limen-Neural/neuromod/blob/main/docs/adr/002-wire-eligibility-traces.md
 //!
 //! ANALOGY: Hebb's Rule on a timer — "neurons that fire together wire
-//! together," but only if the timing (and, eventually, reward) is right.
+//! together," but only if the timing *and* the reward are right.
+
+use serde::{Deserialize, Serialize};
 
 /// LTP (potentiation) time constant, in steps.
 pub const RM_STDP_TAU_PLUS: f32 = 20.0;
@@ -26,15 +36,43 @@ pub const RM_STDP_A_MINUS: f32 = 0.012;
 pub const RM_STDP_W_MIN: f32 = 0.0;
 /// Maximum synaptic weight (prevents runaway excitation).
 pub const RM_STDP_W_MAX: f32 = 2.0;
+/// Default eligibility-trace decay time constant, in steps.
+///
+/// Longer than the LTP/LTD kernels ([`RM_STDP_TAU_PLUS`] / [`RM_STDP_TAU_MINUS`]):
+/// the kernel decides *how much* credit a coincidence earns, the trace decides
+/// *how long* that credit stays claimable before reward arrives.
+pub const RM_STDP_TAU_ELIGIBILITY: f32 = 50.0;
+/// Default learning rate for converting an eligibility trace into a weight change.
+pub const RM_STDP_REWARD_LR: f32 = 0.05;
 
 const _: () = assert!(RM_STDP_W_MIN < RM_STDP_W_MAX);
 const _: () = assert!(RM_STDP_A_MINUS >= RM_STDP_A_PLUS);
+const _: () = assert!(RM_STDP_TAU_ELIGIBILITY > 0.0);
+const _: () = assert!(RM_STDP_REWARD_LR > 0.0);
 
 /// Eligibility trace for a single synapse.
 ///
-/// Accumulates based on pre/post spike timing and decays exponentially over
-/// time; positive values favor potentiation (LTP), negative values favor
-/// depression (LTD). Each synapse holds its own trace instance.
+/// Accumulates on pre/post spike timing and decays exponentially over time;
+/// positive values favor potentiation (LTP), negative values favor depression
+/// (LTD). Each synapse holds its own trace instance — the engine keeps one per
+/// input channel in [`crate::LifNeuron::eligibility`].
+///
+/// ```
+/// use neuromod::EligibilityTrace;
+///
+/// let mut trace = EligibilityTrace::new(50.0);
+/// assert_eq!(trace.value, 0.0);
+///
+/// // Pre fired one step before post: potentiation.
+/// trace.accumulate(1.0);
+/// assert!(trace.value > 0.0);
+///
+/// // The imprint fades unless reward converts it into a weight change.
+/// let peak = trace.value;
+/// trace.decay();
+/// assert!(trace.value < peak);
+/// ```
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct EligibilityTrace {
     /// Current trace value.
     pub value: f32,
@@ -42,7 +80,18 @@ pub struct EligibilityTrace {
     pub tau: f32,
 }
 
+impl Default for EligibilityTrace {
+    fn default() -> Self {
+        Self::new(RM_STDP_TAU_ELIGIBILITY)
+    }
+}
+
 /// R-STDP hyperparameters.
+///
+/// Held by `SpikingNetwork::stdp_config`; see
+/// [`SpikingNetwork::set_rm_stdp_config`](crate::SpikingNetwork::set_rm_stdp_config)
+/// to change it on a live network.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct RmStdpConfig {
     /// Eligibility trace decay time constant, in steps. Typical values are 50-100.
     pub tau_eligibility: f32,
@@ -55,7 +104,76 @@ pub struct RmStdpConfig {
     pub w_max: f32,
 }
 
+impl Default for RmStdpConfig {
+    fn default() -> Self {
+        Self {
+            tau_eligibility: RM_STDP_TAU_ELIGIBILITY,
+            reward_lr: RM_STDP_REWARD_LR,
+            w_min: RM_STDP_W_MIN,
+            w_max: RM_STDP_W_MAX,
+        }
+    }
+}
+
+impl RmStdpConfig {
+    /// Weight bounds as an ordered `(min, max)` pair, safe to hand to
+    /// [`f32::clamp`].
+    ///
+    /// `w_min` and `w_max` are public fields, so a caller can leave them
+    /// reversed or non-finite — which would make `clamp` panic. This falls back
+    /// to [`RM_STDP_W_MIN`] / [`RM_STDP_W_MAX`] in that case rather than taking
+    /// the engine down mid-step.
+    ///
+    /// ```
+    /// use neuromod::RmStdpConfig;
+    ///
+    /// let sane = RmStdpConfig { w_min: 0.2, w_max: 1.5, ..RmStdpConfig::default() };
+    /// assert_eq!(sane.weight_bounds(), (0.2, 1.5));
+    ///
+    /// let reversed = RmStdpConfig { w_min: 1.5, w_max: 0.2, ..RmStdpConfig::default() };
+    /// assert_eq!(reversed.weight_bounds(), (0.0, 2.0));
+    /// ```
+    pub fn weight_bounds(&self) -> (f32, f32) {
+        if !self.w_min.is_finite() || !self.w_max.is_finite() || self.w_min > self.w_max {
+            return (RM_STDP_W_MIN, RM_STDP_W_MAX);
+        }
+        (self.w_min, self.w_max)
+    }
+}
+
 impl EligibilityTrace {
+    /// Create a zeroed trace with decay time constant `tau` (in steps).
+    pub const fn new(tau: f32) -> Self {
+        Self { value: 0.0, tau }
+    }
+
+    /// Spike-timing kernel for one pre/post coincidence, with
+    /// `delta_t = t_post - t_pre` measured in steps.
+    ///
+    /// - `delta_t >= 0` (pre fired first, and so may have caused the post
+    ///   spike): potentiation, `+A₊·exp(−Δt/τ₊)`.
+    /// - `delta_t < 0` (post fired first, so pre cannot have caused it):
+    ///   depression, `−A₋·exp(Δt/τ₋)`.
+    ///
+    /// Magnitude is largest at `delta_t == 0` and falls off exponentially as
+    /// the two spikes drift apart.
+    pub fn kernel(delta_t: f32) -> f32 {
+        if delta_t >= 0.0 {
+            RM_STDP_A_PLUS * (-delta_t / RM_STDP_TAU_PLUS).exp()
+        } else {
+            -RM_STDP_A_MINUS * (delta_t / RM_STDP_TAU_MINUS).exp()
+        }
+    }
+
+    /// Record one pre/post coincidence, adding [`Self::kernel`] to the trace.
+    ///
+    /// Call this only on a step where a spike actually occurred. Re-applying it
+    /// every step from a stale spike pair inflates the trace toward
+    /// `tau × kernel` and turns one coincidence into sustained learning.
+    pub fn accumulate(&mut self, delta_t: f32) {
+        self.value += Self::kernel(delta_t);
+    }
+
     /// Decay the trace by one step (assumes dt = 1 unit).
     pub fn decay(&mut self) {
         // Guard against non-positive tau, which would cause division by zero
@@ -63,11 +181,130 @@ impl EligibilityTrace {
         let tau = self.tau.max(f32::EPSILON);
         self.value *= (-1.0 / tau).exp();
     }
+
+    /// Clear the accumulated value, keeping [`Self::tau`].
+    pub fn reset(&mut self) {
+        self.value = 0.0;
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn new_starts_at_zero_with_requested_tau() {
+        let trace = EligibilityTrace::new(75.0);
+        assert_eq!(trace.value, 0.0);
+        assert_eq!(trace.tau, 75.0);
+    }
+
+    #[test]
+    fn default_trace_uses_default_eligibility_tau() {
+        let trace = EligibilityTrace::default();
+        assert_eq!(trace.value, 0.0);
+        assert_eq!(trace.tau, RM_STDP_TAU_ELIGIBILITY);
+    }
+
+    #[test]
+    fn default_config_matches_published_constants() {
+        let config = RmStdpConfig::default();
+        assert_eq!(config.tau_eligibility, RM_STDP_TAU_ELIGIBILITY);
+        assert_eq!(config.reward_lr, RM_STDP_REWARD_LR);
+        assert_eq!(config.w_min, RM_STDP_W_MIN);
+        assert_eq!(config.w_max, RM_STDP_W_MAX);
+    }
+
+    #[test]
+    fn weight_bounds_pass_through_a_sane_configuration() {
+        let config = RmStdpConfig {
+            w_min: 0.25,
+            w_max: 1.75,
+            ..RmStdpConfig::default()
+        };
+        assert_eq!(config.weight_bounds(), (0.25, 1.75));
+    }
+
+    #[test]
+    fn weight_bounds_fall_back_when_reversed_or_non_finite() {
+        let fallback = (RM_STDP_W_MIN, RM_STDP_W_MAX);
+        for (w_min, w_max) in [
+            (1.5, 0.2),
+            (f32::NAN, 1.0),
+            (0.0, f32::NAN),
+            (f32::NEG_INFINITY, f32::INFINITY),
+        ] {
+            let config = RmStdpConfig {
+                w_min,
+                w_max,
+                ..RmStdpConfig::default()
+            };
+            let (lo, hi) = config.weight_bounds();
+            assert_eq!((lo, hi), fallback);
+            // The contract that matters: `clamp` must not panic on the result.
+            assert!(0.5_f32.clamp(lo, hi).is_finite());
+        }
+    }
+
+    #[test]
+    fn kernel_potentiates_when_pre_precedes_post() {
+        let dw = EligibilityTrace::kernel(5.0);
+        assert!(dw > 0.0);
+        let expected = RM_STDP_A_PLUS * (-5.0_f32 / RM_STDP_TAU_PLUS).exp();
+        assert!((dw - expected).abs() < 1e-9);
+    }
+
+    #[test]
+    fn kernel_depresses_when_post_precedes_pre() {
+        let dw = EligibilityTrace::kernel(-5.0);
+        assert!(dw < 0.0);
+        let expected = -RM_STDP_A_MINUS * (-5.0_f32 / RM_STDP_TAU_MINUS).exp();
+        assert!((dw - expected).abs() < 1e-9);
+    }
+
+    #[test]
+    fn kernel_is_strongest_at_coincident_spikes() {
+        assert!((EligibilityTrace::kernel(0.0) - RM_STDP_A_PLUS).abs() < 1e-9);
+        assert!(EligibilityTrace::kernel(1.0) < EligibilityTrace::kernel(0.0));
+        assert!(EligibilityTrace::kernel(20.0) < EligibilityTrace::kernel(1.0));
+        assert!(EligibilityTrace::kernel(-1.0) > EligibilityTrace::kernel(-0.5));
+    }
+
+    #[test]
+    fn accumulate_adds_the_kernel_to_the_trace() {
+        let mut trace = EligibilityTrace::new(50.0);
+        trace.accumulate(3.0);
+        assert!((trace.value - EligibilityTrace::kernel(3.0)).abs() < 1e-9);
+    }
+
+    #[test]
+    fn accumulate_compounds_repeated_coincidences() {
+        let mut trace = EligibilityTrace::new(50.0);
+        trace.accumulate(0.0);
+        let after_first = trace.value;
+        trace.accumulate(0.0);
+        assert!(trace.value > after_first);
+        assert!((trace.value - 2.0 * RM_STDP_A_PLUS).abs() < 1e-9);
+    }
+
+    #[test]
+    fn accumulate_can_flip_a_potentiated_trace_negative() {
+        let mut trace = EligibilityTrace::new(50.0);
+        trace.accumulate(0.0);
+        assert!(trace.value > 0.0);
+        // LTD amplitude exceeds LTP amplitude, so a coincident depression wins.
+        trace.accumulate(-0.0001);
+        assert!(trace.value < 0.0);
+    }
+
+    #[test]
+    fn reset_clears_value_but_keeps_tau() {
+        let mut trace = EligibilityTrace::new(60.0);
+        trace.accumulate(0.0);
+        trace.reset();
+        assert_eq!(trace.value, 0.0);
+        assert_eq!(trace.tau, 60.0);
+    }
 
     #[test]
     fn decay_scales_value_by_exp_neg_inv_tau() {

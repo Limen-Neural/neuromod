@@ -20,8 +20,8 @@
 //! 2. [`engine`] — [`SpikingNetwork`] and the per-tick [`SpikingNetwork::step`] contract.
 //! 3. [`lif`] / [`izhikevich`] — the two banks the engine actually wires.
 //! 4. [`modulators`] — dopamine / serotonin / acetylcholine / norepinephrine.
-//! 5. [`rm_stdp`] / [`hebbian`] — plasticity building blocks (eligibility traces are
-//!    **not** yet consumed by the live engine path; see those modules).
+//! 5. [`rm_stdp`] / [`hebbian`] — plasticity: reward-modulated eligibility traces
+//!    (wired into the engine) and classical Hebbian STDP (standalone).
 //! 6. Standalone models ([`lapicque`], [`gif`], [`fitzhugh_nagumo`], [`hodgkin_huxley`])
 //!    for research use outside the engine.
 //!
@@ -32,14 +32,17 @@
 //! - **Standalone** types (`LapicqueNeuron`, `GifNeuron`, `FitzHughNagumoNeuron`,
 //!   `HodgkinHuxleyNeuron`, …) are usable on their own; they are not alternate
 //!   engine banks.
-//! - Plasticity: classical Hebbian STDP utilities plus `EligibilityTrace` /
-//!   `RmStdpConfig` building blocks. Live `step` learning is dopamine-gated and
-//!   updates LIF weights **directly** (not via eligibility conversion).
+//! - Plasticity: `SpikingNetwork` learns through `EligibilityTrace` / `RmStdpConfig`.
+//!   Each step decays and accumulates one trace per synapse regardless of dopamine;
+//!   dopamine gates only the trace → weight conversion, so reward can arrive after
+//!   the coincidence it pays for. Classical Hebbian STDP utilities are separate and
+//!   unmodulated.
 //!
 //! ## Features
 //!
 //! - Topology-neutral, dynamically sized `SpikingNetwork`
 //! - Neuromodulators: dopamine, serotonin, acetylcholine, norepinephrine
+//! - Reward-modulated STDP over per-synapse eligibility traces
 //!
 //! ```rust
 //! use neuromod::{NeuroModulators, SpikingNetwork};

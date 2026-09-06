@@ -58,6 +58,10 @@ Benchmarks synaptic plasticity operations:
 - `classical_stdp_ltp` - Classical STDP with pre-before-post timing (LTP)
 - `classical_stdp_ltd` - Classical STDP with post-before-pre timing (LTD)
 - `eligibility_trace_decay` - Eligibility trace decay operation
+- `eligibility_trace_accumulate_ltp` - Kernel evaluation and accumulation for a pre-before-post pair
+- `eligibility_trace_accumulate_ltd` - Same for post-before-pre (depression)
+- `rm_stdp_trace_to_weight` - One synapse's decay -> accumulate -> dopamine-gated conversion
+- `engine_step/unrewarded` / `engine_step/rewarded` - Full `SpikingNetwork::step` (64 LIF over 64 channels) carrying trace bookkeeping, with the dopamine gate shut and open
 - `stdp_weight_update` - Complete weight update cycle
 - `hebbian_network_update` - Hebbian network weight update
 - `stdp_delta_t_calculation` - Spike timing difference calculation

@@ -13,9 +13,11 @@
 //! For classical Hebbian STDP on a small Izhikevich network, see
 //! [`crate::hebbian`] — that path is separate from this engine.
 //!
-//! Plasticity honesty: live reward-modulated updates run inside `step` via
-//! `apply_stdp` (dopamine-gated). [`crate::EligibilityTrace`] is a building
-//! block and is **not** consumed by the engine yet (see [`crate::rm_stdp`]).
+//! Plasticity: live reward-modulated updates run inside `step` via `apply_stdp`.
+//! Every step decays and accumulates one [`crate::EligibilityTrace`] per synapse;
+//! dopamine gates only the trace → weight conversion, so a coincidence recorded
+//! while reward was absent can still be paid out later (see [`crate::rm_stdp`]
+//! and [`RmStdpConfig`]).
 
 use rand::RngExt;
 use serde::{Deserialize, Serialize};
@@ -55,6 +57,14 @@ pub struct SpikingNetwork {
     pub input_spike_times: Vec<i64>,
     /// Per-channel exponential moving average of input stimuli.
     pub predictive_state: Vec<f32>,
+    /// R-STDP hyperparameters: eligibility-trace decay, the reward learning
+    /// rate used to convert traces into weight changes, and the weight bounds
+    /// enforced by `apply_stdp` and the L1 renormalization pass.
+    ///
+    /// Assigning this field directly leaves existing traces on their previous
+    /// `tau`; use [`SpikingNetwork::set_rm_stdp_config`] to update both.
+    #[serde(default)]
+    pub stdp_config: RmStdpConfig,
 }
 
 impl SpikingNetwork {
@@ -65,10 +75,15 @@ impl SpikingNetwork {
 
     /// Create a dynamically sized network.
     pub fn with_dimensions(num_lif: usize, num_izh: usize, num_channels: usize) -> Self {
+        let stdp_config = RmStdpConfig::default();
         let neurons: Vec<LifNeuron> = (0..num_lif)
             .map(|_| {
                 let mut n = LifNeuron::new();
                 n.weights = vec![0.0; num_channels];
+                n.eligibility = vec![
+                    EligibilityTrace::new(stdp_config.effective_tau_eligibility());
+                    num_channels
+                ];
                 n.last_spike_time = -1;
                 n
             })
@@ -82,6 +97,52 @@ impl SpikingNetwork {
             num_channels,
             input_spike_times: vec![-1; num_channels],
             predictive_state: vec![0.0; num_channels],
+            stdp_config,
+        }
+    }
+
+    /// Replace the R-STDP hyperparameters, re-`tau`-ing every existing
+    /// eligibility trace so traces and config stay consistent.
+    ///
+    /// The config is **normalized on the way in**: each field passes through its
+    /// guard ([`RmStdpConfig::weight_bounds`],
+    /// [`RmStdpConfig::effective_reward_lr`],
+    /// [`RmStdpConfig::effective_tau_eligibility`]), so a reversed or non-finite
+    /// value is replaced by the published default rather than stored and worked
+    /// around later. Assigning [`Self::stdp_config`] directly bypasses this; the
+    /// engine still reads through the same guards, so it stays safe either way.
+    ///
+    /// Accumulated trace *values* are preserved — only the decay time constant
+    /// changes. Use [`Self::reset`] to clear them.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use neuromod::{RmStdpConfig, SpikingNetwork};
+    ///
+    /// let mut net = SpikingNetwork::with_dimensions(4, 1, 4);
+    /// net.set_rm_stdp_config(RmStdpConfig {
+    ///     tau_eligibility: 100.0,
+    ///     reward_lr: 0.02,
+    ///     ..RmStdpConfig::default()
+    /// });
+    ///
+    /// assert_eq!(net.neurons[0].eligibility[0].tau, 100.0);
+    /// ```
+    pub fn set_rm_stdp_config(&mut self, config: RmStdpConfig) {
+        let (w_min, w_max) = config.weight_bounds();
+        let tau = config.effective_tau_eligibility();
+        self.stdp_config = RmStdpConfig {
+            tau_eligibility: tau,
+            reward_lr: config.effective_reward_lr(),
+            w_min,
+            w_max,
+        };
+
+        for neuron in &mut self.neurons {
+            for trace in &mut neuron.eligibility {
+                trace.tau = tau;
+            }
         }
     }
 
@@ -105,9 +166,20 @@ impl SpikingNetwork {
     ///    `input_spike_times` on success.
     /// 5. Integrate each LIF neuron (weighted stimuli + surprise), then `check_fire`.
     /// 6. Lateral inhibition on non-firing LIF cells if anyone spiked.
-    /// 7. Dopamine-gated STDP on LIF weights (`apply_stdp`); skipped if learning
-    ///    rate ≈ 0. Weights are **not** updated via [`crate::EligibilityTrace`].
-    /// 8. Renormalize LIF weights to an L1 budget and clamp to R-STDP bounds.
+    /// 7. R-STDP on LIF weights (`apply_stdp`): decay and accumulate every
+    ///    [`crate::EligibilityTrace`] regardless of dopamine, then convert traces
+    ///    into weight changes only when the dopamine-derived learning rate is
+    ///    above ≈ 0.
+    /// 8. Renormalize LIF weights toward an L1 budget, then clamp to the
+    ///    [`RmStdpConfig`] bounds. Applies only to a neuron whose weights already
+    ///    sum above `1e-6`; a blank neuron stays blank rather than being scaled
+    ///    up to the budget, and a synapse at exactly zero is left alone so a
+    ///    positive `w_min` cannot conjure a connection on an unrewarded step.
+    ///    **Bounds take precedence over the budget.** Under the default bounds
+    ///    the clamp provably cannot bind — weights are non-negative and `w_max`
+    ///    equals the budget — so the L1 sum lands on budget exactly. A binding
+    ///    bound is still enforced, leaving the sum off budget in whichever
+    ///    direction it binds.
     /// 9. Drive each Izhikevich neuron from mean LIF membrane potential + dopamine.
     ///
     /// # Examples
@@ -214,13 +286,28 @@ impl SpikingNetwork {
 
         self.apply_stdp(learning_rate);
 
+        // Scale toward the L1 budget, then enforce the configured bounds. The
+        // bounds win where the two disagree: under the defaults they cannot
+        // bind here, so the budget holds exactly; a narrowed range is honored
+        // and leaves the sum off budget. See the `step` contract, item 8.
+        let (w_min, w_max) = self.stdp_config.weight_bounds();
         for neuron in &mut self.neurons {
             let total: f32 = neuron.weights.iter().sum();
             if total > 1e-6 {
                 let scale = WEIGHT_BUDGET / total;
                 for w in &mut neuron.weights {
+                    // A synapse at exactly zero is unconnected. Rescaling and
+                    // capping the connected ones is this pass's job, but a
+                    // positive `w_min` must not conjure a connection here: this
+                    // loop runs every step, dopamine or not, and an unrewarded
+                    // step must leave weights alone. Learning raises a synapse
+                    // to the floor in `apply_stdp`, and only on a step where it
+                    // actually applies an update.
+                    if *w == 0.0 {
+                        continue;
+                    }
                     *w *= scale;
-                    *w = w.clamp(RM_STDP_W_MIN, RM_STDP_W_MAX);
+                    *w = w.clamp(w_min, w_max);
                 }
             }
         }
@@ -240,37 +327,96 @@ impl SpikingNetwork {
         Ok(spike_ids)
     }
 
+    /// Reward-modulated STDP over the per-synapse eligibility traces.
+    ///
+    /// Runs on every step. Traces decay and accumulate independently of
+    /// `dopamine_lr`; only the trace → weight conversion is gated on it, which is
+    /// what lets reward arriving *after* a coincidence still pay for it.
+    ///
+    /// A coincidence is recorded once, on the step it happens — when the post
+    /// neuron fired now (`Δt = t_post − t_pre ≥ 0`, potentiation) or when the pre
+    /// channel fired now after an earlier post spike (`Δt < 0`, depression).
+    /// Re-applying the kernel every step from stale `last_spike_time` values
+    /// would inflate one spike pair into sustained learning.
     fn apply_stdp(&mut self, dopamine_lr: f32) {
-        if dopamine_lr < 1e-6 {
-            return;
-        }
-
-        let input_times = self.input_spike_times.clone();
+        let now = self.global_step;
+        let config = self.stdp_config;
+        let (w_min, w_max) = config.weight_bounds();
+        let reward_lr = config.effective_reward_lr();
+        let rewarding = dopamine_lr >= 1e-6;
+        let input_times = &self.input_spike_times;
 
         for neuron in &mut self.neurons {
-            if neuron.last_spike_time < 0 {
-                continue;
+            // Pre-0.6 deserialized state carries no traces, and a caller may have
+            // resized `weights` by hand; keep the two vectors index-compatible.
+            if neuron.eligibility.len() != neuron.weights.len() {
+                neuron.eligibility.resize(
+                    neuron.weights.len(),
+                    EligibilityTrace::new(config.effective_tau_eligibility()),
+                );
             }
 
-            for (ch, &pre_time) in input_times.iter().enumerate() {
-                if ch >= neuron.weights.len() || pre_time < 0 {
-                    continue;
+            let post_time = neuron.last_spike_time;
+
+            for (ch, &pre_time) in input_times.iter().enumerate().take(neuron.weights.len()) {
+                let trace = &mut neuron.eligibility[ch];
+
+                // A non-finite trace carries no credit, and paying it out would
+                // poison the weight — `clamp` preserves NaN, and the L1 pass then
+                // skips this neuron forever because a NaN total is never
+                // `> 1e-6`. Clear it so the synapse can learn again. `value` is
+                // public and deserializable, so this is reachable without ever
+                // going through `accumulate`.
+                if !trace.value.is_finite() {
+                    trace.reset();
+                } else if trace.value != 0.0 {
+                    // An untouched trace decays to itself; skip the `exp` so a
+                    // blank or unrewarded network stays cheap at large channel
+                    // counts.
+                    trace.decay();
                 }
 
-                let post_time = neuron.last_spike_time;
-                if post_time < 0 {
-                    continue;
+                if pre_time >= 0
+                    && post_time >= 0
+                    && (post_time == now || (pre_time == now && post_time < pre_time))
+                {
+                    trace.accumulate((post_time - pre_time) as f32);
                 }
 
-                let delta_t = (post_time - pre_time) as f32;
-                let dw = if delta_t >= 0.0 {
-                    RM_STDP_A_PLUS * (-delta_t / RM_STDP_TAU_PLUS).exp()
-                } else {
-                    -RM_STDP_A_MINUS * (delta_t / RM_STDP_TAU_MINUS).exp()
-                };
+                if rewarding && trace.value != 0.0 {
+                    let dw = reward_lr * dopamine_lr * trace.value;
+                    let w = neuron.weights[ch];
+                    // The bounds must never move a weight on their own. Writing
+                    // unconditionally lets them do exactly that on a synapse
+                    // left at exactly zero -- unconnected, the state the L1 pass
+                    // below is careful to preserve -- in two ways:
+                    //
+                    // - `reward_lr = 0.0` disables conversion, yet a `dw` of
+                    //   zero still clamps the synapse up to a positive `w_min`.
+                    // - Depression (`dw < 0`) has nothing to take away, and its
+                    //   negative result clamps up to `w_min` too, connecting a
+                    //   synapse by weakening it.
+                    //
+                    // Potentiation is the one update that may bring a synapse
+                    // online, and it still lands on the floor where `w_min`
+                    // binds. Everywhere else the L1 pass re-clamps each step.
+                    if dw > 0.0 || (dw < 0.0 && w != 0.0) {
+                        neuron.weights[ch] = (w + dw).clamp(w_min, w_max);
+                    }
+                }
+            }
 
-                neuron.weights[ch] =
-                    (neuron.weights[ch] + dw * dopamine_lr).clamp(RM_STDP_W_MIN, RM_STDP_W_MAX);
+            // A caller can hand a neuron more weights than the network has
+            // channels. Those synapses have no input that could spike, so they
+            // only ever decay — but the loop above stops at the last channel,
+            // which would leave a planted or deserialized trace frozen there
+            // forever. Empty in the usual case, where the two lengths agree.
+            for trace in neuron.eligibility.iter_mut().skip(input_times.len()) {
+                if !trace.value.is_finite() {
+                    trace.reset();
+                } else if trace.value != 0.0 {
+                    trace.decay();
+                }
             }
         }
     }
@@ -295,6 +441,9 @@ impl SpikingNetwork {
             neuron.membrane_potential = 0.0;
             neuron.last_spike = false;
             neuron.last_spike_time = -1;
+            for trace in &mut neuron.eligibility {
+                trace.reset();
+            }
         }
 
         self.modulators = NeuroModulators::default();
@@ -329,6 +478,12 @@ mod tests {
         assert_eq!(network.input_spike_times.len(), 518);
         assert_eq!(network.predictive_state.len(), 518);
         assert_eq!(network.neurons[0].weights.len(), 518);
+        assert_eq!(network.neurons[0].eligibility.len(), 518);
+        assert_eq!(network.stdp_config, RmStdpConfig::default());
+        assert_eq!(
+            network.neurons[0].eligibility[0].tau,
+            RmStdpConfig::default().tau_eligibility
+        );
     }
 
     #[test]
@@ -384,5 +539,682 @@ mod tests {
         for &p in &potentials {
             assert_eq!(p, 0.0);
         }
+    }
+
+    // --- Reward-gated STDP over eligibility traces (GH#72 / GH#73 / GH#74) ---
+
+    /// Four LIF neurons over four channels, weights seeded so the L1
+    /// renormalization pass in `step` is an exact no-op (`sum == WEIGHT_BUDGET`).
+    /// That isolates weight movement caused by learning from weight movement
+    /// caused by rescaling.
+    fn rstdp_test_network() -> SpikingNetwork {
+        const CHANNELS: usize = 4;
+        let mut network = SpikingNetwork::with_dimensions(4, 1, CHANNELS);
+        let seed = WEIGHT_BUDGET / CHANNELS as f32;
+        for neuron in &mut network.neurons {
+            neuron.weights = vec![seed; CHANNELS];
+        }
+        network
+    }
+
+    /// Channels 0 and 1 spike on every step (`|s| = 1.0` always wins the
+    /// Bernoulli trial); channels 2 and 3 never spike (`|s| <= 0.01` skips the
+    /// trial entirely). No RNG outcome is left to chance.
+    const DRIVEN_AND_SILENT: [f32; 4] = [1.0, 1.0, 0.0, 0.0];
+
+    #[test]
+    fn test_traces_accumulate_without_dopamine_but_weights_hold() {
+        let mut network = rstdp_test_network();
+        let before = network.neurons[0].weights.clone();
+        let no_reward = NeuroModulators::default();
+        assert_eq!(no_reward.dopamine, 0.0);
+
+        for _ in 0..25 {
+            network
+                .step(&DRIVEN_AND_SILENT, &no_reward)
+                .expect("length matches");
+        }
+
+        // Learning is gated off, so not one weight moved...
+        assert_eq!(network.neurons[0].weights, before);
+        // ...but the driven synapses still banked the coincidences.
+        assert!(
+            network.neurons[0].eligibility[0].value > 0.0,
+            "driven channel should hold a positive trace, got {}",
+            network.neurons[0].eligibility[0].value
+        );
+        assert_eq!(network.neurons[0].eligibility[2].value, 0.0);
+    }
+
+    #[test]
+    fn test_dopamine_converts_traces_into_weight_change() {
+        let mut network = rstdp_test_network();
+        let seed = network.neurons[0].weights[0];
+        let reward = NeuroModulators {
+            dopamine: 0.8,
+            ..Default::default()
+        };
+
+        for _ in 0..25 {
+            network
+                .step(&DRIVEN_AND_SILENT, &reward)
+                .expect("length matches");
+        }
+
+        for neuron in &network.neurons {
+            assert!(
+                neuron.weights[0] > seed && neuron.weights[1] > seed,
+                "driven synapses should potentiate: {:?}",
+                neuron.weights
+            );
+            assert!(
+                neuron.weights[2] < seed && neuron.weights[3] < seed,
+                "silent synapses should lose share of the L1 budget: {:?}",
+                neuron.weights
+            );
+            assert!(neuron.eligibility[0].value > 0.0);
+        }
+    }
+
+    #[test]
+    fn test_weight_change_scales_with_dopamine_level() {
+        let run = |dopamine: f32| {
+            let mut network = rstdp_test_network();
+            let modulators = NeuroModulators {
+                dopamine,
+                ..Default::default()
+            };
+            for _ in 0..25 {
+                network
+                    .step(&DRIVEN_AND_SILENT, &modulators)
+                    .expect("length matches");
+            }
+            network.neurons[0].weights[0]
+        };
+
+        let weak = run(0.2);
+        let strong = run(0.9);
+        assert!(
+            strong > weak,
+            "more dopamine must buy more learning: {strong} vs {weak}"
+        );
+    }
+
+    #[test]
+    fn test_reward_pays_out_the_banked_trace_not_just_the_latest_spike() {
+        let reward = NeuroModulators {
+            dopamine: 0.8,
+            ..Default::default()
+        };
+
+        // Bank ten steps of coincidences with reward switched off, then reward once.
+        let mut banked = rstdp_test_network();
+        let no_reward = NeuroModulators::default();
+        for _ in 0..10 {
+            banked
+                .step(&DRIVEN_AND_SILENT, &no_reward)
+                .expect("length matches");
+        }
+        let before_reward = banked.neurons[0].weights[0];
+        banked
+            .step(&DRIVEN_AND_SILENT, &reward)
+            .expect("length matches");
+        let banked_gain = banked.neurons[0].weights[0] - before_reward;
+
+        // Identical reward on an identical step, with nothing banked behind it.
+        let mut fresh = rstdp_test_network();
+        let fresh_seed = fresh.neurons[0].weights[0];
+        fresh
+            .step(&DRIVEN_AND_SILENT, &reward)
+            .expect("length matches");
+        let fresh_gain = fresh.neurons[0].weights[0] - fresh_seed;
+
+        assert!(banked_gain > 0.0 && fresh_gain > 0.0);
+        assert!(
+            banked_gain > 5.0 * fresh_gain,
+            "the accumulated trace, not the latest coincidence alone, must drive \
+             the update: {banked_gain} vs {fresh_gain}"
+        );
+    }
+
+    #[test]
+    fn test_trace_converts_on_a_step_with_no_new_coincidence() {
+        // Two channels, weights summing to the L1 budget so renormalization
+        // cannot manufacture the difference this test looks for.
+        let mut network = SpikingNetwork::with_dimensions(1, 1, 2);
+        network.neurons[0].weights = vec![WEIGHT_BUDGET / 2.0; 2];
+        let seed = network.neurons[0].weights[0];
+        // Credit earned earlier, on steps this network has no memory of beyond
+        // the trace itself.
+        network.neurons[0].eligibility[0].value = 0.5;
+
+        // Zero stimuli: no pre spike is stamped, and with no drive (and no
+        // prediction error to be surprised by) the neuron cannot fire either.
+        let reward = NeuroModulators {
+            dopamine: 0.9,
+            ..Default::default()
+        };
+        network.step(&[0.0, 0.0], &reward).expect("length matches");
+
+        assert_eq!(network.input_spike_times[0], -1, "no pre spike");
+        assert_eq!(network.neurons[0].last_spike_time, -1, "no post spike");
+        assert!(
+            network.neurons[0].eligibility[0].value < 0.5,
+            "the trace should have decayed, not grown"
+        );
+        assert!(
+            network.neurons[0].weights[0] > seed,
+            "deferred credit: reward converts the banked trace with no new spikes"
+        );
+        assert!(network.neurons[0].weights[0] > network.neurons[0].weights[1]);
+    }
+    #[test]
+    fn test_zero_reward_rate_leaves_an_unconnected_synapse_at_zero() {
+        // `reward_lr = 0.0` turns trace conversion off. A positive `w_min` must
+        // not then stand in for it: with no update applied there is nothing to
+        // clamp, and raising an unconnected synapse to the floor would let a
+        // disabled learning rate change connectivity. The renormalization pass
+        // would then scale that fabricated weight toward the budget.
+        let mut network = SpikingNetwork::with_dimensions(1, 1, 2);
+        network.neurons[0].weights = vec![0.0, WEIGHT_BUDGET];
+        network.set_rm_stdp_config(RmStdpConfig {
+            reward_lr: 0.0,
+            w_min: 0.1,
+            ..RmStdpConfig::default()
+        });
+        // Credit is banked, so the conversion branch is entered every step.
+        network.neurons[0].eligibility[0].value = 0.5;
+
+        let reward = NeuroModulators {
+            dopamine: 0.9,
+            ..Default::default()
+        };
+        for _ in 0..5 {
+            network.step(&[0.0, 0.0], &reward).expect("length matches");
+        }
+
+        assert!(
+            network.neurons[0].eligibility[0].value > 0.0,
+            "the trace should still be banked, so the branch really ran"
+        );
+        assert_eq!(
+            network.neurons[0].weights[0], 0.0,
+            "a zero learning rate applied no update, so the floor must not connect this synapse"
+        );
+    }
+
+    #[test]
+    fn test_post_before_pre_drives_depression_and_respects_w_min() {
+        let mut network = SpikingNetwork::with_dimensions(1, 1, 2);
+        // Zero weights mean zero drive, so the neuron cannot fire and
+        // `last_spike_time` keeps the post spike we plant here — strictly before
+        // the pre spike that channel 0 emits on the step below.
+        network.neurons[0].weights = vec![0.0, 0.0];
+        network.neurons[0].last_spike_time = 0;
+        let reward = NeuroModulators {
+            dopamine: 0.9,
+            ..Default::default()
+        };
+
+        network.step(&[1.0, 0.0], &reward).expect("length matches");
+
+        assert_eq!(network.neurons[0].last_spike_time, 0, "must not have fired");
+        assert!(
+            network.neurons[0].eligibility[0].value < 0.0,
+            "post-before-pre is depression, got {}",
+            network.neurons[0].eligibility[0].value
+        );
+        assert_eq!(
+            network.neurons[0].weights[0],
+            network.stdp_config.weight_bounds().0,
+            "depression must clamp at w_min, not go negative"
+        );
+    }
+    #[test]
+    fn test_rewarded_depression_does_not_connect_a_zero_weight_synapse() {
+        // Depression on an unconnected synapse: `(0.0 + dw).clamp(w_min, w_max)`
+        // with a negative `dw` and a positive floor returns `w_min`, so paying
+        // out a negative trace would *create* the connection depression is
+        // supposed to weaken. Skipping a zero update is not enough here -- `dw`
+        // is genuinely non-zero, it just points the wrong way.
+        let mut network = SpikingNetwork::with_dimensions(1, 1, 2);
+        network.neurons[0].weights = vec![0.0, WEIGHT_BUDGET];
+        network.set_rm_stdp_config(RmStdpConfig {
+            w_min: 0.1,
+            ..RmStdpConfig::default()
+        });
+        // Zero weight on channel 0 means no drive from it, so the neuron cannot
+        // fire and keeps the post spike planted here -- strictly before the pre
+        // spike channel 0 emits on the step below.
+        network.neurons[0].last_spike_time = 0;
+        let reward = NeuroModulators {
+            dopamine: 0.9,
+            ..Default::default()
+        };
+
+        network.step(&[1.0, 0.0], &reward).expect("length matches");
+
+        assert_eq!(network.neurons[0].last_spike_time, 0, "must not have fired");
+        assert!(
+            network.neurons[0].eligibility[0].value < 0.0,
+            "expected a depressing trace, got {}",
+            network.neurons[0].eligibility[0].value
+        );
+        assert_eq!(
+            network.neurons[0].weights[0], 0.0,
+            "depression must not lift an unconnected synapse to the floor"
+        );
+    }
+    #[test]
+    fn test_depression_clamps_a_connected_synapse_at_w_min() {
+        // The floor still binds wherever an update actually applies: a
+        // *connected* synapse depressed past `w_min` stops there instead of
+        // going negative. This is the other half of the test above, which
+        // covers the synapse that must not be connected in the first place.
+        let mut network = SpikingNetwork::with_dimensions(1, 1, 2);
+        network.neurons[0].weights = vec![0.001, WEIGHT_BUDGET];
+        network.neurons[0].eligibility[0].value = -0.5;
+        let reward = NeuroModulators {
+            dopamine: 0.9,
+            ..Default::default()
+        };
+
+        // Zero stimuli: nothing spikes, so the banked trace is the only input
+        // to the update and its sign is not in doubt.
+        network.step(&[0.0, 0.0], &reward).expect("length matches");
+
+        assert_eq!(
+            network.neurons[0].weights[0],
+            network.stdp_config.weight_bounds().0,
+            "depression must clamp at w_min, not go negative"
+        );
+    }
+    #[test]
+    fn test_traces_past_the_last_channel_still_decay() {
+        // Two channels, but a caller widened this neuron to four synapses. The
+        // extra two have no input that could ever spike, so decay is all they
+        // can do — and the per-channel loop stops before reaching them, which
+        // left a planted trace frozen there across every step.
+        let mut network = SpikingNetwork::with_dimensions(1, 1, 2);
+        network.neurons[0].weights = vec![WEIGHT_BUDGET / 4.0; 4];
+        network.neurons[0].eligibility = vec![EligibilityTrace::new(50.0); 4];
+        network.neurons[0].eligibility[3].value = 0.5;
+
+        let no_reward = NeuroModulators::default();
+        for _ in 0..5 {
+            network
+                .step(&[0.0, 0.0], &no_reward)
+                .expect("length matches");
+        }
+
+        let orphan = network.neurons[0].eligibility[3].value;
+        assert!(
+            orphan > 0.0 && orphan < 0.5,
+            "a trace past the last channel should decay toward zero, got {orphan}"
+        );
+    }
+
+    #[test]
+    fn test_one_spike_pair_is_counted_once_not_re_accumulated() {
+        let mut network = SpikingNetwork::with_dimensions(1, 1, 1);
+        network.neurons[0].weights = vec![0.0];
+        network.neurons[0].last_spike_time = 0;
+        let no_reward = NeuroModulators::default();
+
+        // Step 1 stamps a pre spike; the planted post spike at t=0 precedes it.
+        network.step(&[1.0], &no_reward).expect("length matches");
+        let after_event = network.neurons[0].eligibility[0].value;
+        assert!(after_event < 0.0);
+
+        // Step 2 has no stimulus, so neither side spikes: the stale pair must
+        // not be re-counted, leaving pure decay toward zero.
+        network.step(&[0.0], &no_reward).expect("length matches");
+        let after_quiet = network.neurons[0].eligibility[0].value;
+
+        assert!(
+            after_quiet > after_event && after_quiet < 0.0,
+            "expected decay toward zero, got {after_event} -> {after_quiet}"
+        );
+    }
+
+    #[test]
+    fn test_reset_clears_eligibility_traces() {
+        let mut network = rstdp_test_network();
+        let reward = NeuroModulators {
+            dopamine: 0.8,
+            ..Default::default()
+        };
+        for _ in 0..10 {
+            network
+                .step(&DRIVEN_AND_SILENT, &reward)
+                .expect("length matches");
+        }
+        assert!(network.neurons[0].eligibility[0].value > 0.0);
+
+        network.reset();
+
+        for neuron in &network.neurons {
+            assert!(neuron.eligibility.iter().all(|t| t.value == 0.0));
+            // `tau` survives a reset; only the accumulated value is cleared.
+            assert!(
+                neuron
+                    .eligibility
+                    .iter()
+                    .all(|t| t.tau == network.stdp_config.tau_eligibility)
+            );
+        }
+    }
+
+    #[test]
+    fn test_set_rm_stdp_config_normalizes_what_it_stores() {
+        let mut network = rstdp_test_network();
+
+        network.set_rm_stdp_config(RmStdpConfig {
+            tau_eligibility: f32::NAN,
+            reward_lr: f32::INFINITY,
+            w_min: 1.5,
+            w_max: 0.2, // reversed
+        });
+
+        // The setter installs guarded values rather than storing nonsense and
+        // working around it at every read.
+        assert_eq!(network.stdp_config, RmStdpConfig::default());
+        for neuron in &network.neurons {
+            assert!(
+                neuron
+                    .eligibility
+                    .iter()
+                    .all(|t| t.tau == RmStdpConfig::default().tau_eligibility)
+            );
+        }
+    }
+
+    #[test]
+    fn test_set_rm_stdp_config_retaus_existing_traces() {
+        let mut network = rstdp_test_network();
+        let config = RmStdpConfig {
+            tau_eligibility: 100.0,
+            reward_lr: 0.02,
+            w_min: 0.1,
+            w_max: 1.5,
+        };
+
+        network.set_rm_stdp_config(config);
+
+        assert_eq!(network.stdp_config, config);
+        for neuron in &network.neurons {
+            assert!(neuron.eligibility.iter().all(|t| t.tau == 100.0));
+        }
+    }
+
+    #[test]
+    fn test_default_bounds_keep_the_l1_sum_on_budget() {
+        let mut network = rstdp_test_network();
+        let reward = NeuroModulators {
+            dopamine: 0.9,
+            ..Default::default()
+        };
+
+        for _ in 0..40 {
+            network
+                .step(&DRIVEN_AND_SILENT, &reward)
+                .expect("length matches");
+        }
+
+        for neuron in &network.neurons {
+            let total: f32 = neuron.weights.iter().sum();
+            assert!(
+                (total - WEIGHT_BUDGET).abs() < 1e-4,
+                "the default clamp cannot bind, so the budget holds: got {total}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_configured_bounds_take_precedence_over_the_l1_budget() {
+        // Four channels capped at 0.4 cannot reach the budget of 2.0 — the
+        // documented precedence is that the bound wins and the sum sits under.
+        let mut network = rstdp_test_network();
+        network.set_rm_stdp_config(RmStdpConfig {
+            w_max: 0.4,
+            ..RmStdpConfig::default()
+        });
+        let reward = NeuroModulators {
+            dopamine: 1.0,
+            ..Default::default()
+        };
+
+        for _ in 0..40 {
+            network
+                .step(&DRIVEN_AND_SILENT, &reward)
+                .expect("length matches");
+        }
+
+        for neuron in &network.neurons {
+            assert!(
+                neuron.weights.iter().all(|&w| w <= 0.4 + 1e-6),
+                "weights must respect the configured w_max: {:?}",
+                neuron.weights
+            );
+            let total: f32 = neuron.weights.iter().sum();
+            assert!(
+                total < WEIGHT_BUDGET,
+                "a binding w_max holds the L1 sum under budget: got {total}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_non_finite_reward_lr_cannot_poison_weights() {
+        // A NaN weight would survive forever: renormalization skips a neuron
+        // whose total is not `> 1e-6`, and `NaN > 1e-6` is false.
+        let mut network = rstdp_test_network();
+        network.stdp_config.reward_lr = f32::NAN;
+        let reward = NeuroModulators {
+            dopamine: 0.9,
+            ..Default::default()
+        };
+
+        for _ in 0..10 {
+            network
+                .step(&DRIVEN_AND_SILENT, &reward)
+                .expect("length matches");
+        }
+
+        for neuron in &network.neurons {
+            assert!(
+                neuron.weights.iter().all(|w| w.is_finite()),
+                "a non-finite reward_lr must not poison weights: {:?}",
+                neuron.weights
+            );
+        }
+    }
+
+    #[test]
+    fn test_positive_w_min_does_not_seed_a_blank_network() {
+        // Blank weights are the documented neutral initialization. Bounds gate
+        // weight *updates*; they do not fabricate synaptic weight where the
+        // network deliberately has none.
+        let mut network = SpikingNetwork::with_dimensions(2, 1, 4);
+        network.set_rm_stdp_config(RmStdpConfig {
+            w_min: 0.1,
+            ..RmStdpConfig::default()
+        });
+        let reward = NeuroModulators {
+            dopamine: 0.9,
+            ..Default::default()
+        };
+
+        for _ in 0..5 {
+            network.step(&[1.0; 4], &reward).expect("length matches");
+        }
+
+        for neuron in &network.neurons {
+            assert!(
+                neuron.weights.iter().all(|&w| w == 0.0),
+                "a positive w_min must not seed blank weights: {:?}",
+                neuron.weights
+            );
+        }
+    }
+
+    #[test]
+    fn test_positive_w_min_does_not_seed_untouched_zero_weights() {
+        // A partially connected neuron: channel 0 carries the whole budget,
+        // channel 1 is unconnected. The nonzero total clears the `> 1e-6` guard,
+        // so this reaches the clamp that a fully blank network never does.
+        let mut network = SpikingNetwork::with_dimensions(1, 1, 2);
+        network.neurons[0].weights = vec![WEIGHT_BUDGET, 0.0];
+        network.set_rm_stdp_config(RmStdpConfig {
+            w_min: 0.1,
+            ..RmStdpConfig::default()
+        });
+        let no_reward = NeuroModulators::default();
+
+        network
+            .step(&[0.0, 0.0], &no_reward)
+            .expect("length matches");
+
+        assert_eq!(
+            network.neurons[0].weights[1], 0.0,
+            "an unrewarded step must not conjure a connection out of w_min"
+        );
+        assert_eq!(network.neurons[0].weights[0], WEIGHT_BUDGET);
+    }
+
+    #[test]
+    fn test_non_finite_tau_eligibility_neither_erases_nor_freezes_traces() {
+        for bad_tau in [f32::NAN, f32::INFINITY, 0.0, -5.0] {
+            let mut network = rstdp_test_network();
+            network.set_rm_stdp_config(RmStdpConfig {
+                tau_eligibility: bad_tau,
+                ..RmStdpConfig::default()
+            });
+            let no_reward = NeuroModulators::default();
+
+            for _ in 0..10 {
+                network
+                    .step(&DRIVEN_AND_SILENT, &no_reward)
+                    .expect("length matches");
+            }
+
+            // The default tau is installed instead, so credit is neither wiped
+            // (NaN) nor held forever (+inf): it banks like any other run.
+            let trace = network.neurons[0].eligibility[0].value;
+            assert!(
+                trace > 0.0 && trace.is_finite(),
+                "tau {bad_tau} should fall back to the default, got trace {trace}"
+            );
+            assert_eq!(
+                network.neurons[0].eligibility[0].tau,
+                RmStdpConfig::default().tau_eligibility
+            );
+        }
+    }
+
+    #[test]
+    fn test_non_finite_trace_value_cannot_poison_weights() {
+        // `EligibilityTrace::value` is public and deserializable, so a NaN can
+        // arrive without ever passing through `accumulate`.
+        let mut network = SpikingNetwork::with_dimensions(1, 1, 2);
+        network.neurons[0].weights = vec![1.0, 1.0];
+        network.neurons[0].eligibility[0].value = f32::NAN;
+        network.neurons[0].eligibility[1].value = f32::INFINITY;
+        let reward = NeuroModulators {
+            dopamine: 0.9,
+            ..Default::default()
+        };
+
+        for _ in 0..5 {
+            network.step(&[1.0, 1.0], &reward).expect("length matches");
+        }
+
+        assert!(
+            network.neurons[0].weights.iter().all(|w| w.is_finite()),
+            "a non-finite trace must not poison weights: {:?}",
+            network.neurons[0].weights
+        );
+        assert!(
+            network.neurons[0]
+                .eligibility
+                .iter()
+                .all(|t| t.value.is_finite()),
+            "the trace itself should be cleared, not left non-finite"
+        );
+    }
+
+    #[test]
+    fn test_negative_w_min_cannot_make_weights_inhibitory() {
+        // Ordered and finite, but inhibitory — unsupported by this crate. Left
+        // unguarded, a rewarded depression drives weights negative and the L1
+        // pass then skips the neuron forever, since a negative total never
+        // satisfies its `> 1e-6` guard.
+        let mut network = SpikingNetwork::with_dimensions(1, 1, 2);
+        network.neurons[0].weights = vec![0.5, 0.5];
+        network.set_rm_stdp_config(RmStdpConfig {
+            w_min: -2.0,
+            w_max: -1.0,
+            ..RmStdpConfig::default()
+        });
+        let reward = NeuroModulators {
+            dopamine: 0.9,
+            ..Default::default()
+        };
+
+        for _ in 0..5 {
+            network.step(&[1.0, 1.0], &reward).expect("length matches");
+        }
+
+        for neuron in &network.neurons {
+            assert!(
+                neuron.weights.iter().all(|&w| w >= 0.0),
+                "weights must stay excitatory: {:?}",
+                neuron.weights
+            );
+        }
+        assert_eq!(network.stdp_config.weight_bounds(), (0.0, 2.0));
+    }
+
+    #[test]
+    fn test_pre_0_6_state_without_new_fields_loads_and_steps() {
+        let mut network = SpikingNetwork::with_dimensions(2, 1, 3);
+        for neuron in &mut network.neurons {
+            neuron.weights = vec![0.4; 3];
+        }
+
+        // Strip the fields added in 0.6 to mimic a checkpoint written before
+        // eligibility traces were wired in.
+        let mut state = serde_json::to_value(&network).expect("network serializes");
+        let object = state.as_object_mut().expect("network is a JSON object");
+        object.remove("stdp_config");
+        for neuron in object["neurons"].as_array_mut().expect("neurons array") {
+            neuron
+                .as_object_mut()
+                .expect("neuron is a JSON object")
+                .remove("eligibility");
+        }
+
+        let mut restored: SpikingNetwork =
+            serde_json::from_value(state).expect("pre-0.6 state still deserializes");
+        assert!(restored.neurons[0].eligibility.is_empty());
+        assert_eq!(restored.stdp_config, RmStdpConfig::default());
+
+        let reward = NeuroModulators {
+            dopamine: 0.7,
+            ..Default::default()
+        };
+        for _ in 0..5 {
+            restored
+                .step(&[0.9, 0.9, 0.9], &reward)
+                .expect("length matches");
+        }
+
+        assert_eq!(restored.neurons[0].eligibility.len(), 3);
+        assert!(
+            restored.neurons[0]
+                .eligibility
+                .iter()
+                .all(|t| t.tau == RmStdpConfig::default().tau_eligibility)
+        );
     }
 }

@@ -134,6 +134,24 @@ grep -R 'pub fn apply_classical_stdp\|pub fn apply_neuromodulation' src/
 grep -R 'pub struct EligibilityTrace\|pub struct RmStdpConfig' src/
 ```
 
+R-STDP must stay **wired into the engine**, not merely exported (GH#72; see
+[ADR 002](docs/adr/002-wire-eligibility-traces.md)). These guard against a refactor that
+quietly reverts to an inline rule and leaves the eligibility types decorative:
+
+Chained with `&&` so the block exits non-zero on the **first** missing invariant. Run as
+separate commands, an early failure would be masked by a later success and the guard would
+report a pass on a half-unwired engine. Decay and accumulation are checked separately rather
+than as one alternation, so dropping either one fails the guard.
+
+```bash
+grep -q 'pub eligibility: Vec<EligibilityTrace>' src/lif.rs \
+  && grep -q 'pub stdp_config: RmStdpConfig' src/engine.rs \
+  && grep -q 'trace.decay()' src/engine.rs \
+  && grep -q 'trace.accumulate(' src/engine.rs \
+  && grep -q 'pub fn set_rm_stdp_config' src/engine.rs \
+  && echo "ok: R-STDP still wired into the engine"
+```
+
 Verify Criterion benchmarks aren't silently reverted to the default libtest harness (causes `cargo bench` to report `running 0 tests` instead of executing benchmarks). Every `[[bench]]` must explicitly set `harness = false` — omitting the key is as bad as setting `true`:
 
 ```bash

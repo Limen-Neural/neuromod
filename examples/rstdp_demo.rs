@@ -220,7 +220,16 @@ fn scenario_slow_traces(network: &mut SpikingNetwork) {
     }
     report(network, "slow config");
     report(&default_twin, "default config");
+    explain_slow_vs_default(network, &default_twin, entry_weight);
+}
 
+/// Decompose the A/B above: which knob accounts for how much of the weight-gain
+/// gap, and where the two traces ended up.
+fn explain_slow_vs_default(
+    network: &SpikingNetwork,
+    default_twin: &SpikingNetwork,
+    entry_weight: f32,
+) {
     let slow_gain = network.neurons[0].weights[0] - entry_weight;
     let default_gain = default_twin.neurons[0].weights[0] - entry_weight;
     // Fraction of a trace discarded per step, read off each network's live tau.

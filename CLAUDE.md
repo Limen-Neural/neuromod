@@ -94,7 +94,7 @@ Domain signals (thermal, power, throughput, timing) map into modulator levels vi
 
 Unit convention (full details in [docs/signal-units.md](docs/signal-units.md)):
 
-- Modulator levels are dimensionless, in `0.0..=1.0`.
+- Modulator levels are dimensionless. `0.0..=1.0` is the intended range, not an enforced invariant.
 - Input channels carry no unit.
 - Each `SignalProfile` field uses the same unit as the channel it scales.
 

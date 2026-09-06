@@ -148,7 +148,7 @@ fn main() {
 
 `neuromod` is unit-agnostic on the input side and dimensionless on the output side:
 
-- Every `NeuroModulators` level is a dimensionless value in `0.0..=1.0`.
+- Every `NeuroModulators` level is a dimensionless value; `0.0..=1.0` is the intended range, kept by `from_signals` and `decay()` for finite inputs (negative `add_*` amounts and `NaN` signals are the documented exceptions).
 - The four `from_signals` channels (thermal, power, throughput, timing) carry no unit of their own.
 - Each `SignalProfile` field is expressed in the same unit as the channel it scales, so the caller declares its units exactly once, in the profile.
 

@@ -10,8 +10,8 @@ All notable changes to this project are documented in this file.
 
 ### Added
 
-- **Signal unit conventions** — [docs/signal-units.md](docs/signal-units.md) documents the contract: `NeuroModulators` levels are dimensionless `0.0..=1.0`, `from_signals` input channels carry no unit, and each `SignalProfile` field is expressed in the same unit as the channel it scales. Includes the exact mapping formulas, edge cases (clamping, near-zero divisors), and the serotonin caveat — deviation from `stability_target` is measured in raw throughput units and is not scale-normalized. Behavior unchanged; documented, not fixed (#75).
-- Unit tests covering `from_signals` output clamping, near-zero-divisor safety, thermal-threshold onset/saturation, and legacy-literal equivalence.
+- **Signal unit conventions** — [docs/signal-units.md](docs/signal-units.md) documents the contract: `NeuroModulators` levels are dimensionless `0.0..=1.0`, `from_signals` input channels carry no unit, and each `SignalProfile` field is expressed in the same unit as the channel it scales. Includes the exact mapping formulas and the caveats the range guarantee actually has: `add_*` / `boost_*` clamp only the upper bound (a negative amount goes below `0.0`), `NaN` signals propagate through `f32::clamp` into every level except `norepinephrine`, near-zero and `NaN` profile divisors yield `0.0`, and serotonin's deviation from `stability_target` is measured in raw throughput units rather than scale-normalized. Behavior unchanged throughout; documented, not fixed (#75).
+- Unit tests covering `from_signals` output clamping, near-zero-divisor safety, `NaN` propagation, `add_*` lower-bound behavior, thermal-threshold onset/saturation, the legacy profile's disjoint dopamine/serotonin bands, and legacy-literal equivalence.
 
 ### Changed
 

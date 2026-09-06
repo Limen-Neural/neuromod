@@ -12,7 +12,7 @@ own units.
 
 | Side | Rule |
 |------|------|
-| **Outputs** | Every `NeuroModulators` field (`dopamine`, `serotonin`, `acetylcholine`, `norepinephrine`) is a **dimensionless level in `0.0..=1.0`**. Every constructor, `add_*` / `boost_*` helper, and `decay()` preserves that range. |
+| **Outputs** | Every `NeuroModulators` field (`dopamine`, `serotonin`, `acetylcholine`, `norepinephrine`) is a **dimensionless level**, with `0.0..=1.0` as the intended range. `from_signals` and `decay()` keep levels inside it for finite inputs. See [Range caveats](#range-caveats) for the two ways a level leaves it. |
 | **Inputs** | The four channels passed to `from_signals` (thermal, power, throughput, timing) are **bare `f32`s with no unit**. |
 | **Profiles** | Each `SignalProfile` field is expressed in the **same unit as the channel it pairs with**, so every ratio inside `from_signals` cancels to a dimensionless number. |
 
@@ -41,7 +41,8 @@ norepinephrine = max(thermal_stress, power_stress)
 ```
 
 `clamp(x)` is `x.clamp(0.0, 1.0)`. Negative signals read as `0.0`; over-range
-signals saturate instead of wrapping. A divisor within `f32::EPSILON` of zero
+signals saturate instead of wrapping. A divisor within `f32::EPSILON` of zero —
+or a `NaN` profile field, which fails the same `abs() > f32::EPSILON` guard —
 yields `0.0` for that term rather than an infinity or `NaN`.
 
 Reference points worth remembering:
@@ -50,6 +51,27 @@ Reference points worth remembering:
 - `timing_scale` is the timing value that maps to acetylcholine `1.0`.
 - Thermal stress starts at `thermal_threshold` and saturates at `2 x thermal_threshold`.
 - Power stress starts at `power_baseline` and saturates at `power_baseline + power_scale`.
+
+## Range caveats
+
+`0.0..=1.0` is the intended range, not an invariant the type enforces. Two
+documented ways out of it:
+
+- **Negative amounts.** `add_reward`, `add_serotonin`, `boost_focus`, and
+  `add_norepinephrine` cap the upper bound with `.min(1.0)` and do **not** clamp
+  the lower one, so `add_reward(-0.5)` on a level of `0.0` yields `-0.5`. Keeping
+  those amounts non-negative is the caller's job. (`decay()` does clamp low, so a
+  negative level recovers to `0.0` on the next decay.)
+- **`NaN` signals.** `f32::clamp` returns `NaN` for a `NaN` input, so
+  `from_signals` propagates a `NaN` throughput into `dopamine` and `serotonin`,
+  and a `NaN` timing into `acetylcholine`. `norepinephrine` is the exception and
+  reads `0.0`: the thermal comparison is false for `NaN`, and `f32::max` discards
+  a `NaN` operand. A `NaN` **profile** field is caught by the near-zero divisor
+  guard and yields `0.0` for that term. Validate signals upstream if they can be
+  `NaN`.
+
+Both are preserved behavior, documented rather than changed — tightening either
+would move existing callers' trajectories.
 
 ## Known wart: serotonin is not scale-normalized
 
@@ -60,8 +82,22 @@ therefore pins serotonin at `0.0` for virtually every input.
 
 The deprecated `SignalProfile::hardware_calibrated()` is exactly that case:
 `throughput_scale` is `0.0105` while `stability_target` is `1.05`, two orders of
-magnitude apart, so a throughput that saturates dopamine leaves serotonin at
-`0.0`.
+magnitude apart, so the two throughput-derived channels are never informative at
+the same time.
+
+| throughput | dopamine | serotonin |
+|-----------|----------|-----------|
+| `0.005` | `0.48` | `0.0` |
+| `0.0105` | `1.0` | `0.0` |
+| `0.55` | `1.0` | `0.0` |
+| `1.0` | `1.0` | `0.9` |
+| `1.05` | `1.0` | `1.0` |
+| `1.55` | `1.0` | `0.0` |
+
+Dopamine saturates at any throughput at or above `0.0105`; serotonin is non-zero
+only within `0.5` of `1.05`. Across the range where dopamine still varies,
+serotonin is pinned at `0.0`; across the range where serotonin varies, dopamine
+is already pinned at `1.0`.
 
 Keep `stability_target` and `throughput_scale` in the same range, or feed a
 pre-normalized throughput channel. The behavior is documented rather than

@@ -16,9 +16,12 @@
 //! This crate is **unit-agnostic on the input side and dimensionless on the
 //! output side**:
 //!
-//! - **Outputs.** Every [`NeuroModulators`] field is a dimensionless level in
-//!   `0.0..=1.0`. This is the only fixed unit contract in the module, and every
-//!   helper (`add_*`, `boost_*`, `decay`, `is_*`) preserves it.
+//! - **Outputs.** Every [`NeuroModulators`] field is a dimensionless level, and
+//!   `0.0..=1.0` is the intended range — the only unit contract in the module.
+//!   [`NeuroModulators::from_signals`] and [`NeuroModulators::decay`] keep levels
+//!   inside it for finite inputs. The `add_*` / `boost_*` helpers clamp only the
+//!   **upper** bound, so passing a negative amount drives a level below `0.0`;
+//!   keeping those amounts non-negative is the caller's job.
 //! - **Inputs.** The four signal channels accepted by
 //!   [`NeuroModulators::from_signals`] (thermal, power, throughput, timing) carry
 //!   **no unit of their own**. `neuromod` never assumes degrees, watts, hertz, or
@@ -159,9 +162,13 @@ impl SignalProfile {
     /// ```
     ///
     /// Note the wart this profile makes visible: `throughput_scale` (`0.0105`)
-    /// and `stability_target` (`1.05`) disagree by two orders of magnitude, so a
-    /// throughput that saturates dopamine leaves serotonin at `0.0`. New
-    /// profiles should keep the two within the same range.
+    /// and `stability_target` (`1.05`) disagree by two orders of magnitude, so
+    /// the two throughput-derived channels are never informative at the same
+    /// time. Dopamine saturates at any throughput at or above `0.0105`, while
+    /// serotonin is non-zero only within `0.5` of `1.05` (roughly `0.55..1.55`).
+    /// Across the range where dopamine still varies, serotonin is pinned at
+    /// `0.0`; across the range where serotonin varies, dopamine is already
+    /// pinned at `1.0`. New profiles should keep the two within the same range.
     #[deprecated(
         since = "0.6.0",
         note = "deployment calibration belongs to the consuming crate; construct `SignalProfile { .. }` directly (the legacy literal is in this method's docs)"
@@ -238,8 +245,9 @@ impl NeuroModulators {
     ///
     /// The four signals are **unitless as far as this crate is concerned**: each
     /// one only has meaning relative to the matching [`SignalProfile`] field,
-    /// which must be expressed in the same unit. Every result is dimensionless
-    /// and clamped to `0.0..=1.0`.
+    /// which must be expressed in the same unit. For finite inputs every result
+    /// is dimensionless and clamped to `0.0..=1.0`; see *Edge cases* for what
+    /// `NaN` does.
     ///
     /// | Signal | Paired profile field(s) | Drives |
     /// |--------|-------------------------|--------|
@@ -265,7 +273,14 @@ impl NeuroModulators {
     /// # Edge cases
     ///
     /// - A divisor within [`f32::EPSILON`] of zero yields `0.0` for that term
-    ///   instead of an infinity or `NaN`.
+    ///   instead of an infinity or `NaN`. A `NaN` profile field takes the same
+    ///   path, because the guard compares `abs() > f32::EPSILON`.
+    /// - **`NaN` signals are not sanitized.** `f32::clamp` returns `NaN` for a
+    ///   `NaN` input, so a `NaN` throughput reaches `dopamine` and `serotonin`,
+    ///   and a `NaN` timing reaches `acetylcholine`. `norepinephrine` is the
+    ///   exception and reads `0.0`: the thermal comparison is false for `NaN`,
+    ///   and `f32::max` discards a `NaN` operand. Validate signals upstream if
+    ///   they can be `NaN`.
     /// - `thermal_signal` at or below `thermal_threshold` contributes no stress;
     ///   stress saturates at `2 * thermal_threshold`.
     /// - **Serotonin is the one channel that is not scale-normalized.** The
@@ -489,6 +504,92 @@ mod tests {
         assert_eq!(mods.acetylcholine, 0.0);
         assert_eq!(mods.norepinephrine, 0.0);
         assert!(mods.serotonin.is_finite());
+    }
+
+    #[test]
+    fn test_add_helpers_clamp_only_the_upper_bound() {
+        // Documented caveat: `add_*` / `boost_*` cap at 1.0 but not at 0.0.
+        let mut mods = NeuroModulators::default();
+        mods.add_reward(-0.5);
+        mods.add_serotonin(-0.5);
+        mods.boost_focus(-0.5);
+        mods.add_norepinephrine(-0.5);
+        assert_eq!(mods.dopamine, -0.5);
+        assert_eq!(mods.serotonin, -0.5);
+        assert_eq!(mods.acetylcholine, -0.5);
+        assert_eq!(mods.norepinephrine, -0.5);
+
+        // `decay` does clamp low, so a negative level recovers to 0.0.
+        mods.decay();
+        assert_eq!(mods.dopamine, 0.0);
+        assert_eq!(mods.serotonin, 0.0);
+        assert_eq!(mods.acetylcholine, 0.0);
+        assert_eq!(mods.norepinephrine, 0.0);
+    }
+
+    #[test]
+    fn test_from_signals_propagates_nan_signals_except_norepinephrine() {
+        // Documented caveat: `f32::clamp` passes `NaN` through unchanged.
+        let profile = SignalProfile::default();
+        let nan = f32::NAN;
+
+        let throughput = NeuroModulators::from_signals(&profile, 0.0, 0.0, nan, 0.0);
+        assert!(throughput.dopamine.is_nan());
+        assert!(throughput.serotonin.is_nan());
+
+        let timing = NeuroModulators::from_signals(&profile, 0.0, 0.0, 0.0, nan);
+        assert!(timing.acetylcholine.is_nan());
+
+        // Norepinephrine is the exception: the thermal comparison is false for
+        // `NaN`, and `f32::max` discards a `NaN` operand.
+        assert_eq!(
+            NeuroModulators::from_signals(&profile, nan, 0.0, 0.0, 0.0).norepinephrine,
+            0.0
+        );
+        assert_eq!(
+            NeuroModulators::from_signals(&profile, 0.0, nan, 0.0, 0.0).norepinephrine,
+            0.0
+        );
+    }
+
+    #[test]
+    fn test_from_signals_nan_profile_field_hits_the_divisor_guard() {
+        let profile = SignalProfile {
+            throughput_scale: f32::NAN,
+            ..SignalProfile::default()
+        };
+        assert_eq!(
+            NeuroModulators::from_signals(&profile, 0.0, 0.0, 1.0, 0.0).dopamine,
+            0.0
+        );
+    }
+
+    #[test]
+    fn test_legacy_profile_dopamine_and_serotonin_bands_do_not_overlap() {
+        // Guards the documented table: dopamine saturates from 0.0105 upward,
+        // while serotonin is non-zero only within 0.5 of the 1.05 target.
+        let read = |throughput| {
+            NeuroModulators::from_signals(&LEGACY_HARDWARE_PROFILE, 0.0, 0.0, throughput, 0.0)
+        };
+
+        // Where dopamine still varies, serotonin is pinned at 0.0.
+        let low = read(0.005);
+        assert!(low.dopamine > 0.0 && low.dopamine < 1.0);
+        assert_eq!(low.serotonin, 0.0);
+
+        // Where serotonin varies, dopamine is already saturated.
+        let on_target = read(1.05);
+        assert_eq!(on_target.dopamine, 1.0);
+        assert_eq!(on_target.serotonin, 1.0);
+
+        let near = read(1.0);
+        assert_eq!(near.dopamine, 1.0);
+        assert!((near.serotonin - 0.9).abs() < 1e-6);
+
+        // Outside the serotonin band, dopamine stays saturated.
+        let far = read(1.55);
+        assert_eq!(far.dopamine, 1.0);
+        assert_eq!(far.serotonin, 0.0);
     }
 
     #[test]

@@ -97,7 +97,12 @@ What `apply_stdp` does each step:
 - Accumulates a coincidence *only on the step a spike occurs*. Post fired now → `Δt ≥ 0`, potentiation. Pre fired now after an earlier post → `Δt < 0`, depression.
 - Converts traces to weights only when dopamine is present: `w += reward_lr · dopamine_lr · trace`.
 
-Both new fields are `#[serde(default)]`. `apply_stdp` resizes a missing trace vector, so pre-0.6 checkpoints load from self-describing formats (JSON, YAML, RON). Positional binary formats (`bincode`, `postcard`) hit end-of-input before the new fields, so `#[serde(default)]` cannot rescue those — re-serialize from 0.5.x. Rationale: [docs/adr/002-wire-eligibility-traces.md](docs/adr/002-wire-eligibility-traces.md).
+Both new fields are `#[serde(default)]`, and `apply_stdp` resizes a missing trace vector. So pre-0.6 checkpoints still load, with one exception:
+
+- Self-describing formats — JSON, YAML, RON (Rusty Object Notation) — deserialize unchanged.
+- Positional binary formats (`bincode`, `postcard`) hit end-of-input before the new fields. `#[serde(default)]` cannot rescue those; re-serialize from 0.5.x.
+
+Rationale: [docs/adr/002-wire-eligibility-traces.md](docs/adr/002-wire-eligibility-traces.md).
 
 ### Neuromodulators are domain-agnostic by design
 

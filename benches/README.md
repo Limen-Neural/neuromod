@@ -106,11 +106,13 @@ a performance SLA or a cross-crate comparison — re-run the suite yourself with
 - **Machine:** 4-core Intel Xeon @ 2.10GHz cloud CI container (not an isolated benchmarking
   rig — expect run-to-run noise; several benchmarks below report outliers)
 - **Command:** `cargo bench --all-features --bench <name> -- --save-baseline gh77-2026-09-06`
-- Times are Criterion's reported median (midpoint of its confidence interval).
+- Times are Criterion's reported point estimate — the middle value of its
+  `[lower estimate upper]` confidence-interval output. This is not a statistical median,
+  and the interval is not guaranteed to be symmetric around it.
 
 ### Neuron step (`neuron_bench.rs`)
 
-| Benchmark | Median time |
+| Benchmark | Point estimate |
 | --- | --- |
 | `lif_check_fire` | 0.55 ns |
 | `lapicque_step` | 1.64 ns |
@@ -121,12 +123,13 @@ a performance SLA or a cross-crate comparison — re-run the suite yourself with
 | `hodgkin_huxley_step` | 627 ns |
 
 On this run the ranking is LIF < Izhikevich < FitzHugh-Nagumo < Hodgkin-Huxley, consistent
-with their relative model complexity (2 state variables for LIF's check/integrate split,
-4 gating variables for Hodgkin-Huxley).
+with their relative model complexity: LIF integrates a single membrane-potential state,
+Izhikevich and FitzHugh-Nagumo each track two coupled state variables, and Hodgkin-Huxley
+tracks four (membrane potential plus three gating variables `m`, `h`, `n`).
 
 ### STDP / plasticity (`stdp_bench.rs`)
 
-| Benchmark | Median time |
+| Benchmark | Point estimate |
 | --- | --- |
 | `classical_stdp_ltp` | 0.58 ns |
 | `classical_stdp_ltd` | 0.61 ns |
@@ -141,7 +144,7 @@ with their relative model complexity (2 state variables for LIF's check/integrat
 Full `SpikingNetwork::step` with trace bookkeeping (64 LIF neurons, 64 channels, steady
 state after 200 warm-up steps):
 
-| Benchmark | Median time |
+| Benchmark | Point estimate |
 | --- | --- |
 | `engine_step/unrewarded` (dopamine = 0.0) | 35.6 µs |
 | `engine_step/rewarded` (dopamine = 0.9) | 51.2 µs |
@@ -149,7 +152,7 @@ state after 200 warm-up steps):
 `stdp_network_size` (`HebbianIzhikevichNetwork::update_weights` over every pre/post pair,
 fully connected):
 
-| Network size | Median time |
+| Network size | Point estimate |
 | --- | --- |
 | 10 | 134 ns |
 | 50 | 3.14 µs |
@@ -182,7 +185,7 @@ neuron count.
 
 Allocation timing:
 
-| Benchmark | Median time | Throughput |
+| Benchmark | Point estimate | Throughput |
 | --- | --- | --- |
 | `network_allocation` (`SpikingNetwork::new()`, 16 LIF + 5 Izhikevich, 16 channels) | 1.01 µs | — |
 | `neuron_vector_allocation/10` | 22.1 ns | 452 Melem/s |
@@ -199,7 +202,7 @@ Allocation timing:
 
 Full `SpikingNetwork::step` (default `new()`: 16 LIF, 5 Izhikevich, 16 channels):
 
-| Benchmark | Median time |
+| Benchmark | Point estimate |
 | --- | --- |
 | `network_step_baseline` (no modulators) | 1.24 µs |
 | `network_step_with_dopamine` (0.8) | 1.27 µs |
@@ -216,7 +219,7 @@ and do not treat 5%-or-any-other threshold as a target this baseline demonstrate
 
 Modulator primitive operations (not full network steps):
 
-| Benchmark | Median time |
+| Benchmark | Point estimate |
 | --- | --- |
 | `modulator_add_reward` | 1.83 ns |
 | `modulator_boost_focus` | 1.86 ns |

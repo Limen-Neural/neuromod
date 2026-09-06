@@ -10,6 +10,30 @@
 //!
 //! [`apply_neuromodulation`] tweaks weight/threshold slices without owning a
 //! full network — useful for tests and simple pipelines.
+//!
+//! ## Unit conventions
+//!
+//! This crate is **unit-agnostic on the input side and dimensionless on the
+//! output side**:
+//!
+//! - **Outputs.** Every [`NeuroModulators`] field is a dimensionless level in
+//!   `0.0..=1.0`. This is the only fixed unit contract in the module, and every
+//!   helper (`add_*`, `boost_*`, `decay`, `is_*`) preserves it.
+//! - **Inputs.** The four signal channels accepted by
+//!   [`NeuroModulators::from_signals`] (thermal, power, throughput, timing) carry
+//!   **no unit of their own**. `neuromod` never assumes degrees, watts, hertz, or
+//!   samples; the caller picks the unit and states it once, in the
+//!   [`SignalProfile`].
+//! - **Profiles.** Each [`SignalProfile`] field is expressed in the *same unit as
+//!   the channel it pairs with*, so every ratio inside `from_signals` cancels to a
+//!   dimensionless number. Mixing units within a channel (a threshold in °C
+//!   against a signal in °F) is the caller's bug, not something this crate can
+//!   detect.
+//!
+//! [`SignalProfile::default`] is the neutral profile for callers who already
+//! normalize their signals into `0.0..=1.0`. See
+//! [docs/signal-units.md](https://github.com/Limen-Neural/neuromod/blob/main/docs/signal-units.md)
+//! for the full channel-by-channel table and worked calibration examples.
 
 use serde::{Deserialize, Serialize};
 
@@ -18,24 +42,82 @@ const SEROTONIN_DECAY: f32 = 0.92;
 const ACETYLCHOLINE_DECAY: f32 = 0.99;
 const NOREPINEPHRINE_DECAY: f32 = 0.90;
 
-/// Configuration for mapping external signals into neuromodulator levels.
+/// Calibration for mapping external signals into neuromodulator levels.
+///
+/// A profile is the single place a caller declares what its signal channels
+/// *mean*. `neuromod` treats the channels as bare `f32`s: the profile supplies
+/// the reference values that turn them into dimensionless
+/// [`NeuroModulators`] levels in `0.0..=1.0`.
+///
+/// # Units
+///
+/// Every field below is in the **same unit as the channel it scales**, so each
+/// ratio in [`NeuroModulators::from_signals`] is dimensionless. There is no
+/// implied SI unit anywhere in this struct.
+///
+/// | Field | Channel | Meaning |
+/// |-------|---------|---------|
+/// | [`throughput_scale`](Self::throughput_scale) | throughput | throughput that maps to dopamine `1.0` |
+/// | [`stability_target`](Self::stability_target) | throughput | throughput considered perfectly stable (serotonin `1.0`) |
+/// | [`thermal_threshold`](Self::thermal_threshold) | thermal | onset of thermal stress; `2 x threshold` saturates it |
+/// | [`power_baseline`](Self::power_baseline) | power | power at which stress starts accumulating |
+/// | [`power_scale`](Self::power_scale) | power | excess over baseline that saturates power stress |
+/// | [`timing_scale`](Self::timing_scale) | timing | timing value that maps to acetylcholine `1.0` |
+///
+/// # Choosing a profile
+///
+/// - Signals already normalized to `0.0..=1.0` — use [`SignalProfile::default`].
+/// - Signals in physical units — construct the struct directly with the
+///   reference values of *your* domain. All fields are public; there is no
+///   builder and no hidden state.
+///
+/// ```rust
+/// use neuromod::{NeuroModulators, SignalProfile};
+///
+/// // Thermal in °C, power in W, throughput in items/s, timing in samples.
+/// let profile = SignalProfile {
+///     throughput_scale: 500.0,
+///     thermal_threshold: 80.0,
+///     power_baseline: 120.0,
+///     power_scale: 40.0,
+///     timing_scale: 1024.0,
+///     stability_target: 400.0,
+/// };
+///
+/// let mods = NeuroModulators::from_signals(&profile, 88.0, 130.0, 250.0, 512.0);
+/// assert!((0.0..=1.0).contains(&mods.dopamine));
+/// assert!((0.0..=1.0).contains(&mods.norepinephrine));
+/// ```
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct SignalProfile {
-    /// Divisor for normalizing throughput into dopamine (default: 1.0).
+    /// Throughput value that maps to dopamine `1.0`, in throughput units
+    /// (default: `1.0`). Larger values make a given throughput less rewarding.
     pub throughput_scale: f32,
-    /// Unitless threshold above which thermal input contributes stress.
+    /// Thermal value above which thermal stress starts accumulating, in thermal
+    /// units (default: `0.5`). Stress saturates at twice this value.
     pub thermal_threshold: f32,
-    /// Baseline power/load signal before stress accumulation.
+    /// Power value at which power stress starts accumulating, in power units
+    /// (default: `0.0`).
     pub power_baseline: f32,
-    /// Divisor for power signal stress scaling.
+    /// Excess over [`power_baseline`](Self::power_baseline) that saturates power
+    /// stress, in power units (default: `1.0`).
     pub power_scale: f32,
-    /// Divisor for normalizing timing input into acetylcholine.
+    /// Timing value that maps to acetylcholine `1.0`, in timing units
+    /// (default: `1.0`).
     pub timing_scale: f32,
-    /// Target throughput level for stability (serotonin) computation.
+    /// Throughput considered perfectly stable, in throughput units
+    /// (default: `1.0`). Serotonin falls off linearly with the **raw**
+    /// deviation from this target — see [`NeuroModulators::from_signals`].
     pub stability_target: f32,
 }
 
 impl Default for SignalProfile {
+    /// Neutral, unitless profile for callers whose signals are already
+    /// normalized to `0.0..=1.0`.
+    ///
+    /// Every scale is `1.0`, so each channel passes through unchanged (modulo
+    /// clamping); `thermal_threshold` is `0.5`, so the upper half of a
+    /// normalized thermal channel maps onto the full stress range.
     fn default() -> Self {
         Self {
             throughput_scale: 1.0,
@@ -49,7 +131,41 @@ impl Default for SignalProfile {
 }
 
 impl SignalProfile {
-    /// Legacy hardware-calibrated profile for callers migrating from pre-0.5 APIs.
+    /// Legacy hardware-calibrated profile kept for pre-0.5 callers.
+    ///
+    /// # Deprecated
+    ///
+    /// Calibration constants describe a *deployment*, not neuron dynamics, so
+    /// they belong to the consuming crate. This constructor is a domain fossil:
+    /// its numbers only mean anything for one historical device (thermal in °C,
+    /// power in W, timing in samples), and `neuromod` cannot check that a caller
+    /// feeds it those units.
+    ///
+    /// Nothing is removed in 0.6 — this still returns exactly the values it
+    /// always has. To migrate, copy the literal into your own crate:
+    ///
+    /// ```rust
+    /// use neuromod::SignalProfile;
+    ///
+    /// let profile = SignalProfile {
+    ///     throughput_scale: 0.0105,
+    ///     thermal_threshold: 83.0,
+    ///     power_baseline: 400.0,
+    ///     power_scale: 50.0,
+    ///     timing_scale: 2640.0,
+    ///     stability_target: 1.05,
+    /// };
+    /// # let _ = profile;
+    /// ```
+    ///
+    /// Note the wart this profile makes visible: `throughput_scale` (`0.0105`)
+    /// and `stability_target` (`1.05`) disagree by two orders of magnitude, so a
+    /// throughput that saturates dopamine leaves serotonin at `0.0`. New
+    /// profiles should keep the two within the same range.
+    #[deprecated(
+        since = "0.6.0",
+        note = "deployment calibration belongs to the consuming crate; construct `SignalProfile { .. }` directly (the legacy literal is in this method's docs)"
+    )]
     pub fn hardware_calibrated() -> Self {
         Self {
             throughput_scale: 0.0105,
@@ -116,7 +232,60 @@ impl Default for NeuroModulators {
 }
 
 impl NeuroModulators {
-    /// Create neuromodulators from generic external signals using `profile` scaling.
+    /// Map four external signal channels into modulator levels using `profile`.
+    ///
+    /// # Units
+    ///
+    /// The four signals are **unitless as far as this crate is concerned**: each
+    /// one only has meaning relative to the matching [`SignalProfile`] field,
+    /// which must be expressed in the same unit. Every result is dimensionless
+    /// and clamped to `0.0..=1.0`.
+    ///
+    /// | Signal | Paired profile field(s) | Drives |
+    /// |--------|-------------------------|--------|
+    /// | `thermal_signal` | [`thermal_threshold`](SignalProfile::thermal_threshold) | norepinephrine (with power) |
+    /// | `power_signal` | [`power_baseline`](SignalProfile::power_baseline), [`power_scale`](SignalProfile::power_scale) | norepinephrine (with thermal) |
+    /// | `throughput_signal` | [`throughput_scale`](SignalProfile::throughput_scale), [`stability_target`](SignalProfile::stability_target) | dopamine, serotonin |
+    /// | `timing_signal` | [`timing_scale`](SignalProfile::timing_scale) | acetylcholine |
+    ///
+    /// # Mapping
+    ///
+    /// ```text
+    /// dopamine       = clamp(throughput / throughput_scale)
+    /// acetylcholine  = clamp(timing / timing_scale)
+    /// serotonin      = clamp(1 - 2 * |throughput - stability_target|)
+    /// norepinephrine = max(thermal_stress, power_stress)
+    ///   thermal_stress = clamp((thermal - thermal_threshold) / thermal_threshold)   [0 below threshold]
+    ///   power_stress   = clamp((power - power_baseline) / power_scale)
+    /// ```
+    ///
+    /// where `clamp(x)` is `x.clamp(0.0, 1.0)`, so negative signals read as `0.0`
+    /// and over-range signals saturate rather than wrap.
+    ///
+    /// # Edge cases
+    ///
+    /// - A divisor within [`f32::EPSILON`] of zero yields `0.0` for that term
+    ///   instead of an infinity or `NaN`.
+    /// - `thermal_signal` at or below `thermal_threshold` contributes no stress;
+    ///   stress saturates at `2 * thermal_threshold`.
+    /// - **Serotonin is the one channel that is not scale-normalized.** The
+    ///   deviation from `stability_target` is measured in raw throughput units
+    ///   with a fixed half-width of `0.5`, so a profile whose throughput unit is
+    ///   much larger or smaller than `1.0` pins serotonin to `0.0`. Keep
+    ///   `stability_target` and `throughput_scale` in the same range, or feed a
+    ///   pre-normalized throughput channel. This is preserved behavior, not a
+    ///   recommendation.
+    ///
+    /// ```rust
+    /// use neuromod::{NeuroModulators, SignalProfile};
+    ///
+    /// // Normalized signals in 0.0..=1.0 against the neutral profile.
+    /// let mods = NeuroModulators::from_signals(&SignalProfile::default(), 0.75, 0.4, 1.0, 0.6);
+    /// assert_eq!(mods.dopamine, 1.0); // throughput / 1.0, saturated
+    /// assert_eq!(mods.serotonin, 1.0); // exactly on the stability target
+    /// assert!((mods.acetylcholine - 0.6).abs() < 1e-6);
+    /// assert!((mods.norepinephrine - 0.5).abs() < 1e-6); // thermal 0.75 vs threshold 0.5
+    /// ```
     pub fn from_signals(
         profile: &SignalProfile,
         thermal_signal: f32,
@@ -259,12 +428,84 @@ mod tests {
         assert!(mods.serotonin >= 0.0);
     }
 
+    /// The legacy literal documented on `hardware_calibrated` as the migration
+    /// target. Kept next to the deprecated constructor so the two cannot drift.
+    const LEGACY_HARDWARE_PROFILE: SignalProfile = SignalProfile {
+        throughput_scale: 0.0105,
+        thermal_threshold: 83.0,
+        power_baseline: 400.0,
+        power_scale: 50.0,
+        timing_scale: 2640.0,
+        stability_target: 1.05,
+    };
+
     #[test]
-    fn test_from_signals_hardware_calibrated() {
-        let profile = SignalProfile::hardware_calibrated();
-        let mods = NeuroModulators::from_signals(&profile, 75.0, 300.0, 0.05, 2640.0);
+    #[allow(deprecated)]
+    fn test_hardware_calibrated_matches_documented_migration_literal() {
+        assert_eq!(
+            SignalProfile::hardware_calibrated(),
+            LEGACY_HARDWARE_PROFILE
+        );
+    }
+
+    #[test]
+    fn test_from_signals_legacy_hardware_profile() {
+        let mods =
+            NeuroModulators::from_signals(&LEGACY_HARDWARE_PROFILE, 75.0, 300.0, 0.05, 2640.0);
         assert!(mods.dopamine > 0.0);
         assert!(mods.acetylcholine > 0.0);
+    }
+
+    #[test]
+    fn test_from_signals_outputs_are_dimensionless_and_clamped() {
+        let profile = SignalProfile::default();
+        // Wildly out-of-range and negative inputs must still land in 0.0..=1.0.
+        for (thermal, power, throughput, timing) in [(1e6, 1e6, 1e6, 1e6), (-1e6, -1e6, -1e6, -1e6)]
+        {
+            let mods = NeuroModulators::from_signals(&profile, thermal, power, throughput, timing);
+            for level in [
+                mods.dopamine,
+                mods.serotonin,
+                mods.acetylcholine,
+                mods.norepinephrine,
+            ] {
+                assert!((0.0..=1.0).contains(&level), "level out of range: {level}");
+            }
+        }
+    }
+
+    #[test]
+    fn test_from_signals_zero_scales_do_not_produce_nan() {
+        let profile = SignalProfile {
+            throughput_scale: 0.0,
+            thermal_threshold: 0.0,
+            power_baseline: 0.0,
+            power_scale: 0.0,
+            timing_scale: 0.0,
+            stability_target: 0.0,
+        };
+        let mods = NeuroModulators::from_signals(&profile, 1.0, 1.0, 1.0, 1.0);
+        assert_eq!(mods.dopamine, 0.0);
+        assert_eq!(mods.acetylcholine, 0.0);
+        assert_eq!(mods.norepinephrine, 0.0);
+        assert!(mods.serotonin.is_finite());
+    }
+
+    #[test]
+    fn test_from_signals_thermal_threshold_semantics() {
+        let profile = SignalProfile {
+            thermal_threshold: 80.0,
+            ..SignalProfile::default()
+        };
+        // At or below the threshold: no thermal stress.
+        let at = NeuroModulators::from_signals(&profile, 80.0, 0.0, 0.0, 0.0);
+        assert_eq!(at.norepinephrine, 0.0);
+        // Halfway to saturation (threshold + 0.5 * threshold).
+        let mid = NeuroModulators::from_signals(&profile, 120.0, 0.0, 0.0, 0.0);
+        assert!((mid.norepinephrine - 0.5).abs() < 1e-6);
+        // Twice the threshold saturates.
+        let hot = NeuroModulators::from_signals(&profile, 160.0, 0.0, 0.0, 0.0);
+        assert_eq!(hot.norepinephrine, 1.0);
     }
 
     #[test]

@@ -144,7 +144,32 @@ fn main() {
 }
 ```
 
-For legacy hardware-calibrated signal mapping, use `SignalProfile::hardware_calibrated()`.
+### Signal units
+
+`neuromod` is unit-agnostic on the input side and dimensionless on the output side:
+
+- Every `NeuroModulators` level is a dimensionless value in `0.0..=1.0`.
+- The four `from_signals` channels (thermal, power, throughput, timing) carry no unit of their own.
+- Each `SignalProfile` field is expressed in the same unit as the channel it scales, so the caller declares its units exactly once, in the profile.
+
+`SignalProfile::default()` is the neutral profile for signals already normalized to `0.0..=1.0`. For physical units, construct the struct directly — all fields are public. See [docs/signal-units.md](docs/signal-units.md) for the channel table, the exact mapping formulas, and the serotonin caveat.
+
+### Migrating off `hardware_calibrated()`
+
+`SignalProfile::hardware_calibrated()` is **deprecated since 0.6.0** and still returns the same values; nothing is removed or renamed. Deployment calibration belongs to the consuming crate, so copy the literal into your own code:
+
+```rust
+use neuromod::SignalProfile;
+
+let profile = SignalProfile {
+    throughput_scale: 0.0105,
+    thermal_threshold: 83.0,
+    power_baseline: 400.0,
+    power_scale: 50.0,
+    timing_scale: 2640.0,
+    stability_target: 1.05,
+};
+```
 
 ## Included Components
 

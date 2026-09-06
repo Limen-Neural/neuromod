@@ -90,7 +90,9 @@ Returns the indices of LIF neurons that fired this step.
 
 `NeuroModulators` (`src/modulators.rs`) is a four-field struct (dopamine/serotonin/acetylcholine/norepinephrine) with exponential `decay()` and `add_*`/`boost_*`/`is_*` helpers.
 
-Domain signals (thermal, power, throughput, timing) map into modulator levels via `SignalProfile` and `NeuroModulators::from_signals(...)`. `SignalProfile::default()` is unitless/neutral. `SignalProfile::hardware_calibrated()` is a legacy pre-0.5 profile kept for migration.
+Domain signals (thermal, power, throughput, timing) map into modulator levels via `SignalProfile` and `NeuroModulators::from_signals(...)`. `SignalProfile::default()` is unitless/neutral.
+
+Unit convention: modulator levels are dimensionless (`0.0..=1.0`); input channels carry no unit; each `SignalProfile` field is in the same unit as the channel it scales. Full details in [docs/signal-units.md](docs/signal-units.md). `SignalProfile::hardware_calibrated()` is **deprecated since 0.6.0** (still compiles, unchanged values) — deployment calibration belongs downstream; migrate by copying the literal documented on the method.
 
 Domain-specific reward shaping is downstream via the `GenericReward` trait. `UnitReward` is the only shipped implementation, intended for tests and simple consumer pipelines. `apply_neuromodulation` applies a `NeuroModulators` snapshot to weight/threshold slices without needing `SpikingNetwork`.
 

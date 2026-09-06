@@ -4,7 +4,18 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+### Deprecated
+
+- **`SignalProfile::hardware_calibrated()`** — deprecated since **0.6.0** (`#[deprecated]`; still compiles and returns the same values). Deployment calibration describes a device, not neuron dynamics, so it belongs to the consuming crate per the boundary matrix. Migrate by copying the legacy literal documented on the method and in [docs/signal-units.md](docs/signal-units.md); a unit test asserts the literal stays equal to the constructor. No rename, no removal, and no behavior change in this release (#75).
+
+### Added
+
+- **Signal unit conventions** — [docs/signal-units.md](docs/signal-units.md) documents the contract: `NeuroModulators` levels are dimensionless `0.0..=1.0`, `from_signals` input channels carry no unit, and each `SignalProfile` field is expressed in the same unit as the channel it scales. Includes the exact mapping formulas, edge cases (clamping, near-zero divisors), and the serotonin caveat — deviation from `stability_target` is measured in raw throughput units and is not scale-normalized. Behavior unchanged; documented, not fixed (#75).
+- Unit tests covering `from_signals` output clamping, near-zero-divisor safety, thermal-threshold onset/saturation, and legacy-literal equivalence.
+
 ### Changed
+
+- **Rustdoc for `SignalProfile` / `NeuroModulators::from_signals`** — per-field units, channel-to-modulator table, mapping formulas, and runnable examples for both the neutral and physical-unit profiles; `modulators` module docs gained a unit-conventions section. README, `CLAUDE.md`, and the boundary matrix point at the new units page (#75).
 
 - **Docker:** CI pushes example runtime images to Docker Hub and **GHCR** (`ghcr.io/limen-neural/neuromod` with SHA, version, and `latest` tags) so the image appears under GitHub org packages; README documents pull URLs.
 - **Docker verify:** PR job asserts example binaries exist in the runtime image; publish job requires full `X.Y.Z` crate version for tags.

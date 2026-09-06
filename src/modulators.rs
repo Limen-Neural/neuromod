@@ -118,9 +118,17 @@ impl Default for SignalProfile {
     /// Neutral, unitless profile for callers whose signals are already
     /// normalized to `0.0..=1.0`.
     ///
-    /// Every scale is `1.0`, so each channel passes through unchanged (modulo
-    /// clamping); `thermal_threshold` is `0.5`, so the upper half of a
-    /// normalized thermal channel maps onto the full stress range.
+    /// "Neutral" means the scales are `1.0`, not that each channel is copied to
+    /// an output. Only the two ratio channels pass through: `dopamine` is the
+    /// throughput signal and `acetylcholine` is the timing signal. The other two
+    /// are still derived:
+    ///
+    /// - `norepinephrine` is `max(thermal_stress, power_stress)`. Power passes
+    ///   through, but thermal is measured against `thermal_threshold` (`0.5`),
+    ///   so a thermal signal of `0.5` reads as `0.0` and `1.0` saturates.
+    /// - `serotonin` is `clamp(1 - 2 * |throughput - 1.0|)` — distance from the
+    ///   `stability_target` of `1.0`, so a throughput of `0.5` gives `0.0`, not
+    ///   `0.5`.
     fn default() -> Self {
         Self {
             throughput_scale: 1.0,
@@ -504,6 +512,42 @@ mod tests {
         assert_eq!(mods.acetylcholine, 0.0);
         assert_eq!(mods.norepinephrine, 0.0);
         assert!(mods.serotonin.is_finite());
+    }
+
+    #[test]
+    fn test_default_profile_passes_through_only_the_ratio_channels() {
+        let profile = SignalProfile::default();
+
+        // dopamine and acetylcholine are the throughput / timing signals.
+        let m = NeuroModulators::from_signals(&profile, 0.0, 0.0, 0.3, 0.7);
+        assert!((m.dopamine - 0.3).abs() < 1e-6);
+        assert!((m.acetylcholine - 0.7).abs() < 1e-6);
+
+        // Thermal is measured against the 0.5 threshold, not passed through.
+        assert_eq!(
+            NeuroModulators::from_signals(&profile, 0.5, 0.0, 0.0, 0.0).norepinephrine,
+            0.0
+        );
+        assert_eq!(
+            NeuroModulators::from_signals(&profile, 1.0, 0.0, 0.0, 0.0).norepinephrine,
+            1.0
+        );
+        // Power does pass through, and norepinephrine takes the larger stress.
+        assert!(
+            (NeuroModulators::from_signals(&profile, 0.75, 0.4, 0.0, 0.0).norepinephrine - 0.5)
+                .abs()
+                < 1e-6
+        );
+
+        // Serotonin is a distance from the 1.0 stability target, not a copy.
+        assert_eq!(
+            NeuroModulators::from_signals(&profile, 0.0, 0.0, 0.5, 0.0).serotonin,
+            0.0
+        );
+        assert_eq!(
+            NeuroModulators::from_signals(&profile, 0.0, 0.0, 1.0, 0.0).serotonin,
+            1.0
+        );
     }
 
     #[test]

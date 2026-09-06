@@ -108,11 +108,19 @@ trajectory.
 
 ### Pre-normalized signals — `SignalProfile::default()`
 
-For callers that already map their signals into `0.0..=1.0`. Every scale is
-`1.0`, so each channel passes through unchanged; `thermal_threshold` is `0.5`, so
-the upper half of the normalized thermal channel spans the full stress range.
-This is the recommended starting point, and it keeps the serotonin wart above out
-of play.
+For callers that already map their signals into `0.0..=1.0`. "Neutral" means the
+scales are `1.0`, not that each channel is copied to an output — only `dopamine`
+(throughput) and `acetylcholine` (timing) pass through. The other two are still
+derived:
+
+- `norepinephrine` is `max(thermal_stress, power_stress)`. Power passes through,
+  but thermal is measured against `thermal_threshold` (`0.5`), so a thermal
+  signal of `0.5` reads as `0.0` and `1.0` saturates.
+- `serotonin` is `clamp(1 - 2 * |throughput - 1.0|)` — distance from the
+  `stability_target` of `1.0`, so a throughput of `0.5` gives `0.0`, not `0.5`.
+
+This is still the recommended starting point: with `stability_target` and
+`throughput_scale` both `1.0`, it keeps the serotonin wart above out of play.
 
 ```rust
 use neuromod::{NeuroModulators, SignalProfile};

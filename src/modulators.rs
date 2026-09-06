@@ -142,7 +142,7 @@ impl Default for SignalProfile {
 }
 
 impl SignalProfile {
-    /// Legacy hardware-calibrated profile kept for pre-0.5 callers.
+    /// Legacy hardware-calibrated profile retained for existing 0.5.x callers.
     ///
     /// # Deprecated
     ///

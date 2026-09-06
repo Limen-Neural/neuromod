@@ -34,7 +34,7 @@ jobs:
         uses: Swatinem/rust-cache@f0d9c3887740aee45f6153b24b3a6b815192ec16 # v2
 
       - name: Install cargo-llvm-cov
-        uses: taiki-e/install-action@6cd13508893c0e7eab5f273c2575d3859bd7229a # pinned (taiki-e/install-action v2)
+        uses: taiki-e/install-action@1ed6d7be6168f6c9046541087ff549b6bc581fdf # pinned (taiki-e/install-action v2)
         with:
           tool: cargo-llvm-cov
 
@@ -43,7 +43,7 @@ jobs:
 
       # Generate JUnit XML via nextest ci profile (.config/nextest.toml).
       - name: Install nextest
-        uses: taiki-e/install-action@6cd13508893c0e7eab5f273c2575d3859bd7229a # pinned (taiki-e/install-action v2)
+        uses: taiki-e/install-action@1ed6d7be6168f6c9046541087ff549b6bc581fdf # pinned (taiki-e/install-action v2)
         with:
           tool: nextest
           version: '0.9.70'

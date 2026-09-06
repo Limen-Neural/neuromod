@@ -74,8 +74,8 @@ Construction is topology-neutral. `new()` is the legacy default (16 LIF, 5 Izhik
 3. Update `predictive_state` (exponential moving average (EMA) per channel) and derive `pred_errors` ("surprise") that boost synaptic drive.
 4. Stochastically encode `stimuli` into `input_spike_times` (Poisson-style, probability proportional to stimulus magnitude).
 5. Integrate LIF membrane potentials, fire (`check_fire`), apply lateral inhibition to non-firing LIF neurons.
-6. Apply reward-modulated STDP (`apply_stdp`, gated by `dopamine`-derived `learning_rate`; skipped entirely if learning rate ≈ 0).
-7. Re-normalize each neuron's weights to `WEIGHT_BUDGET` (L1 budget) and clamp to `RM_STDP_W_MIN..RM_STDP_W_MAX`.
+6. Apply reward-modulated STDP (`apply_stdp`). Runs every step: per-synapse eligibility traces decay and accumulate regardless of dopamine; the `dopamine`-derived `learning_rate` gates only the trace → weight conversion.
+7. Re-normalize each neuron's weights to `WEIGHT_BUDGET` (L1 budget) and clamp to the `stdp_config` bounds (`RmStdpConfig::w_min`/`w_max`).
 8. Drive the Izhikevich bank from the mean LIF membrane potential + dopamine (`iz_drive`), independent of the LIF spike/STDP pipeline.
 
 Returns the indices of LIF neurons that fired this step.
@@ -83,8 +83,26 @@ Returns the indices of LIF neurons that fired this step.
 ### Two separate STDP implementations — do not conflate them
 
 - **Classical/unmodulated Hebbian STDP** — `src/hebbian/classical.rs` (`apply_classical_stdp`, `StdpParams`, `HebbianIzhikevichNetwork`). Pure Hebb's rule, no reward gating; the "biological root."
-- **Reward-modulated STDP (R-STDP)** — constants and `EligibilityTrace`/`RmStdpConfig` types live in `src/rm_stdp.rs`. The live per-step learning rule is inlined in `SpikingNetwork::apply_stdp` (`src/engine.rs`), gated by dopamine.
-- The R-STDP engine path was reconstructed after going missing; `EligibilityTrace` is not yet wired into `apply_stdp`. Weight updates currently happen directly rather than via eligibility-trace-then-reward-conversion. Do not assume eligibility traces are live.
+- **Reward-modulated STDP (R-STDP)** — constants, `EligibilityTrace`, and `RmStdpConfig` live in `src/rm_stdp.rs`; the live per-step rule is `SpikingNetwork::apply_stdp` (`src/engine.rs`).
+- Eligibility traces **are** live — wired into the engine, not decorative.
+
+Where the R-STDP state lives:
+
+- `LifNeuron` holds `eligibility: Vec<EligibilityTrace>`, indexed like `weights`.
+- `SpikingNetwork` holds an `stdp_config: RmStdpConfig`.
+
+What `apply_stdp` does each step:
+
+- Decays every trace.
+- Accumulates a coincidence *only on the step a spike occurs*. Post fired now → `Δt ≥ 0`, potentiation. Pre fired now after an earlier post → `Δt < 0`, depression.
+- Converts traces to weights only when dopamine is present: `w += reward_lr · dopamine_lr · trace`.
+
+Both new fields are `#[serde(default)]`, and `apply_stdp` resizes a missing trace vector. So pre-0.6 checkpoints still load, with one exception:
+
+- Self-describing formats deserialize unchanged: JSON, YAML, TOML (Tom's Obvious Minimal Language), RON (Rusty Object Notation), map-encoded MessagePack.
+- Positional binary formats (`bincode`, `postcard`) hit end-of-input before the new fields. `#[serde(default)]` cannot rescue those; re-serialize from 0.5.x.
+
+Rationale: [docs/adr/002-wire-eligibility-traces.md](docs/adr/002-wire-eligibility-traces.md).
 
 ### Neuromodulators are domain-agnostic by design
 

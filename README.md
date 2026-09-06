@@ -17,7 +17,8 @@ Biologically grounded spiking neural network (SNN) primitives in Rust: a topolog
 - Neutral initialization (blank synaptic weights; no hardcoded domain topology)
 - Generic neuromodulators: dopamine, serotonin, acetylcholine, norepinephrine
 - `GenericReward` trait for domain-specific reward shaping in downstream crates
-- Classical Hebbian STDP utilities and reward-modulated STDP types (`EligibilityTrace`, `RmStdpConfig`)
+- Reward-modulated STDP wired into the engine: per-synapse `EligibilityTrace` accumulation with a dopamine-gated payout, tuned by `RmStdpConfig`
+- Classical (unmodulated) Hebbian STDP utilities for the biological root case
 
 ### Engine (`SpikingNetwork`)
 
@@ -54,8 +55,12 @@ CI installs the same toolchain on each OS. Keep `Cargo.toml` `rust-version`, `ru
 
 ```toml
 [dependencies]
-neuromod = "0.5.2"
+neuromod = "0.6.0"
 ```
+
+> `0.6.0` reaches crates.io when its tag lands. Until then the newest published release is
+> `0.5.2`, which predates the wired R-STDP API below — depend on the git repository if you
+> need it before the release.
 
 Links: [crates.io](https://crates.io/crates/neuromod) · [docs.rs](https://docs.rs/neuromod) · [repository](https://github.com/Limen-Neural/neuromod)
 
@@ -171,6 +176,117 @@ let profile = SignalProfile {
 };
 ```
 
+## Reward-Modulated STDP
+
+> **New in 0.6.0.** `EligibilityTrace`, `RmStdpConfig`, `SpikingNetwork::set_rm_stdp_config`,
+> and `LifNeuron::eligibility` do not exist in `0.5.2`, so the code below will not compile
+> against the last published release — see [Installation](#installation) and
+> [Migration Notes](#migration-notes).
+
+`SpikingNetwork` learns *through* eligibility traces, not around them. Each `LifNeuron`
+carries one `EligibilityTrace` per input channel, indexed like `weights`:
+
+1. Every step, each trace decays and — on the step a spike actually occurs — accumulates the
+   pre/post timing kernel. This happens **whether or not dopamine is present**.
+2. Dopamine gates only the payout: `w += reward_lr × dopamine_lr × trace`, clamped to the
+   `RmStdpConfig` bounds.
+
+Splitting it that way is what buys credit assignment: reward can arrive several steps after
+the coincidence it pays for, and still find the credit waiting.
+
+```rust
+use neuromod::{NeuroModulators, RmStdpConfig, SpikingNetwork};
+
+fn main() {
+    let mut network = SpikingNetwork::with_dimensions(4, 1, 4);
+    for neuron in &mut network.neurons {
+        neuron.weights = vec![0.5; 4]; // sums to the engine's L1 weight budget
+    }
+
+    // Bank coincidences with reward switched off: traces grow, weights do not.
+    let unrewarded = NeuroModulators::default();
+    let stimuli = [1.0, 1.0, 0.0, 0.0];
+    for _ in 0..10 {
+        network.step(&stimuli, &unrewarded).unwrap();
+    }
+    println!("trace: {:.4}", network.neurons[0].eligibility[0].value); // > 0
+    println!("weight: {:.4}", network.neurons[0].weights[0]); // still 0.5
+
+    // Reward converts the banked trace into a weight change.
+    let rewarded = NeuroModulators { dopamine: 0.9, ..Default::default() };
+    for _ in 0..10 {
+        network.step(&stimuli, &rewarded).unwrap();
+    }
+    println!("weight: {:.4}", network.neurons[0].weights[0]); // driven synapse potentiated
+
+    // Retune decay, payout rate, and weight bounds at any time.
+    network.set_rm_stdp_config(RmStdpConfig { tau_eligibility: 100.0, ..Default::default() });
+}
+```
+
+Proof, not promise: the behavior above is covered by unit and multi-step tests in
+`src/rm_stdp.rs` and `src/engine.rs` (including a pre-0.6 checkpoint that deserializes
+without the trace fields and keeps stepping), and `cargo run --example rstdp_demo` prints
+the real trace and weight numbers. Rationale for wiring the types in rather than demoting
+them: [ADR 002](docs/adr/002-wire-eligibility-traces.md).
+
+## Migration Notes
+
+### 0.6.0 — eligibility traces wired into the engine
+
+**Serialized state survives in self-describing formats.** `LifNeuron::eligibility` and
+`SpikingNetwork::stdp_config` are `#[serde(default)]`, and `apply_stdp` resizes a missing
+trace vector, so a 0.5.x checkpoint written with a format that names its fields — JSON,
+YAML, TOML, RON, map-encoded MessagePack — still deserializes and steps. This is covered by
+`test_pre_0_6_state_without_new_fields_loads_and_steps`, which strips both fields from
+serialized JSON and drives the restored network.
+
+`#[serde(default)]` cannot help positional binary formats such as `bincode` or `postcard`:
+they encode a struct as a bare sequence of fields, so old bytes hit end-of-input before the
+new fields are reached. If you checkpoint with one of those, re-serialize from 0.5.x before
+upgrading, or read through a versioned wrapper of your own.
+
+**Struct literals need updating.** Both types have public fields and are not
+`#[non_exhaustive]`, so adding a field is a source-level break: any downstream
+`LifNeuron { .. }` or `SpikingNetwork { .. }` literal that spells out every field now fails
+to compile. Fill the remainder from the constructor or `Default`:
+
+```rust
+use neuromod::LifNeuron;
+
+// Before (0.5.x) — breaks in 0.6
+// let neuron = LifNeuron {
+//     membrane_potential: 0.0,
+//     decay_rate: 0.15,
+//     threshold: 0.02,
+//     base_threshold: 0.02,
+//     last_spike: false,
+//     weights: vec![0.0; 16],
+//     last_spike_time: -1,
+// };
+
+// After — forward-compatible with future field additions
+let neuron = LifNeuron {
+    weights: vec![0.0; 16],
+    ..LifNeuron::new()
+};
+```
+
+Callers that already build through `LifNeuron::new()`, `SpikingNetwork::new()`, or
+`SpikingNetwork::with_dimensions(..)` need no change.
+
+**Weight trajectories change.** Updates now flow through a decaying eligibility trace
+instead of being recomputed from raw spike times each step, so a 0.6 run will not reproduce
+0.5.x weights on the same inputs. Learning gained memory: reward arriving after a
+coincidence still pays for it.
+
+**Weight bounds moved into `RmStdpConfig`.** `RM_STDP_W_MIN` / `RM_STDP_W_MAX` remain public
+and are the defaults. Bounds take precedence over the engine's L1 weight budget: `step`
+scales toward the budget and then clamps, so a binding bound leaves the sum **off** budget in
+whichever direction it binds — a lowered `w_max` caps weights and leaves the sum short, while
+a raised `w_min` lifts weights after scaling and can push the sum past it. The defaults cannot
+bind, so the budget holds exactly under them.
+
 ## Included Components
 
 - Engine: `SpikingNetwork`, `StepError` (LIF + Izhikevich banks)
@@ -178,8 +294,9 @@ let profile = SignalProfile {
 - Engine neuron types: `LifNeuron`, `IzhikevichNeuron`
 - Standalone neuron types: `GifNeuron`, `LapicqueNeuron`, `FitzHughNagumoNeuron`, `HodgkinHuxleyNeuron`
 - Learning/plasticity:
-  - Classical: `apply_classical_stdp`, `StdpParams`, `HebbianIzhikevichNetwork`
-  - Reward-modulated building blocks: `EligibilityTrace`, `RmStdpConfig`
+  - Classical (unmodulated): `apply_classical_stdp`, `StdpParams`, `HebbianIzhikevichNetwork`
+  - Reward-modulated, wired into `SpikingNetwork`: `EligibilityTrace`, `RmStdpConfig`,
+    `LifNeuron::eligibility`, `SpikingNetwork::set_rm_stdp_config`
 
 ## Architecture & Boundaries
 
@@ -190,6 +307,7 @@ See the full planning documents:
 - [Org Modularization Standards](docs/org-modularization.md) — workstream index (#35–#43), cross-cutting git/build/beads standards, and audit commands.
 - [neuromod Boundary Matrix](docs/neuromod-boundary-matrix.md) — runtime/deployment role, owns/does-not-own, allowed/forbidden dependencies vs. limbic-critic, brainstem-daemon, axon-encoder, synaptic-mesh, silicon-bridge, Spikenaut-Hardware, plasticity-lab, etc. (LIM-9).
 - [ADR 001: Shared traits live in neuromod](docs/adr/001-traits-in-neuromod.md) — why traits are hosted here.
+- [ADR 002: Wire eligibility traces into the engine](docs/adr/002-wire-eligibility-traces.md) — why R-STDP is wired rather than demoted, and what changed in the learning path.
 
 ## Examples
 
@@ -281,10 +399,10 @@ This repository uses a comprehensive CI setup for speed, quality, security, and 
   Pull (examples only — prefer the crates.io library for embedding):
 
   ```bash
-  docker pull ghcr.io/limen-neural/neuromod:0.5.2
+  docker pull ghcr.io/limen-neural/neuromod:0.6.0
   # or Docker Hub:
-  docker pull pelon23/neuromod:0.5.2
-  docker run --rm ghcr.io/limen-neural/neuromod:0.5.2 ls /usr/local/bin
+  docker pull pelon23/neuromod:0.6.0
+  docker run --rm ghcr.io/limen-neural/neuromod:0.6.0 ls /usr/local/bin
   ```
 
   Local usage:

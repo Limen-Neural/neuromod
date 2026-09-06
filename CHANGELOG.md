@@ -2,7 +2,66 @@
 
 All notable changes to this project are documented in this file.
 
-## [Unreleased]
+## [0.6.0] - 2026-08-29
+
+Reward-modulated STDP wired into the engine learning path. Breaking for downstream struct
+literals and for weight trajectories; see the README migration notes. Publish with
+`cargo publish` after this tag lands.
+
+### Added
+
+- **R-STDP is wired into the engine.** `LifNeuron` gains `eligibility: Vec<EligibilityTrace>`
+  (one trace per input channel, indexed like `weights`) and `SpikingNetwork` gains
+  `stdp_config: RmStdpConfig`. `SpikingNetwork::apply_stdp` now decays and accumulates those
+  traces on every step and converts them into weight changes under the dopamine gate, so
+  reward arriving *after* a coincidence still pays for it (#72, #73).
+- `SpikingNetwork::set_rm_stdp_config` — replace the R-STDP hyperparameters and re-`tau`
+  existing traces in one call.
+- `EligibilityTrace::new` / `kernel` / `accumulate` / `reset`, plus `Default` impls for
+  `EligibilityTrace` and `RmStdpConfig`, and the `RM_STDP_TAU_ELIGIBILITY` /
+  `RM_STDP_REWARD_LR` constants behind those defaults.
+- `RmStdpConfig::weight_bounds` — ordered, non-negative `(min, max)` accessor that falls back
+  to `RM_STDP_W_MIN` / `RM_STDP_W_MAX` when the public bound fields are left reversed or
+  non-finite (either would panic `f32::clamp` inside `step`), or when `w_min` is negative.
+  Because of that fallback a negative bound never reaches `clamp`; the rest of this entry
+  describes what the guard prevents, not live behavior. This crate does not support inhibitory
+  weights: an honored negative floor would let a rewarded depression flip a synapse's sign, and
+  the L1 renormalization pass would then skip that neuron for as long as its weights summed
+  non-positive. A wholly negative range such as `(-2.0, -1.0)` would make that permanent —
+  every update clamps back inside it, so the total could never climb — while a range merely
+  straddling zero would stall normalization until later potentiation restored a positive
+  total.
+- `RmStdpConfig::effective_reward_lr` — same guard for a non-finite `reward_lr`. A `NaN`
+  rate would poison a weight on the first rewarded step and never clear, because the L1
+  renormalization pass skips any neuron whose total is not `> 1e-6` and `NaN > 1e-6` is
+  false. Finite negative rates still pass through.
+- `EligibilityTrace::kernel` returns `0.0` for a non-finite `delta_t` — no usable timing means
+  no credit. The engine cannot produce one (it subtracts two `i64` step counters), but `kernel`
+  and `accumulate` are public: `NaN` took the depression branch (`NaN >= 0.0` is false) and
+  poisoned whichever trace it landed in.
+- `apply_stdp` clears a non-finite `EligibilityTrace::value` instead of paying it out.
+  `value` is public and deserializable, so a `NaN` can arrive without passing through
+  `accumulate`; converting it produced a `NaN` weight (`f32::clamp` preserves `NaN`) and the
+  L1 pass then skipped that neuron permanently. Clearing lets the synapse learn again.
+- `RmStdpConfig::effective_tau_eligibility` — same guard for `tau_eligibility`, and
+  `EligibilityTrace::decay` now falls back the same way. `decay` multiplies by
+  `exp(-1/tau)`, so a `NaN` tau used to propagate `NaN` into every banked trace on the next
+  step (which is what left `apply_stdp` with non-finite values to clear), `+∞` disabled decay
+  entirely, `0.0` erased every trace at once, and a negative tau grew them without bound. All
+  four now degrade to `RM_STDP_TAU_ELIGIBILITY`; a tiny *positive* tau is still honored, since
+  "no memory" is a legitimate setting.
+- Tests proving the reward-gated path: traces accumulate with dopamine off while weights
+  hold, dopamine converts the banked trace (and more dopamine buys more learning),
+  post-before-pre depresses and clamps at `w_min`, one spike pair is counted once, and a
+  pre-0.6 checkpoint without the new fields still deserializes and steps (#74).
+- Benchmarks for trace accumulation, the trace → weight conversion, and rewarded vs
+  unrewarded engine steps (`benches/stdp_bench.rs`), listed in `benches/README.md`. The
+  engine-step benches warm the network to steady state first: `apply_stdp` skips the decay
+  `exp` while a trace is still exactly zero, so timing from a blank network would measure that
+  transient instead of the per-step cost of a running one. The conversion bench is batched
+  rather than carrying its weight across iterations, which would pin it at `w_max` within a
+  couple of hundred samples and time a saturated synapse.
+- [ADR 002](docs/adr/002-wire-eligibility-traces.md) recording the wire-vs-demote decision.
 
 ### Deprecated
 
@@ -17,9 +76,49 @@ All notable changes to this project are documented in this file.
 
 - **Rustdoc for `SignalProfile` / `NeuroModulators::from_signals`** — per-field units, channel-to-modulator table, mapping formulas, and runnable examples for both the neutral and physical-unit profiles; `modulators` module docs gained a unit-conventions section. README, `CLAUDE.md`, and the boundary matrix point at the new units page (#75).
 
+- **Breaking:** weight updates flow through a decaying eligibility trace
+  instead of being recomputed from raw spike times each step, so same-input runs will not
+  reproduce pre-0.6 weight trajectories. `apply_stdp` no longer early-returns when dopamine
+  is ~0 — only the trace → weight conversion is gated. Weight bounds now come from
+  `stdp_config` rather than the `RM_STDP_W_MIN` / `RM_STDP_W_MAX` constants directly, in both
+  `apply_stdp` and the L1 renormalization pass (the constants remain public and are the
+  defaults) (#72, #73).
+- **Breaking (source):** `LifNeuron` and `SpikingNetwork` have public fields
+  and are not `#[non_exhaustive]`, so the new `eligibility` / `stdp_config` fields break
+  downstream struct literals that spell out every field. Fill the remainder from
+  `..LifNeuron::new()` / `..Default::default()`, or build through the constructors. Serialized
+  state written by 0.5.x stays *deserializable* in self-describing formats (JSON, YAML,
+  TOML, RON, map-encoded MessagePack) via `#[serde(default)]`; positional binary formats such as
+  `bincode` / `postcard` cannot use those defaults and will not load pre-0.6 bytes. The
+  serialized shape does change — checkpoints written by 0.6 carry `eligibility` and
+  `stdp_config`, so they will not load into 0.5.x. See the README migration notes (#72, #73).
+- Weight bounds now take documented precedence over the engine's L1 weight budget: `step`
+  scales toward the budget and then clamps, so a narrowed `w_min` / `w_max` leaves the sum
+  off budget. The defaults cannot bind, so the budget still holds exactly under them. The
+  renormalization pass leaves a synapse at exactly zero alone, so a positive `w_min` cannot
+  conjure a connection on an unrewarded step; learning raises a synapse to the floor in the
+  reward-gated `apply_stdp` instead, and only through potentiation. Both paths that touch a
+  weight now agree that exactly zero means unconnected and that the bounds never move a weight
+  on their own. Writing unconditionally let them do so twice over on a zero-weight synapse:
+  `reward_lr = 0.0` disables conversion, yet a `dw` of zero still clamped up to a positive
+  `w_min`; and a depressing update (`dw < 0`) clamped up to `w_min` as well, connecting a
+  synapse by weakening it. Either way the L1 pass then scaled the fabricated weight toward the
+  budget. The floor still binds wherever an update actually applies.
+- `apply_stdp` decays eligibility traces past the last input channel as well. A caller can
+  give a neuron more weights than the network has channels; those synapses have no input that
+  could ever spike, and the per-channel loop stopped before reaching them, so a planted or
+  deserialized trace stayed frozen there across every step.
+- `examples/rstdp_demo.rs` prints real trace and weight numbers read back from the network
+  instead of narrating hardcoded claims about learning. Its `RmStdpConfig` scenario runs the
+  reconfigured network and an otherwise identical default-config twin through the same
+  rewarded steps, so the slower payout and the longer-held trace are measured rather than
+  asserted.
+- Docs no longer carry the "eligibility traces are not wired" caveat: crate root, `engine`,
+  `lif`, and `rm_stdp` rustdoc, `README.md`, `CLAUDE.md`, and the `REVIEW.md` regression
+  guards describe (and guard) the wired path.
 - **Docker:** CI pushes example runtime images to Docker Hub and **GHCR** (`ghcr.io/limen-neural/neuromod` with SHA, version, and `latest` tags) so the image appears under GitHub org packages; README documents pull URLs.
 - **Docker verify:** PR job asserts example binaries exist in the runtime image; publish job requires full `X.Y.Z` crate version for tags.
-- README crates.io / docs.rs badges stay version-agnostic (latest); install pin documents **0.5.2**.
+- README crates.io / docs.rs badges stay version-agnostic (latest); install pin documents **0.6.0**.
 
 ## [0.5.2] - 2026-08-12
 

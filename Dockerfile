@@ -1,6 +1,6 @@
 # Multi-stage Docker for neuromod (library + examples/tests)
 # Builder — Rust 1.97.1 (bookworm) keeps glibc in sync with the debian:bookworm-slim runtime.
-FROM rust:1.97.1-slim-bookworm AS builder
+FROM rust:1.98.0-slim-bookworm AS builder
 WORKDIR /app
 COPY . .
 RUN cargo build --release --examples && \

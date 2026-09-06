@@ -64,11 +64,23 @@ documented ways out of it:
   negative level recovers to `0.0` on the next decay.)
 - **`NaN` signals.** `f32::clamp` returns `NaN` for a `NaN` input, so
   `from_signals` propagates a `NaN` throughput into `dopamine` and `serotonin`,
-  and a `NaN` timing into `acetylcholine`. `norepinephrine` is the exception and
-  reads `0.0`: the thermal comparison is false for `NaN`, and `f32::max` discards
-  a `NaN` operand. A `NaN` **profile** field is caught by the near-zero divisor
-  guard and yields `0.0` for that term. Validate signals upstream if they can be
-  `NaN`.
+  and a `NaN` timing into `acetylcholine`. `norepinephrine` never propagates
+  `NaN` — but it does not always read `0.0`. `f32::max` discards a `NaN` operand,
+  so the *surviving* stress term wins: `from_signals(&default, NaN, 5.0, 0.0,
+  0.0)` gives `norepinephrine` `1.0`. It reads `0.0` only when neither term
+  contributes.
+
+`NaN` in a **profile** field is not one behavior but four, depending on where the
+field is used:
+
+| Field | Effect of `NaN` |
+|-------|-----------------|
+| `throughput_scale`, `power_scale`, `timing_scale` | divisors — fail the `abs() > f32::EPSILON` guard, so that term is `0.0` |
+| `thermal_threshold` | the `>` comparison is false, so thermal stress is `0.0` |
+| `power_baseline` | `power_stress` becomes `NaN`, which `f32::max` then discards |
+| `stability_target` | the only one that reaches an output — `serotonin` becomes `NaN` |
+
+Validate signals *and* profiles upstream if either can be `NaN`.
 
 Both are preserved behavior, documented rather than changed — tightening either
 would move existing callers' trajectories.

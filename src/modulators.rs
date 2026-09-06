@@ -281,14 +281,27 @@ impl NeuroModulators {
     /// # Edge cases
     ///
     /// - A divisor within [`f32::EPSILON`] of zero yields `0.0` for that term
-    ///   instead of an infinity or `NaN`. A `NaN` profile field takes the same
-    ///   path, because the guard compares `abs() > f32::EPSILON`.
+    ///   instead of an infinity or `NaN`. A `NaN` **divisor scale**
+    ///   ([`throughput_scale`](SignalProfile::throughput_scale),
+    ///   [`power_scale`](SignalProfile::power_scale),
+    ///   [`timing_scale`](SignalProfile::timing_scale)) takes the same path,
+    ///   because the guard compares `abs() > f32::EPSILON`.
     /// - **`NaN` signals are not sanitized.** `f32::clamp` returns `NaN` for a
     ///   `NaN` input, so a `NaN` throughput reaches `dopamine` and `serotonin`,
-    ///   and a `NaN` timing reaches `acetylcholine`. `norepinephrine` is the
-    ///   exception and reads `0.0`: the thermal comparison is false for `NaN`,
-    ///   and `f32::max` discards a `NaN` operand. Validate signals upstream if
-    ///   they can be `NaN`.
+    ///   and a `NaN` timing reaches `acetylcholine`.
+    /// - **`norepinephrine` never propagates `NaN`** — but it does not always
+    ///   read `0.0`. `f32::max` discards a `NaN` operand, so the *surviving*
+    ///   stress term wins: a `NaN` thermal signal beside a saturating power
+    ///   signal still gives `1.0`. It reads `0.0` only when neither term
+    ///   contributes.
+    /// - The non-divisor profile fields each behave differently: a `NaN`
+    ///   [`thermal_threshold`](SignalProfile::thermal_threshold) makes the
+    ///   thermal comparison false, so that term is `0.0`; a `NaN`
+    ///   [`power_baseline`](SignalProfile::power_baseline) makes `power_stress`
+    ///   `NaN`, which `f32::max` then discards; and a `NaN`
+    ///   [`stability_target`](SignalProfile::stability_target) is the one that
+    ///   reaches an output — `serotonin` becomes `NaN`. Validate signals *and*
+    ///   profiles upstream if either can be `NaN`.
     /// - `thermal_signal` at or below `thermal_threshold` contributes no stress;
     ///   stress saturates at `2 * thermal_threshold`.
     /// - **Serotonin is the one channel that is not scale-normalized.** The
@@ -584,27 +597,66 @@ mod tests {
         let timing = NeuroModulators::from_signals(&profile, 0.0, 0.0, 0.0, nan);
         assert!(timing.acetylcholine.is_nan());
 
-        // Norepinephrine is the exception: the thermal comparison is false for
-        // `NaN`, and `f32::max` discards a `NaN` operand.
+        // Norepinephrine never propagates `NaN` (the thermal comparison is
+        // false for `NaN`, and `f32::max` discards a `NaN` operand) ...
+        for (thermal, power) in [(nan, 0.0), (0.0, nan), (nan, nan)] {
+            let mods = NeuroModulators::from_signals(&profile, thermal, power, 0.0, 0.0);
+            assert_eq!(mods.norepinephrine, 0.0);
+        }
+
+        // ... but it is not pinned to 0.0: the surviving stress term wins.
         assert_eq!(
-            NeuroModulators::from_signals(&profile, nan, 0.0, 0.0, 0.0).norepinephrine,
-            0.0
+            NeuroModulators::from_signals(&profile, nan, 5.0, 0.0, 0.0).norepinephrine,
+            1.0
         );
-        assert_eq!(
-            NeuroModulators::from_signals(&profile, 0.0, nan, 0.0, 0.0).norepinephrine,
-            0.0
-        );
+        let surviving = NeuroModulators::from_signals(&profile, 0.9, nan, 0.0, 0.0);
+        assert!((surviving.norepinephrine - 0.8).abs() < 1e-6);
     }
 
     #[test]
-    fn test_from_signals_nan_profile_field_hits_the_divisor_guard() {
-        let profile = SignalProfile {
-            throughput_scale: f32::NAN,
+    fn test_nan_profile_fields_behave_by_where_they_are_used() {
+        let nan = f32::NAN;
+
+        // Divisor scales fail the `abs() > f32::EPSILON` guard: term is 0.0.
+        let scales = SignalProfile {
+            throughput_scale: nan,
+            power_scale: nan,
+            timing_scale: nan,
+            ..SignalProfile::default()
+        };
+        let mods = NeuroModulators::from_signals(&scales, 0.0, 1.0, 1.0, 1.0);
+        assert_eq!(mods.dopamine, 0.0);
+        assert_eq!(mods.acetylcholine, 0.0);
+        assert_eq!(mods.norepinephrine, 0.0);
+
+        // A NaN thermal threshold makes the `>` comparison false: no stress.
+        let threshold = SignalProfile {
+            thermal_threshold: nan,
             ..SignalProfile::default()
         };
         assert_eq!(
-            NeuroModulators::from_signals(&profile, 0.0, 0.0, 1.0, 0.0).dopamine,
+            NeuroModulators::from_signals(&threshold, 100.0, 0.0, 0.0, 0.0).norepinephrine,
             0.0
+        );
+
+        // A NaN power baseline makes power_stress NaN, which `f32::max` drops,
+        // so the thermal term survives.
+        let baseline = SignalProfile {
+            power_baseline: nan,
+            ..SignalProfile::default()
+        };
+        let mods = NeuroModulators::from_signals(&baseline, 0.9, 1.0, 0.0, 0.0);
+        assert!((mods.norepinephrine - 0.8).abs() < 1e-6);
+
+        // stability_target is the one NaN profile field that reaches an output.
+        let target = SignalProfile {
+            stability_target: nan,
+            ..SignalProfile::default()
+        };
+        assert!(
+            NeuroModulators::from_signals(&target, 0.0, 0.0, 1.0, 0.0)
+                .serotonin
+                .is_nan()
         );
     }
 

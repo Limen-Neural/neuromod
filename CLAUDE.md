@@ -92,7 +92,13 @@ Returns the indices of LIF neurons that fired this step.
 
 Domain signals (thermal, power, throughput, timing) map into modulator levels via `SignalProfile` and `NeuroModulators::from_signals(...)`. `SignalProfile::default()` is unitless/neutral.
 
-Unit convention: modulator levels are dimensionless (`0.0..=1.0`); input channels carry no unit; each `SignalProfile` field is in the same unit as the channel it scales. Full details in [docs/signal-units.md](docs/signal-units.md). `SignalProfile::hardware_calibrated()` is **deprecated since 0.6.0** (still compiles, unchanged values) — deployment calibration belongs downstream; migrate by copying the literal documented on the method.
+Unit convention (full details in [docs/signal-units.md](docs/signal-units.md)):
+
+- Modulator levels are dimensionless, in `0.0..=1.0`.
+- Input channels carry no unit.
+- Each `SignalProfile` field uses the same unit as the channel it scales.
+
+`SignalProfile::hardware_calibrated()` is **deprecated since 0.6.0**. It still compiles and returns unchanged values. Deployment calibration belongs downstream. To migrate, copy the literal documented on the method.
 
 Domain-specific reward shaping is downstream via the `GenericReward` trait. `UnitReward` is the only shipped implementation, intended for tests and simple consumer pipelines. `apply_neuromodulation` applies a `NeuroModulators` snapshot to weight/threshold slices without needing `SpikingNetwork`.
 

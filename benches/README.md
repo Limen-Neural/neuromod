@@ -94,10 +94,12 @@ Benchmarks neuromodulator impact on network performance:
 
 ## Measured Baseline
 
-This crate makes no unqualified "high-performance" claim; the numbers below are what
-the benches in this directory actually report. They are a single-machine snapshot, not
-a performance SLA or a cross-crate comparison — re-run the suite yourself with
-`cargo bench` before relying on any of this for a decision.
+This crate makes no unqualified "high-performance" claim. The timing tables below are
+what the benches in this directory actually report; the byte-size table in the "Memory"
+section further down is a separate `size_of::<T>()` measurement, not a bench result (see
+that section for how it was taken). All of it is a single-machine snapshot, not a
+performance SLA or a cross-crate comparison — re-run the suite yourself with `cargo bench`
+before relying on any of this for a decision.
 
 - **Commit:** `5a6ac98`
 - **Date:** 2026-09-06
@@ -165,8 +167,9 @@ loop structure implies.
 
 ### Memory (`memory_bench.rs`)
 
-`size_of::<T>()` byte counts (measured separately from the timing benchmarks below, which
-time a constructor + `size_of_val` call rather than reporting a byte size):
+`size_of::<T>()` byte counts for the `x86_64-unknown-linux-gnu` target (layout can vary by
+target; measured separately from the timing benchmarks below, which time a constructor +
+`size_of_val` call rather than reporting a byte size):
 
 | Type | Size |
 | --- | --- |

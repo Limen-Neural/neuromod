@@ -99,7 +99,7 @@ What `apply_stdp` does each step:
 
 Both new fields are `#[serde(default)]`, and `apply_stdp` resizes a missing trace vector. So pre-0.6 checkpoints still load, with one exception:
 
-- Self-describing formats — JSON, YAML, RON (Rusty Object Notation) — deserialize unchanged.
+- Self-describing formats deserialize unchanged: JSON, YAML, TOML, RON (Rusty Object Notation), map-encoded MessagePack.
 - Positional binary formats (`bincode`, `postcard`) hit end-of-input before the new fields. `#[serde(default)]` cannot rescue those; re-serialize from 0.5.x.
 
 Rationale: [docs/adr/002-wire-eligibility-traces.md](docs/adr/002-wire-eligibility-traces.md).

@@ -76,8 +76,8 @@ literals and for weight trajectories; see the README migration notes. Publish wi
   and are not `#[non_exhaustive]`, so the new `eligibility` / `stdp_config` fields break
   downstream struct literals that spell out every field. Fill the remainder from
   `..LifNeuron::new()` / `..Default::default()`, or build through the constructors. Serialized
-  state written by 0.5.x stays *deserializable* in self-describing formats (JSON, YAML, RON,
-  map-encoded MessagePack) via `#[serde(default)]`; positional binary formats such as
+  state written by 0.5.x stays *deserializable* in self-describing formats (JSON, YAML,
+  TOML, RON, map-encoded MessagePack) via `#[serde(default)]`; positional binary formats such as
   `bincode` / `postcard` cannot use those defaults and will not load pre-0.6 bytes. The
   serialized shape does change — checkpoints written by 0.6 carry `eligibility` and
   `stdp_config`, so they will not load into 0.5.x. See the README migration notes (#72, #73).

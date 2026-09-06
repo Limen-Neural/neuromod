@@ -63,7 +63,18 @@ literals and for weight trajectories; see the README migration notes. Publish wi
   couple of hundred samples and time a saturated synapse.
 - [ADR 002](docs/adr/002-wire-eligibility-traces.md) recording the wire-vs-demote decision.
 
+### Deprecated
+
+- **`SignalProfile::hardware_calibrated()`** — deprecated since **0.6.0** (`#[deprecated]`; still compiles and returns the same values). Deployment calibration describes a device, not neuron dynamics, so it belongs to the consuming crate per the boundary matrix. Migrate by copying the legacy literal documented on the method and in [docs/signal-units.md](docs/signal-units.md); a unit test asserts the literal stays equal to the constructor. No rename, no removal, and no behavior change in this release (#75).
+
+### Added
+
+- **Signal unit conventions** — [docs/signal-units.md](docs/signal-units.md) documents the contract: `NeuroModulators` levels are dimensionless `0.0..=1.0`, `from_signals` input channels carry no unit, and each `SignalProfile` field is expressed in the same unit as the channel it scales. Includes the exact mapping formulas and the caveats the range guarantee actually has: `add_*` / `boost_*` clamp only the upper bound (a negative amount goes below `0.0`), `NaN` signals propagate through `f32::clamp` into every level except `norepinephrine` (which never propagates `NaN` but resolves to the surviving stress term rather than always `0.0`), a `NaN` profile field behaves four different ways depending on where it is used, and serotonin's deviation from `stability_target` is measured in raw throughput units rather than scale-normalized. Behavior unchanged throughout; documented, not fixed (#75).
+- Unit tests covering `from_signals` output clamping, near-zero-divisor safety, `NaN` propagation, `add_*` lower-bound behavior, thermal-threshold onset/saturation, the legacy profile's disjoint dopamine/serotonin bands, and legacy-literal equivalence.
+
 ### Changed
+
+- **Rustdoc for `SignalProfile` / `NeuroModulators::from_signals`** — per-field units, channel-to-modulator table, mapping formulas, and runnable examples for both the neutral and physical-unit profiles; `modulators` module docs gained a unit-conventions section. README, `CLAUDE.md`, and the boundary matrix point at the new units page (#75).
 
 - **Breaking:** weight updates flow through a decaying eligibility trace
   instead of being recomputed from raw spike times each step, so same-input runs will not

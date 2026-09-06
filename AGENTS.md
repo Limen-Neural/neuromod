@@ -25,7 +25,7 @@ Part of the [Limen-Neural](https://github.com/Limen-Neural) ecosystem. See [docs
 | `src/` | Library code (neuron models, `SpikingNetwork`, neuromodulators, plasticity) |
 | `examples/` | Runnable demos (`basic`, `basic_lif`, `hebbian_learning`, `rstdp_demo`) |
 | `benches/` | Criterion benchmarks |
-| `docs/` | Architecture docs: boundary matrix, org modularization index, Architecture Decision Records (ADRs) |
+| `docs/` | Architecture docs: boundary matrix, org modularization index, signal unit conventions, Architecture Decision Records (ADRs) |
 | [rust-toolchain.toml](rust-toolchain.toml) | Pinned Rust toolchain (1.97.1) |
 | `.devcontainer/` | VS Code dev container configuration |
 | `AGENTS.md` | Agent instructions (this file) |

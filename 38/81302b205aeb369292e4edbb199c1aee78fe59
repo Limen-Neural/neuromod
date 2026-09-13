@@ -1,0 +1,20 @@
+src/gif_layer/layer.rs
+  s_b13b67a7bfa966::t_d897b1753b1355 74-85,89-90
+  s_b13b67a7bfa966::t_063140e575b2bc 128-137
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "3881302b205aeb369292e4edbb199c1aee78fe59",
+  "prompts": {},
+  "sessions": {
+    "s_b13b67a7bfa966": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "e2fe9b66-cd5b-4293-acf8-2e77c6c93368",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Raul Cardenas Montoya <montoyaraul34@gmail.com>"
+    }
+  }
+}

@@ -102,6 +102,34 @@ fn rejects_checkpoint_with_a_negative_step_counter() {
 }
 
 #[test]
+fn rejects_checkpoint_with_impossible_spike_timestamps() {
+    // A timestamp is -1 (never fired) or the step it fired on, recorded before
+    // the counter advances, so it is always strictly below `step_count`. The
+    // bank's length was already checked; these are values the layer could
+    // never have produced, and `step_count - last_spike_time` over one of them
+    // can overflow.
+    let below = decode_corrupted(|v| v["last_spike_time"][0] = (-2).into()).unwrap_err();
+    assert!(below.to_string().contains("last_spike_time"), "{below}");
+
+    // The fixture is a fresh layer, so step_count is 0 and any non-negative
+    // timestamp is in the future.
+    let future = decode_corrupted(|v| v["last_spike_time"][0] = 0.into()).unwrap_err();
+    assert!(future.to_string().contains("last_spike_time"), "{future}");
+
+    // A layer that really has stepped round-trips: its timestamps are all
+    // strictly below its counter, so the guard must not reject them.
+    let mut stepped = SparseGifHiddenLayer::new(&config(8, 3, 3, 5)).unwrap();
+    stepped.run(&ramp_train(6, 8)).unwrap();
+    assert!(
+        stepped.last_spike_time().iter().any(|&t| t >= 0),
+        "fixture must fire to be meaningful"
+    );
+    let json = serde_json::to_string(&stepped).unwrap();
+    let restored: SparseGifHiddenLayer = serde_json::from_str(&json).unwrap();
+    assert_eq!(restored, stepped);
+}
+
+#[test]
 fn a_valid_checkpoint_still_decodes() {
     // Guard against the validator being so strict it rejects good input.
     assert!(decode_corrupted(|_| {}).is_ok());

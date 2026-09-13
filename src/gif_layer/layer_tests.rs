@@ -363,7 +363,13 @@ fn exhausted_step_counter_is_reported_without_mutating_state() {
     json["step_count"] = serde_json::json!(i64::MAX);
     layer = serde_json::from_value(json).unwrap();
 
-    let before = layer.membrane().to_vec();
+    // Snapshot every mutable bank, not just the membrane: a partial mutation
+    // is exactly the failure this test exists to catch, so checking one array
+    // would let the other two regress unnoticed.
+    let membrane_before = layer.membrane().to_vec();
+    let adaptation_before = layer.adaptation().to_vec();
+    let spike_times_before = layer.last_spike_time().to_vec();
+
     let err = layer.step(&[1.0; 8]).unwrap_err();
 
     assert_eq!(
@@ -374,7 +380,9 @@ fn exhausted_step_counter_is_reported_without_mutating_state() {
     );
     assert!(err.to_string().contains("exhausted"));
     // The step must fail before touching neuron state, not half-way through.
-    assert_eq!(layer.membrane(), &before[..]);
+    assert_eq!(layer.membrane(), &membrane_before[..]);
+    assert_eq!(layer.adaptation(), &adaptation_before[..]);
+    assert_eq!(layer.last_spike_time(), &spike_times_before[..]);
     assert_eq!(layer.step_count(), i64::MAX);
 }
 
@@ -523,10 +531,35 @@ fn as_flat_agrees_with_the_per_step_views() {
     assert!(raster.fired_at(raster.num_steps()).is_empty());
 }
 
+/// Names every [`GifLayerError`] variant in an exhaustive match.
+///
+/// This is the compile-time guard: adding a variant makes the match
+/// non-exhaustive and breaks the build here, forcing it into
+/// [`all_error_variants`] below. The array on its own could not do that — it
+/// is hand-written, so a new variant would simply be missing from it.
+#[expect(
+    clippy::match_same_arms,
+    reason = "one arm per variant is the point; collapsing them defeats the guard"
+)]
+fn assert_error_variants_exhaustive(e: &GifLayerError) {
+    match e {
+        GifLayerError::FanInExceedsInputs { .. } => {}
+        GifLayerError::InvalidWeightRange { .. } => {}
+        GifLayerError::InputLenMismatch { .. } => {}
+        GifLayerError::OutputLenMismatch { .. } => {}
+        GifLayerError::SourceOutOfRange { .. } => {}
+        GifLayerError::TooManyInputs { .. } => {}
+        GifLayerError::MalformedCheckpoint { .. } => {}
+        GifLayerError::StepCounterExhausted { .. } => {}
+        GifLayerError::RasterTooLarge { .. } => {}
+    }
+}
+
 /// One instance of every [`GifLayerError`] variant.
 ///
-/// Adding a variant without extending this list fails the exhaustiveness
-/// assertion in `every_error_variant_renders_a_distinct_message`.
+/// Kept honest by [`assert_error_variants_exhaustive`] and by the array's own
+/// length: a new variant fails to compile there, and widening this array
+/// without adding an entry fails to compile here.
 fn all_error_variants() -> [GifLayerError; 9] {
     [
         GifLayerError::FanInExceedsInputs {
@@ -572,6 +605,7 @@ fn every_error_variant_renders_a_distinct_message() {
     let variants = all_error_variants();
     let messages: Vec<String> = variants.iter().map(ToString::to_string).collect();
     for (v, m) in variants.iter().zip(&messages) {
+        assert_error_variants_exhaustive(v);
         assert!(!m.is_empty(), "{v:?} rendered an empty message");
     }
 

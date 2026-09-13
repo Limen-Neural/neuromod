@@ -131,6 +131,21 @@ impl SparseGifHiddenLayerRepr {
             return Err(malformed("step_count is negative"));
         }
 
+        // Timestamps are `-1` (never fired) or the step index fired on, which
+        // is recorded before the counter advances — so a real one is always
+        // below `step_count`. The bank's *length* is checked above, but a
+        // value the layer could never have produced still gets through, and
+        // `step_count - last_spike_time` over a bogus entry can overflow.
+        if self
+            .last_spike_time
+            .iter()
+            .any(|&t| t < -1 || t >= self.step_count)
+        {
+            return Err(malformed(
+                "a last_spike_time is below -1 or not strictly in the past",
+            ));
+        }
+
         Ok(())
     }
 }

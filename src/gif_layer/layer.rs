@@ -255,15 +255,32 @@ impl SparseGifHiddenLayer {
             fan_in_sources[row_start..].sort_unstable();
 
             for _ in 0..fan_in {
-                // Interpolate in f64: `w_max - w_min` overflows to `inf` for a
-                // finite range wider than f32::MAX (e.g. -3e38..3e38), which
-                // would install `inf`/`NaN` synapses from inputs that passed
-                // the finiteness check in `new`. f64 spans any f32 range
-                // exactly, and `next_unit` is an exact 24-bit value, so every
-                // range that did work keeps its previous weights bit for bit.
-                let unit = f64::from(rng.next_unit());
-                let w = f64::from(w_min) + (f64::from(w_max) - f64::from(w_min)) * unit;
-                weights.push(w as f32);
+                // Drawn once, outside the branch: both paths must consume
+                // exactly one value or the seeded stream would diverge.
+                let unit = rng.next_unit();
+                let span = w_max - w_min;
+
+                // `span` overflows to `inf` for a finite range wider than
+                // f32::MAX (e.g. -3e38..3e38), and `inf * 0.0` is `NaN`, so
+                // that range would install non-finite synapses despite passing
+                // the finiteness check in `new`. Only that case falls back to
+                // f64.
+                //
+                // The fallback is deliberately NOT applied to ordinary ranges.
+                // f64 interpolation rounds once where the f32 expression rounds
+                // three times, so the two disagree by 1 ULP on roughly 30% of
+                // random ranges. Routing every range through f64 would silently
+                // reseed existing layers. (The default 0.0..1.0 range happens to
+                // agree exactly -- span is 1.0 and the offset is 0.0, so all
+                // three f32 roundings are exact -- which is why the golden
+                // fixtures alone do not catch the difference.)
+                let w = if span.is_finite() {
+                    w_min + span * unit
+                } else {
+                    (f64::from(w_min) + (f64::from(w_max) - f64::from(w_min)) * f64::from(unit))
+                        as f32
+                };
+                weights.push(w);
             }
 
             // Undo the partial shuffle so the next neuron starts from the same

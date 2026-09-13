@@ -157,7 +157,7 @@ fn main() {
 - The four `from_signals` channels (thermal, power, throughput, timing) carry no unit of their own.
 - Each `SignalProfile` field is expressed in the same unit as the channel it scales, so the caller declares its units exactly once, in the profile.
 
-`SignalProfile::default()` is the neutral profile for signals already normalized to `0.0..=1.0`. For physical units, construct the struct directly — all fields are public. See [docs/signal-units.md](docs/signal-units.md) for the channel table, the exact mapping formulas, and the serotonin caveat.
+`SignalProfile::default()` is the neutral profile for signals already normalized to `0.0..=1.0`. For physical units, construct the struct directly — all fields are public. See [docs/signal-units.md](https://github.com/Limen-Neural/neuromod/blob/main/docs/signal-units.md) for the channel table, the exact mapping formulas, and the serotonin caveat.
 
 ### Migrating off `hardware_calibrated()`
 
@@ -228,7 +228,7 @@ Proof, not promise: the behavior above is covered by unit and multi-step tests i
 `src/rm_stdp.rs` and `src/engine.rs` (including a pre-0.6 checkpoint that deserializes
 without the trace fields and keeps stepping), and `cargo run --example rstdp_demo` prints
 the real trace and weight numbers. Rationale for wiring the types in rather than demoting
-them: [ADR 002](docs/adr/002-wire-eligibility-traces.md).
+them: [ADR 002](https://github.com/Limen-Neural/neuromod/blob/main/docs/adr/002-wire-eligibility-traces.md).
 
 ## Migration Notes
 
@@ -304,10 +304,10 @@ bind, so the budget holds exactly under them.
 
 See the full planning documents:
 
-- [Org Modularization Standards](docs/org-modularization.md) — workstream index (#35–#43), cross-cutting git/build/beads standards, and audit commands.
-- [neuromod Boundary Matrix](docs/neuromod-boundary-matrix.md) — runtime/deployment role, owns/does-not-own, allowed/forbidden dependencies vs. limbic-critic, brainstem-daemon, axon-encoder, synaptic-mesh, silicon-bridge, Spikenaut-Hardware, plasticity-lab, etc. (LIM-9).
-- [ADR 001: Shared traits live in neuromod](docs/adr/001-traits-in-neuromod.md) — why traits are hosted here.
-- [ADR 002: Wire eligibility traces into the engine](docs/adr/002-wire-eligibility-traces.md) — why R-STDP is wired rather than demoted, and what changed in the learning path.
+- [Org Modularization Standards](https://github.com/Limen-Neural/neuromod/blob/main/docs/org-modularization.md) — workstream index (#35–#43), cross-cutting git/build/beads standards, and audit commands.
+- [neuromod Boundary Matrix](https://github.com/Limen-Neural/neuromod/blob/main/docs/neuromod-boundary-matrix.md) — runtime/deployment role, owns/does-not-own, allowed/forbidden dependencies vs. limbic-critic, brainstem-daemon, axon-encoder, synaptic-mesh, silicon-bridge, Spikenaut-Hardware, plasticity-lab, etc. (LIM-9).
+- [ADR 001: Shared traits live in neuromod](https://github.com/Limen-Neural/neuromod/blob/main/docs/adr/001-traits-in-neuromod.md) — why traits are hosted here.
+- [ADR 002: Wire eligibility traces into the engine](https://github.com/Limen-Neural/neuromod/blob/main/docs/adr/002-wire-eligibility-traces.md) — why R-STDP is wired rather than demoted, and what changed in the learning path.
 
 ## Examples
 

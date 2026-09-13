@@ -1,0 +1,25 @@
+Cargo.toml
+  s_b13b67a7bfa966::t_fc2e209d468aad 10
+.devcontainer/Dockerfile
+  s_b13b67a7bfa966::t_7f3b4bd71522d3 1-2
+Dockerfile
+  s_b13b67a7bfa966::t_9290e1720e72d6 3
+AGENTS.md
+  s_b13b67a7bfa966::t_bc6c792be74727 81
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "4074f91c1e42c897adc9cb5b2bb7d6765b27223f",
+  "prompts": {},
+  "sessions": {
+    "s_b13b67a7bfa966": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "e2fe9b66-cd5b-4293-acf8-2e77c6c93368",
+        "model": "claude-sonnet-5"
+      },
+      "human_author": "Raul Cardenas Montoya <montoyaraul34@gmail.com>"
+    }
+  }
+}

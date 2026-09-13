@@ -2,6 +2,12 @@
 
 All notable changes to this project are documented in this file.
 
+## [Unreleased]
+
+### Removed
+
+- **Qodana** — dropped `.github/workflows/qodana_code_quality.yml` and `qodana.yaml` after the Qodana Cloud membership expired. README CI bullet and `REVIEW.md` local scan instructions removed with it.
+
 ## [0.6.0] - 2026-08-29
 
 Reward-modulated STDP wired into the engine learning path. Breaking for downstream struct

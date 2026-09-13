@@ -71,12 +71,23 @@ struct SparseGifHiddenLayerRepr {
 }
 
 impl SparseGifHiddenLayerRepr {
-    /// Enforce every invariant `step_into` relies on when indexing.
+    /// Enforce every invariant the layer relies on after decoding.
+    ///
+    /// Split in two because the checks answer different questions: whether the
+    /// arrays *line up* ([`Self::validate_shape`], which is what keeps indexing
+    /// in bounds), and whether the values they hold are ones this crate could
+    /// have produced ([`Self::validate_values`]).
+    fn validate(&self) -> Result<(), GifLayerError> {
+        self.validate_shape()?;
+        self.validate_values()
+    }
+
+    /// Lengths and CSR structure: everything `step_into` indexes through.
     ///
     /// Checked in the order a reader would: addressability, then the SoA bank
     /// widths, then the CSR row structure, then the payload lengths the row
-    /// offsets imply, and finally that each source names a real channel.
-    fn validate(&self) -> Result<(), GifLayerError> {
+    /// offsets imply.
+    fn validate_shape(&self) -> Result<(), GifLayerError> {
         let malformed = |detail| GifLayerError::MalformedCheckpoint { detail };
 
         if self.num_inputs > MAX_INPUTS {
@@ -113,6 +124,16 @@ impl SparseGifHiddenLayerRepr {
                 "fan_in_sources/weights length != final fan_in_offset",
             ));
         }
+
+        Ok(())
+    }
+
+    /// Values the layer could actually have produced.
+    ///
+    /// Runs after [`Self::validate_shape`], so every bank is already known to
+    /// be the right length; these checks are about content, not layout.
+    fn validate_values(&self) -> Result<(), GifLayerError> {
+        let malformed = |detail| GifLayerError::MalformedCheckpoint { detail };
 
         if self
             .fan_in_sources

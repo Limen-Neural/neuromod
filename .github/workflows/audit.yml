@@ -2,10 +2,7 @@
 # Third-party Actions are pinned to immutable commit SHAs (Aikido supply-chain policy).
 name: Audit
 
-permissions:
-  contents: read
-  security-events: write
-  actions: read
+permissions: {}
 
 on:
   push:
@@ -18,6 +15,10 @@ on:
 jobs:
   rustsec:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      checks: write
+      issues: write # rustsec/audit-check files GitHub issues for new advisories on scheduled (cron) runs
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -28,6 +29,9 @@ jobs:
 
   trivy:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:

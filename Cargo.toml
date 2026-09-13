@@ -7,6 +7,7 @@ license = "MIT OR Apache-2.0"
 authors = ["Raul Montoya Cardenas <montoyaraul34@gmail.com>"]
 description = "Biologically inspired SNN primitives in Rust: LIF/Izhikevich SpikingNetwork, neuromodulators, STDP building blocks, and standalone neuron models."
 exclude = [
+    ".gitignore",
     "docs/",
     ".cubic/",
     ".github/",

@@ -178,6 +178,18 @@ pub enum GifLayerError {
         /// Channels supplied.
         got: usize,
     },
+    /// The caller-owned spike buffer did not match the layer's neuron count.
+    ///
+    /// Distinct from [`Self::InputLenMismatch`] so the message names neurons
+    /// rather than input channels — the two widths are unrelated, and reporting
+    /// a neuron count as a channel count sends readers to the wrong end of the
+    /// call.
+    OutputLenMismatch {
+        /// Neurons the layer expects to write.
+        expected: usize,
+        /// Buffer length supplied.
+        got: usize,
+    },
     /// An explicit topology referenced an input channel that does not exist.
     SourceOutOfRange {
         /// Offending neuron index.
@@ -225,6 +237,12 @@ impl core::fmt::Display for GifLayerError {
             }
             Self::InputLenMismatch { expected, got } => {
                 write!(f, "expected {expected} input channels, got {got}")
+            }
+            Self::OutputLenMismatch { expected, got } => {
+                write!(
+                    f,
+                    "expected a spike buffer of {expected} neurons, got {got}"
+                )
             }
             Self::SourceOutOfRange {
                 neuron,
@@ -751,8 +769,8 @@ impl SparseGifHiddenLayer {
     ///
     /// # Errors
     ///
-    /// [`GifLayerError::InputLenMismatch`] if `stimuli.len() != num_inputs()`
-    /// or if `spikes.len() != num_neurons()`.
+    /// [`GifLayerError::InputLenMismatch`] if `stimuli.len() != num_inputs()`,
+    /// or [`GifLayerError::OutputLenMismatch`] if `spikes.len() != num_neurons()`.
     pub fn step_into(&mut self, stimuli: &[f32], spikes: &mut [bool]) -> Result<(), GifLayerError> {
         if stimuli.len() != self.num_inputs {
             return Err(GifLayerError::InputLenMismatch {
@@ -761,7 +779,7 @@ impl SparseGifHiddenLayer {
             });
         }
         if spikes.len() != self.num_neurons {
-            return Err(GifLayerError::InputLenMismatch {
+            return Err(GifLayerError::OutputLenMismatch {
                 expected: self.num_neurons,
                 got: spikes.len(),
             });
@@ -1246,6 +1264,24 @@ mod tests {
                 .all(|&w| (-3.0e38..=3.0e38).contains(&w)),
             "weight escaped the requested range"
         );
+    }
+
+    #[test]
+    fn wrong_sized_spike_buffer_reports_neurons_not_channels() {
+        // num_inputs is 8 and num_neurons is 3, so a bad spike buffer must not
+        // be described as an input-width problem -- the two widths differ and
+        // the old message sent readers to the wrong argument.
+        let mut layer = SparseGifHiddenLayer::new(&config(8, 3, 3, 5)).unwrap();
+        let mut spikes = [false; 2];
+        let err = layer.step_into(&[0.5; 8], &mut spikes).unwrap_err();
+        assert_eq!(
+            err,
+            GifLayerError::OutputLenMismatch {
+                expected: 3,
+                got: 2
+            }
+        );
+        assert!(err.to_string().contains("spike buffer"), "{err}");
     }
 
     #[test]

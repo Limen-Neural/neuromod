@@ -523,9 +523,12 @@ fn as_flat_agrees_with_the_per_step_views() {
     assert!(raster.fired_at(raster.num_steps()).is_empty());
 }
 
-#[test]
-fn every_error_variant_renders_a_distinct_message() {
-    let variants = [
+/// One instance of every [`GifLayerError`] variant.
+///
+/// Adding a variant without extending this list fails the exhaustiveness
+/// assertion in `every_error_variant_renders_a_distinct_message`.
+fn all_error_variants() -> [GifLayerError; 9] {
+    [
         GifLayerError::FanInExceedsInputs {
             fan_in: 5,
             num_inputs: 4,
@@ -561,8 +564,12 @@ fn every_error_variant_renders_a_distinct_message() {
             num_steps: 3,
             num_neurons: 4,
         },
-    ];
+    ]
+}
 
+#[test]
+fn every_error_variant_renders_a_distinct_message() {
+    let variants = all_error_variants();
     let messages: Vec<String> = variants.iter().map(ToString::to_string).collect();
     for (v, m) in variants.iter().zip(&messages) {
         assert!(!m.is_empty(), "{v:?} rendered an empty message");

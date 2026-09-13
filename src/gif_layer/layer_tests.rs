@@ -73,7 +73,25 @@ fn same_seed_same_layer() {
 fn different_seed_different_topology() {
     let a = SparseGifHiddenLayer::new(&config(64, 32, 8, 42)).unwrap();
     let b = SparseGifHiddenLayer::new(&config(64, 32, 8, 43)).unwrap();
-    assert_ne!(a, b, "distinct seeds must not collapse to the same layer");
+
+    // Compare the generated arrays, not the layers themselves. `PartialEq`
+    // includes the `seed` field, so `assert_ne!(a, b)` would pass even for a
+    // generator that ignored the seed entirely.
+    let rows = |l: &SparseGifHiddenLayer| -> Vec<Vec<u32>> {
+        (0..l.num_neurons())
+            .map(|n| l.fan_in_of(n).unwrap().0.to_vec())
+            .collect()
+    };
+    assert_ne!(
+        rows(&a),
+        rows(&b),
+        "distinct seeds must produce distinct fan-in topology"
+    );
+    assert_ne!(
+        a.weights(),
+        b.weights(),
+        "distinct seeds must produce distinct initial weights"
+    );
 }
 
 #[test]
@@ -333,6 +351,43 @@ fn rejects_more_input_channels_than_a_u32_source_can_address() {
         }
     );
     assert!(err.to_string().contains("addressable maximum"));
+}
+
+#[test]
+fn exhausted_step_counter_is_reported_without_mutating_state() {
+    // Reachable only from a restored checkpoint. Incrementing past i64::MAX
+    // would panic in debug and wrap to i64::MIN in release, which would make
+    // every later `last_spike_time` comparison meaningless.
+    let mut layer = SparseGifHiddenLayer::new(&config(8, 3, 3, 5)).unwrap();
+    let mut json: serde_json::Value = serde_json::to_value(&layer).unwrap();
+    json["step_count"] = serde_json::json!(i64::MAX);
+    layer = serde_json::from_value(json).unwrap();
+
+    let before = layer.membrane().to_vec();
+    let err = layer.step(&[1.0; 8]).unwrap_err();
+
+    assert_eq!(
+        err,
+        GifLayerError::StepCounterExhausted {
+            step_count: i64::MAX
+        }
+    );
+    assert!(err.to_string().contains("exhausted"));
+    // The step must fail before touching neuron state, not half-way through.
+    assert_eq!(layer.membrane(), &before[..]);
+    assert_eq!(layer.step_count(), i64::MAX);
+}
+
+#[test]
+fn zero_fan_in_does_not_allocate_a_candidate_pool() {
+    // A topology-free layer never samples the pool, so a wide input width must
+    // not cost one u32 per channel. Constructing succeeds and stays empty.
+    let layer = SparseGifHiddenLayer::new(&config(1_000_000, 4, 0, 7)).unwrap();
+    assert_eq!(layer.num_synapses(), 0);
+    assert!(layer.weights().is_empty());
+    for n in 0..layer.num_neurons() {
+        assert!(layer.fan_in_of(n).unwrap().0.is_empty());
+    }
 }
 
 #[path = "layer_serde_tests.rs"]

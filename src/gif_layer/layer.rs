@@ -122,6 +122,15 @@ impl SparseGifHiddenLayerRepr {
             return Err(malformed("a CSR source references a nonexistent channel"));
         }
 
+        // The counter is monotonic from 0, so a negative value never came from
+        // this crate and would make `last_spike_time` comparisons meaningless.
+        // (Exhaustion at i64::MAX is a separate, recoverable case: `step_into`
+        // reports it rather than rejecting the whole checkpoint, so a saturated
+        // layer can still be inspected.)
+        if self.step_count < 0 {
+            return Err(malformed("step_count is negative"));
+        }
+
         Ok(())
     }
 }
@@ -129,11 +138,9 @@ impl SparseGifHiddenLayerRepr {
 impl TryFrom<SparseGifHiddenLayerRepr> for SparseGifHiddenLayer {
     type Error = GifLayerError;
 
-    /// Enforce every invariant `step_into` relies on when indexing.
+    /// Validate the decoded fields, then move them into the layer.
     ///
-    /// Checked in the order a reader would: addressability, then the SoA bank
-    /// widths, then the CSR row structure, then the payload lengths the row
-    /// offsets imply, and finally that each source names a real channel.
+    /// The checks themselves live in [`SparseGifHiddenLayerRepr::validate`].
     fn try_from(repr: SparseGifHiddenLayerRepr) -> Result<Self, Self::Error> {
         repr.validate()?;
 
@@ -236,7 +243,15 @@ impl SparseGifHiddenLayer {
 
         // Reused across neurons: the candidate pool and the swap journal that
         // restores it in O(fan_in) instead of O(num_inputs) per neuron.
-        let mut pool: Vec<u32> = (0..num_inputs as u32).collect();
+        //
+        // A zero fan-in layer never samples the pool, so skip building it:
+        // otherwise a topology-free layer still allocates one `u32` per input
+        // channel, which is pure waste at a wide input width.
+        let mut pool: Vec<u32> = if fan_in == 0 {
+            Vec::new()
+        } else {
+            (0..num_inputs as u32).collect()
+        };
         let mut journal: Vec<usize> = Vec::with_capacity(fan_in);
 
         fan_in_offsets.push(0);
@@ -478,6 +493,18 @@ impl SparseGifHiddenLayer {
             });
         }
 
+        // Checked before any state is touched: a restored checkpoint can carry
+        // a counter at i64::MAX, and incrementing it below would panic in debug
+        // or wrap to i64::MIN in release, corrupting every later
+        // `last_spike_time` comparison. Failing here leaves the layer untouched
+        // rather than half-stepped.
+        let next_step_count =
+            self.step_count
+                .checked_add(1)
+                .ok_or(GifLayerError::StepCounterExhausted {
+                    step_count: self.step_count,
+                })?;
+
         // Copied out of `self` so the shared parameter block can be read while
         // the state arrays are mutably borrowed.
         let params = self.params;
@@ -507,7 +534,7 @@ impl SparseGifHiddenLayer {
             }
         }
 
-        self.step_count += 1;
+        self.step_count = next_step_count;
         Ok(())
     }
 
@@ -529,7 +556,16 @@ impl SparseGifHiddenLayer {
         spike_train: &[S],
     ) -> Result<SpikeRaster, GifLayerError> {
         let num_steps = spike_train.len();
-        let mut spikes = vec![false; num_steps * self.num_neurons];
+        // Checked: an overflowing product panics in debug, and in release wraps
+        // to a short allocation that then panics when a row is copied into it.
+        let raster_len =
+            num_steps
+                .checked_mul(self.num_neurons)
+                .ok_or(GifLayerError::RasterTooLarge {
+                    num_steps,
+                    num_neurons: self.num_neurons,
+                })?;
+        let mut spikes = vec![false; raster_len];
         let mut frame_out = vec![false; self.num_neurons];
 
         for (t, frame) in spike_train.iter().enumerate() {

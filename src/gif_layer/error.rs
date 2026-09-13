@@ -69,6 +69,27 @@ pub enum GifLayerError {
         /// Which invariant was violated.
         detail: &'static str,
     },
+    /// The monotonic step counter cannot advance another step.
+    ///
+    /// Reached only by a restored checkpoint carrying a counter at
+    /// [`i64::MAX`]; incrementing it would panic in debug builds and wrap to
+    /// [`i64::MIN`] in release, corrupting every later `last_spike_time`
+    /// comparison. Reported before any neuron state is mutated.
+    StepCounterExhausted {
+        /// The counter that cannot be advanced.
+        step_count: i64,
+    },
+    /// A batched run's raster would not fit in memory addressing.
+    ///
+    /// `num_steps * num_neurons` is the flat raster length; an overflowing
+    /// product would panic in debug and, in release, wrap to a short
+    /// allocation that then panics when a row is written into it.
+    RasterTooLarge {
+        /// Steps requested.
+        num_steps: usize,
+        /// Neurons per step.
+        num_neurons: usize,
+    },
 }
 
 impl core::fmt::Display for GifLayerError {
@@ -87,6 +108,16 @@ impl core::fmt::Display for GifLayerError {
             Self::InputLenMismatch { expected, got } => {
                 write!(f, "expected {expected} input channels, got {got}")
             }
+            Self::StepCounterExhausted { step_count } => {
+                write!(f, "step counter is exhausted at {step_count}")
+            }
+            Self::RasterTooLarge {
+                num_steps,
+                num_neurons,
+            } => write!(
+                f,
+                "a {num_steps}-step raster of {num_neurons} neurons exceeds the addressable size"
+            ),
             Self::OutputLenMismatch { expected, got } => {
                 write!(
                     f,

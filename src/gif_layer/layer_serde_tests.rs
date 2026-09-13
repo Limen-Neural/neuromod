@@ -89,6 +89,19 @@ fn rejects_checkpoint_sourcing_a_nonexistent_channel() {
 }
 
 #[test]
+fn rejects_checkpoint_with_a_negative_step_counter() {
+    // The counter is monotonic from 0, so a negative value never came from
+    // this crate, and accepting it would make `last_spike_time` comparisons
+    // meaningless.
+    let err = decode_corrupted(|v| v["step_count"] = (-1).into()).unwrap_err();
+    assert!(err.to_string().contains("step_count is negative"), "{err}");
+
+    // i64::MAX is deliberately NOT rejected here: exhaustion is recoverable
+    // and surfaces from `step_into`, so a saturated layer stays inspectable.
+    assert!(decode_corrupted(|v| v["step_count"] = i64::MAX.into()).is_ok());
+}
+
+#[test]
 fn a_valid_checkpoint_still_decodes() {
     // Guard against the validator being so strict it rejects good input.
     assert!(decode_corrupted(|_| {}).is_ok());

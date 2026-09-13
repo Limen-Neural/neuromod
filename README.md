@@ -46,7 +46,7 @@ Use them directly; use `HebbianIzhikevichNetwork` for a small classical-STDP Izh
 
 - **SoA state:** membrane, adaptation, and last-spike-time live in parallel `Vec`s indexed by neuron, never a `Vec<GifNeuron>`.
 - **CSR topology:** the layer owns its `(offsets, sources, weights)` fan-in.
-- **Deterministic:** topology and initial weights come from a seeded SplitMix64 stream with a per-neuron sub-stream, so the same seed and shape always yield the same layer; `run()` is a sequential fold with no threading, so the same input always yields the same raster.
+- **Deterministic:** topology and initial weights come from a seeded SplitMix64 stream with a per-neuron sub-stream, so the same `SparseGifLayerConfig` — seed, shape, `weight_range`, and `params` alike — always yields the same layer; `run()` is a sequential fold with no threading, so the same input always yields the same raster.
 - **Shared dynamics:** both the layer and `GifNeuron` execute the equations on `GifParams`, so the two representations agree bit for bit (pinned by a test).
 
 ```rust
@@ -66,7 +66,7 @@ let raster = layer.run(&train).unwrap();
 println!("{:?}", raster.per_neuron_counts());
 ```
 
-The layer takes no `NeuroModulators`: a GIF hidden layer is a pure integrate-and-fire structure with no reward signal. Callers that want modulation drive `apply_neuromodulation` over `weights_mut()` or mutate `params_mut()` between steps.
+The layer takes no `NeuroModulators`: a GIF hidden layer is a pure integrate-and-fire structure with no reward signal. Callers that want modulation apply it themselves between steps — `weights_mut()` for synaptic strength, `params_mut()` for the shared dynamics (`base_threshold` and friends). `apply_neuromodulation` is **not** usable here: it expects a per-neuron `&mut [f32]` threshold slice, whereas this layer holds one shared `GifParams` for the whole bank rather than a threshold per neuron.
 
 This module is an upstream port of the equivalent layer from the author's `corinth-canal` repository (issue #101). Its regression fixtures are internal goldens produced by this implementation, not cross-repo bit-parity vectors; true parity vectors are a follow-up blocked on access to that repository. See `cargo run --example sparse_gif_layer`.
 

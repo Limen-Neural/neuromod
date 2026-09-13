@@ -47,10 +47,14 @@
 //! A GIF hidden layer is a pure integrate-and-fire structure: the ported
 //! surface has no reward signal, no eligibility trace, and no dopamine gate,
 //! and wiring one in would change the numerics a parity port is supposed to
-//! preserve. Callers that want modulation can drive
-//! [`crate::modulators::apply_neuromodulation`] over
-//! [`SparseGifHiddenLayer::weights_mut`] between steps, or mutate
-//! [`SparseGifHiddenLayer::params_mut`] directly.
+//! preserve. Callers that want modulation apply it themselves between steps,
+//! through [`SparseGifHiddenLayer::weights_mut`] for synaptic strength and
+//! [`SparseGifHiddenLayer::params_mut`] for the shared dynamics.
+//!
+//! [`crate::modulators::apply_neuromodulation`] is deliberately not used here:
+//! it takes a per-neuron `&mut [f32]` of thresholds, and this layer keeps a
+//! single shared [`GifParams`] for the whole bank rather than one threshold per
+//! neuron, so there is no slice to hand it.
 //!
 //! ## Example
 //!
@@ -84,6 +88,13 @@ pub const GIF_LAYER_DEFAULT_FAN_IN: usize = 16;
 pub const GIF_LAYER_DEFAULT_W_MIN: f32 = 0.0;
 /// Default upper bound of the initial synaptic weight range.
 pub const GIF_LAYER_DEFAULT_W_MAX: f32 = 1.0;
+
+/// Largest addressable input-channel count.
+///
+/// CSR sources are stored as `u32` to halve the topology's footprint, so a
+/// channel index has to fit in one. Construction rejects anything wider rather
+/// than letting the cast wrap.
+const MAX_INPUTS: usize = u32::MAX as usize;
 
 /// Deterministic SplitMix64 generator.
 ///
@@ -176,6 +187,27 @@ pub enum GifLayerError {
         /// Channels actually available.
         num_inputs: usize,
     },
+    /// More input channels were requested than a CSR source index can address.
+    ///
+    /// Sources are stored as `u32` to keep the topology compact, so the channel
+    /// count is capped at [`u32::MAX`]. Without this guard a larger count would
+    /// truncate silently — channel `2^32` would alias to channel `0`.
+    TooManyInputs {
+        /// Channels requested.
+        num_inputs: usize,
+        /// Largest addressable channel count.
+        max: usize,
+    },
+    /// A deserialized layer failed its internal consistency checks.
+    ///
+    /// The derived `Deserialize` cannot enforce the CSR/SoA length invariants,
+    /// so they are validated on the way in: a checkpoint that violates them
+    /// would otherwise panic later while indexing during
+    /// [`SparseGifHiddenLayer::step`].
+    MalformedCheckpoint {
+        /// Which invariant was violated.
+        detail: &'static str,
+    },
 }
 
 impl core::fmt::Display for GifLayerError {
@@ -202,6 +234,13 @@ impl core::fmt::Display for GifLayerError {
                 f,
                 "neuron {neuron} references input channel {source}, but only {num_inputs} exist"
             ),
+            Self::TooManyInputs { num_inputs, max } => write!(
+                f,
+                "{num_inputs} input channels exceeds the addressable maximum of {max}"
+            ),
+            Self::MalformedCheckpoint { detail } => {
+                write!(f, "malformed serialized layer: {detail}")
+            }
         }
     }
 }
@@ -331,6 +370,7 @@ impl SpikeRaster {
 /// assert!(fired.len() <= 4);
 /// ```
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(try_from = "SparseGifHiddenLayerRepr")]
 pub struct SparseGifHiddenLayer {
     num_inputs: usize,
     num_neurons: usize,
@@ -348,6 +388,98 @@ pub struct SparseGifHiddenLayer {
     last_spike_time: Vec<i64>,
 
     step_count: i64,
+}
+
+/// Deserialization mirror of [`SparseGifHiddenLayer`].
+///
+/// The public type is `#[serde(try_from = ...)]` this struct so every decoded
+/// checkpoint passes the CSR/SoA invariant checks in the `TryFrom` impl before
+/// it can be observed. Field names and order match the public type exactly, so
+/// the wire format is unchanged and existing checkpoints still load.
+#[derive(Deserialize)]
+#[serde(rename = "SparseGifHiddenLayer")]
+struct SparseGifHiddenLayerRepr {
+    num_inputs: usize,
+    num_neurons: usize,
+    seed: u64,
+    params: GifParams,
+    fan_in_offsets: Vec<usize>,
+    fan_in_sources: Vec<u32>,
+    weights: Vec<f32>,
+    membrane: Vec<f32>,
+    adaptation: Vec<f32>,
+    last_spike_time: Vec<i64>,
+    step_count: i64,
+}
+
+impl TryFrom<SparseGifHiddenLayerRepr> for SparseGifHiddenLayer {
+    type Error = GifLayerError;
+
+    /// Enforce every invariant `step_into` relies on when indexing.
+    ///
+    /// Checked in the order a reader would: addressability, then the SoA bank
+    /// widths, then the CSR row structure, then the payload lengths the row
+    /// offsets imply, and finally that each source names a real channel.
+    fn try_from(repr: SparseGifHiddenLayerRepr) -> Result<Self, Self::Error> {
+        let malformed = |detail| GifLayerError::MalformedCheckpoint { detail };
+
+        if repr.num_inputs > MAX_INPUTS {
+            return Err(GifLayerError::TooManyInputs {
+                num_inputs: repr.num_inputs,
+                max: MAX_INPUTS,
+            });
+        }
+
+        let n = repr.num_neurons;
+        if repr.membrane.len() != n || repr.adaptation.len() != n {
+            return Err(malformed("membrane/adaptation length != num_neurons"));
+        }
+        if repr.last_spike_time.len() != n {
+            return Err(malformed("last_spike_time length != num_neurons"));
+        }
+
+        if repr.fan_in_offsets.len() != n + 1 {
+            return Err(malformed("fan_in_offsets length != num_neurons + 1"));
+        }
+        if repr.fan_in_offsets[0] != 0 {
+            return Err(malformed("fan_in_offsets does not start at 0"));
+        }
+        if repr.fan_in_offsets.windows(2).any(|w| w[0] > w[1]) {
+            return Err(malformed("fan_in_offsets is not non-decreasing"));
+        }
+
+        // Indexing `sources[start..end]` is only in bounds if the final offset
+        // is exactly the payload length; a shorter payload panics, a longer one
+        // silently strands synapses.
+        let nnz = repr.fan_in_offsets[n];
+        if repr.fan_in_sources.len() != nnz || repr.weights.len() != nnz {
+            return Err(malformed(
+                "fan_in_sources/weights length != final fan_in_offset",
+            ));
+        }
+
+        if repr
+            .fan_in_sources
+            .iter()
+            .any(|&s| s as usize >= repr.num_inputs)
+        {
+            return Err(malformed("a CSR source references a nonexistent channel"));
+        }
+
+        Ok(Self {
+            num_inputs: repr.num_inputs,
+            num_neurons: repr.num_neurons,
+            seed: repr.seed,
+            params: repr.params,
+            fan_in_offsets: repr.fan_in_offsets,
+            fan_in_sources: repr.fan_in_sources,
+            weights: repr.weights,
+            membrane: repr.membrane,
+            adaptation: repr.adaptation,
+            last_spike_time: repr.last_spike_time,
+            step_count: repr.step_count,
+        })
+    }
 }
 
 impl SparseGifHiddenLayer {
@@ -373,6 +505,12 @@ impl SparseGifHiddenLayer {
             params,
         } = *config;
 
+        if num_inputs > MAX_INPUTS {
+            return Err(GifLayerError::TooManyInputs {
+                num_inputs,
+                max: MAX_INPUTS,
+            });
+        }
         if fan_in > num_inputs {
             return Err(GifLayerError::FanInExceedsInputs { fan_in, num_inputs });
         }
@@ -383,7 +521,9 @@ impl SparseGifHiddenLayer {
             });
         }
 
-        let nnz = num_neurons * fan_in;
+        // Only a capacity hint; saturating keeps a pathological shape from
+        // panicking here in debug builds before allocation fails on its own.
+        let nnz = num_neurons.saturating_mul(fan_in);
         let mut fan_in_offsets = Vec::with_capacity(num_neurons + 1);
         let mut fan_in_sources = Vec::with_capacity(nnz);
         let mut weights = Vec::with_capacity(nnz);
@@ -409,7 +549,15 @@ impl SparseGifHiddenLayer {
             fan_in_sources[row_start..].sort_unstable();
 
             for _ in 0..fan_in {
-                weights.push(w_min + (w_max - w_min) * rng.next_unit());
+                // Interpolate in f64: `w_max - w_min` overflows to `inf` for a
+                // finite range wider than f32::MAX (e.g. -3e38..3e38), which
+                // would install `inf`/`NaN` synapses from inputs that passed
+                // the finiteness check above. f64 spans any f32 range exactly,
+                // and `next_unit` is an exact 24-bit value, so every range that
+                // did work keeps its previous weights bit for bit.
+                let unit = f64::from(rng.next_unit());
+                let w = f64::from(w_min) + (f64::from(w_max) - f64::from(w_min)) * unit;
+                weights.push(w as f32);
             }
 
             // Undo the partial shuffle so the next neuron starts from the same
@@ -446,12 +594,25 @@ impl SparseGifHiddenLayer {
     ///
     /// # Errors
     ///
-    /// [`GifLayerError::SourceOutOfRange`] if any source is `>= num_inputs`.
+    /// [`GifLayerError::SourceOutOfRange`] if any source is `>= num_inputs`,
+    /// and [`GifLayerError::TooManyInputs`] if `num_inputs` exceeds what a
+    /// `u32` CSR source can address.
     pub fn from_topology(
         num_inputs: usize,
         params: GifParams,
         rows: &[Vec<(usize, f32)>],
     ) -> Result<Self, GifLayerError> {
+        // Checked before the per-source bound test below: that test compares
+        // against `num_inputs` as a `usize`, so without this guard a source
+        // above u32::MAX would pass it and then wrap on the `as u32` cast,
+        // silently aliasing to a low channel.
+        if num_inputs > MAX_INPUTS {
+            return Err(GifLayerError::TooManyInputs {
+                num_inputs,
+                max: MAX_INPUTS,
+            });
+        }
+
         let num_neurons = rows.len();
         let nnz: usize = rows.iter().map(Vec::len).sum();
         let mut fan_in_offsets = Vec::with_capacity(num_neurons + 1);
@@ -975,6 +1136,133 @@ mod tests {
         let more = ramp_train(10, 16);
         let mut restored = restored;
         assert_eq!(layer.run(&more).unwrap(), restored.run(&more).unwrap());
+    }
+
+    // --- malformed-checkpoint rejection ----------------------------------
+    //
+    // `Deserialize` is derived over private CSR/SoA vectors whose lengths have
+    // to agree, and nothing in the wire format enforces that. Before the
+    // `try_from` shim each of these decoded into a layer that panicked on the
+    // next `step` while indexing. They must now fail at decode instead.
+
+    /// Serialize a good layer, corrupt one field in the JSON, and decode.
+    fn decode_corrupted(
+        mutate: impl FnOnce(&mut serde_json::Value),
+    ) -> Result<SparseGifHiddenLayer, serde_json::Error> {
+        let layer = SparseGifHiddenLayer::new(&config(8, 3, 3, 5)).unwrap();
+        let mut v: serde_json::Value = serde_json::to_value(&layer).unwrap();
+        mutate(&mut v);
+        serde_json::from_value(v)
+    }
+
+    #[test]
+    fn rejects_checkpoint_with_short_soa_bank() {
+        for field in ["membrane", "adaptation", "last_spike_time"] {
+            let err = decode_corrupted(|v| {
+                v[field].as_array_mut().unwrap().pop();
+            })
+            .unwrap_err();
+            assert!(
+                err.to_string().contains("malformed serialized layer"),
+                "{field} truncation should be rejected, got: {err}"
+            );
+        }
+    }
+
+    #[test]
+    fn rejects_checkpoint_with_bad_csr_offsets() {
+        // Wrong length.
+        assert!(
+            decode_corrupted(|v| {
+                v["fan_in_offsets"].as_array_mut().unwrap().pop();
+            })
+            .is_err()
+        );
+
+        // Does not start at zero.
+        assert!(decode_corrupted(|v| { v["fan_in_offsets"][0] = 1.into() }).is_err());
+
+        // Not non-decreasing — this is the one that would index backwards.
+        // Offsets are [0, 3, 6, 9]; 7 > 6 makes row 1 end before it starts.
+        // (Lowering an offset instead would still be valid CSR: [0, 0, 6, 9]
+        // just describes an empty first row.)
+        assert!(decode_corrupted(|v| { v["fan_in_offsets"][1] = 7.into() }).is_err());
+    }
+
+    #[test]
+    fn rejects_checkpoint_whose_payload_disagrees_with_offsets() {
+        for field in ["fan_in_sources", "weights"] {
+            let err = decode_corrupted(|v| {
+                v[field].as_array_mut().unwrap().pop();
+            })
+            .unwrap_err();
+            assert!(
+                err.to_string().contains("malformed serialized layer"),
+                "{field} truncation should be rejected, got: {err}"
+            );
+        }
+    }
+
+    #[test]
+    fn rejects_checkpoint_sourcing_a_nonexistent_channel() {
+        // num_inputs is 8, so channel 99 does not exist.
+        let err = decode_corrupted(|v| v["fan_in_sources"][0] = 99.into()).unwrap_err();
+        assert!(err.to_string().contains("nonexistent channel"), "{err}");
+    }
+
+    #[test]
+    fn a_valid_checkpoint_still_decodes() {
+        // Guard against the validator being so strict it rejects good input.
+        assert!(decode_corrupted(|_| {}).is_ok());
+    }
+
+    // --- numeric and addressability guards -------------------------------
+
+    #[test]
+    fn wide_but_finite_weight_range_stays_finite() {
+        // `w_max - w_min` overflows f32 here (6e38 > f32::MAX), which used to
+        // yield `inf` weights — and `inf * 0.0` = `NaN` — from a range that
+        // passes the finiteness check. Interpolating in f64 keeps every weight
+        // inside the requested bounds.
+        let layer = SparseGifHiddenLayer::new(&SparseGifLayerConfig {
+            num_inputs: 8,
+            num_neurons: 4,
+            fan_in: 3,
+            seed: 11,
+            weight_range: (-3.0e38, 3.0e38),
+            ..Default::default()
+        })
+        .unwrap();
+
+        assert!(
+            layer.weights().iter().all(|w| w.is_finite()),
+            "non-finite weight from a finite range: {:?}",
+            layer.weights()
+        );
+        assert!(
+            layer
+                .weights()
+                .iter()
+                .all(|&w| (-3.0e38..=3.0e38).contains(&w)),
+            "weight escaped the requested range"
+        );
+    }
+
+    #[test]
+    fn rejects_more_input_channels_than_a_u32_source_can_address() {
+        // Empty rows, so this allocates nothing: the guard must fire on the
+        // declared width alone. Without it, `source as u32` would wrap and a
+        // channel above u32::MAX would alias onto a low one.
+        let err = SparseGifHiddenLayer::from_topology(MAX_INPUTS + 1, GifParams::default(), &[])
+            .unwrap_err();
+        assert_eq!(
+            err,
+            GifLayerError::TooManyInputs {
+                num_inputs: MAX_INPUTS + 1,
+                max: MAX_INPUTS,
+            }
+        );
+        assert!(err.to_string().contains("addressable maximum"));
     }
 
     // --- golden regression fixtures --------------------------------------

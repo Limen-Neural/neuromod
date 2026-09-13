@@ -390,6 +390,45 @@ fn zero_fan_in_does_not_allocate_a_candidate_pool() {
     }
 }
 
+#[test]
+fn generated_weights_stay_below_the_exclusive_upper_bound() {
+    // `weight_range` documents a half-open interval, but `unit < 1` is not
+    // enough on its own: with bounds one ULP apart, any unit above 0.5 rounds
+    // the product up to exactly `w_max`. Seed 2 draws 0.5956, which did.
+    let w_min = 1.0f32;
+    let w_max = f32::from_bits(w_min.to_bits() + 1);
+    let layer = SparseGifHiddenLayer::new(&SparseGifLayerConfig {
+        num_inputs: 1,
+        num_neurons: 1,
+        fan_in: 1,
+        seed: 2,
+        weight_range: (w_min, w_max),
+        ..Default::default()
+    })
+    .unwrap();
+
+    for &w in layer.weights() {
+        assert!(
+            w >= w_min && w < w_max,
+            "weight {w:e} escaped the half-open range [{w_min:e}, {w_max:e})"
+        );
+    }
+
+    // A degenerate range has an empty half-open interval, so the single
+    // representable answer is allowed through rather than stepped below the
+    // floor.
+    let degenerate = SparseGifHiddenLayer::new(&SparseGifLayerConfig {
+        num_inputs: 4,
+        num_neurons: 2,
+        fan_in: 2,
+        seed: 3,
+        weight_range: (0.25, 0.25),
+        ..Default::default()
+    })
+    .unwrap();
+    assert!(degenerate.weights().iter().all(|&w| w == 0.25));
+}
+
 #[path = "layer_serde_tests.rs"]
 mod serde_tests;
 

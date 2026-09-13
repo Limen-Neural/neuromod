@@ -295,6 +295,21 @@ impl SparseGifHiddenLayer {
                     (f64::from(w_min) + (f64::from(w_max) - f64::from(w_min)) * f64::from(unit))
                         as f32
                 };
+
+                // `unit` is always below 1, but the rounding above can still
+                // carry the result up to exactly `w_max`, breaking the
+                // half-open range `weight_range` documents. It takes bounds
+                // only a few ULPs apart -- with adjacent floats any unit above
+                // 0.5 rounds up -- so stepping back one representable value
+                // costs nothing for real ranges: a 2M-draw sweep over random
+                // ranges produced zero results at or above `w_max`. Skipped
+                // when the range is degenerate (`w_min == w_max`), where the
+                // half-open interval is empty and `w_min` is the only answer.
+                let w = if w >= w_max && w_min < w_max {
+                    w_max.next_down()
+                } else {
+                    w
+                };
                 weights.push(w);
             }
 

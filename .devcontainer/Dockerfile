@@ -1,3 +1,7 @@
+# Base image is rust:1.98.0-slim-bookworm (latest published tag; no 1.98.1 tag exists
+# yet). The workspace mount brings in rust-toolchain.toml, so rustup fetches and uses
+# the pinned 1.98.1 toolchain (see postCreateCommand `cargo fetch`) for actual builds —
+# this base image only supplies rustup and the OS layer, matching Dockerfile's rationale.
 FROM rust:1.98.0-slim-bookworm
 
 # Add components used by CI, local review, and the dev container post-create step.

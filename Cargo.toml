@@ -4,7 +4,7 @@ version = "0.6.0"
 edition = "2024"
 rust-version = "1.98.1"
 license = "MIT OR Apache-2.0"
-authors = ["Raul Montoya Cardenas <montoyaraul34@gmail.com>"]
+authors = ["Raul Cardenas Montoya <montoyaraul34@gmail.com>"]
 description = "Biologically inspired SNN primitives in Rust: LIF/Izhikevich SpikingNetwork, neuromodulators, STDP building blocks, and standalone neuron models."
 exclude = [
     ".gitignore",

@@ -51,29 +51,6 @@ cargo hack check --feature-powerset --exclude-no-default-features --keep-going
 cargo llvm-cov --all-features --lcov --output-path lcov.info
 ```
 
-## Local Qodana (before push)
-
-CLI: `qodana` (see `qodana.yaml`; CI twin is `.github/workflows/qodana_code_quality.yml`).
-
-```bash
-qodana scan --project-dir . --linter qodana-rust --print-problems --save-report
-```
-
-Optional Cloud upload if `QODANA_TOKEN` is set locally (never commit the token):
-
-```bash
-export QODANA_ENDPOINT=https://qodana.cloud
-qodana scan --project-dir . --linter qodana-rust --print-problems --save-report
-```
-
-Do not push while Qodana reports new actionable defects on `src/`, `examples/`, `benches/`, or `tests/`.
-
-**Known noise (do not block on these alone):**
-
-- `DuplicatedCode` in multi-stage RK4 integrators (`fitzhugh_nagumo`, `hodgkin_huxley`) — intentional stage structure.
-- `RsBorrowChecker` / `RsTypeCheck` false positives from incomplete Cargo project load in the Docker linter (host `cargo check` / `clippy -D warnings` is authoritative).
-- Prefer fixing real hits: unused deps (`CargoUnusedDependency`), clippy-equivalent nits.
-
 ## Examples smoke
 
 ```bash

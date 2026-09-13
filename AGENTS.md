@@ -78,7 +78,7 @@ Open in VS Code with the Dev Containers extension or run:
 devcontainer up --workspace-folder .
 ```
 
-The container is `rust:1.98.0-slim-bookworm`. `cargo fetch` runs on first create. The `vscode` user owns the toolchain, so `cargo` commands and component installs work from the terminal. `cargo-llvm-cov` is also supported.
+The container is `rust:1.98.1-slim-bookworm`. `cargo fetch` runs on first create. The `vscode` user owns the toolchain, so `cargo` commands and component installs work from the terminal. `cargo-llvm-cov` is also supported.
 
 ## Boundaries
 

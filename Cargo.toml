@@ -6,7 +6,25 @@ rust-version = "1.98.1"
 license = "MIT OR Apache-2.0"
 authors = ["Raul Montoya Cardenas <montoyaraul34@gmail.com>"]
 description = "Biologically inspired SNN primitives in Rust: LIF/Izhikevich SpikingNetwork, neuromodulators, STDP building blocks, and standalone neuron models."
-exclude = ["docs/", ".cubic/"]
+exclude = [
+    ".gitignore",
+    "docs/",
+    ".cubic/",
+    ".github/",
+    ".devcontainer/",
+    ".devin/",
+    ".config/",
+    "azure-templates/",
+    ".codacy.yml",
+    ".dockerignore",
+    ".markdownlint.json",
+    "codecov.yml",
+    "Dockerfile",
+    "AGENTS.md",
+    "CLAUDE.md",
+    "REVIEW.md",
+    "benches/README.md",
+]
 repository = "https://github.com/Limen-Neural/neuromod"
 readme = "README.md"
 keywords = ["snn", "neuromorphic", "stdp", "spiking", "neuromodulation"]

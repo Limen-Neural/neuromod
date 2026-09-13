@@ -302,10 +302,52 @@ impl Default for SparseGifLayerConfig {
 /// rather than a `Vec<Vec<bool>>`, matching the layer's structure-of-arrays
 /// storage and keeping a whole raster in one allocation.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(try_from = "SpikeRasterRepr")]
 pub struct SpikeRaster {
     num_steps: usize,
     num_neurons: usize,
     spikes: Vec<bool>,
+}
+
+/// Deserialization mirror of [`SpikeRaster`].
+///
+/// Same rationale as [`SparseGifHiddenLayerRepr`]: the derived `Deserialize`
+/// cannot enforce `spikes.len() == num_steps * num_neurons`, and
+/// [`SpikeRaster::step`] only bounds-checks the step index before slicing, so a
+/// short buffer panics there rather than failing at decode.
+#[derive(Deserialize)]
+#[serde(rename = "SpikeRaster")]
+struct SpikeRasterRepr {
+    num_steps: usize,
+    num_neurons: usize,
+    spikes: Vec<bool>,
+}
+
+impl TryFrom<SpikeRasterRepr> for SpikeRaster {
+    type Error = GifLayerError;
+
+    fn try_from(repr: SpikeRasterRepr) -> Result<Self, Self::Error> {
+        // Checked, not saturating: this product is the exact length the buffer
+        // must have, so a wrapped value would be compared against and could
+        // spuriously match a buffer that is nothing like the right size.
+        let expected = repr.num_steps.checked_mul(repr.num_neurons).ok_or(
+            GifLayerError::MalformedCheckpoint {
+                detail: "num_steps * num_neurons overflows",
+            },
+        )?;
+
+        if repr.spikes.len() != expected {
+            return Err(GifLayerError::MalformedCheckpoint {
+                detail: "spikes length != num_steps * num_neurons",
+            });
+        }
+
+        Ok(Self {
+            num_steps: repr.num_steps,
+            num_neurons: repr.num_neurons,
+            spikes: repr.spikes,
+        })
+    }
 }
 
 impl SpikeRaster {
@@ -1268,6 +1310,45 @@ mod tests {
     fn a_valid_checkpoint_still_decodes() {
         // Guard against the validator being so strict it rejects good input.
         assert!(decode_corrupted(|_| {}).is_ok());
+    }
+
+    /// Serialize a real raster, corrupt one field, and decode.
+    fn decode_corrupted_raster(
+        mutate: impl FnOnce(&mut serde_json::Value),
+    ) -> Result<SpikeRaster, serde_json::Error> {
+        let mut layer = SparseGifHiddenLayer::new(&config(8, 3, 3, 5)).unwrap();
+        let raster = layer.run(&ramp_train(6, 8)).unwrap();
+        let mut v: serde_json::Value = serde_json::to_value(&raster).unwrap();
+        mutate(&mut v);
+        serde_json::from_value(v)
+    }
+
+    #[test]
+    fn rejects_raster_whose_buffer_disagrees_with_its_shape() {
+        // `step()` bounds-checks the step index but then slices
+        // `spikes[lo..lo + num_neurons]`, so a short buffer panics there
+        // instead of failing at decode.
+        let err = decode_corrupted_raster(|v| {
+            v["spikes"].as_array_mut().unwrap().pop();
+        })
+        .unwrap_err();
+        assert!(
+            err.to_string().contains("spikes length"),
+            "short buffer should be rejected, got: {err}"
+        );
+
+        // Overflowing the product must not wrap into a length that matches.
+        let err = decode_corrupted_raster(|v| {
+            v["num_steps"] = (usize::MAX / 2 + 1).into();
+            v["num_neurons"] = 4.into();
+        })
+        .unwrap_err();
+        assert!(err.to_string().contains("overflow"), "{err}");
+    }
+
+    #[test]
+    fn a_valid_raster_still_decodes() {
+        assert!(decode_corrupted_raster(|_| {}).is_ok());
     }
 
     // --- numeric and addressability guards -------------------------------

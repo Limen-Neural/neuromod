@@ -430,6 +430,62 @@ struct SparseGifHiddenLayerRepr {
     step_count: i64,
 }
 
+impl SparseGifHiddenLayerRepr {
+    /// Enforce every invariant `step_into` relies on when indexing.
+    ///
+    /// Checked in the order a reader would: addressability, then the SoA bank
+    /// widths, then the CSR row structure, then the payload lengths the row
+    /// offsets imply, and finally that each source names a real channel.
+    fn validate(&self) -> Result<(), GifLayerError> {
+        let malformed = |detail| GifLayerError::MalformedCheckpoint { detail };
+
+        if self.num_inputs > MAX_INPUTS {
+            return Err(GifLayerError::TooManyInputs {
+                num_inputs: self.num_inputs,
+                max: MAX_INPUTS,
+            });
+        }
+
+        let n = self.num_neurons;
+        if self.membrane.len() != n || self.adaptation.len() != n {
+            return Err(malformed("membrane/adaptation length != num_neurons"));
+        }
+        if self.last_spike_time.len() != n {
+            return Err(malformed("last_spike_time length != num_neurons"));
+        }
+
+        if self.fan_in_offsets.len() != n + 1 {
+            return Err(malformed("fan_in_offsets length != num_neurons + 1"));
+        }
+        if self.fan_in_offsets[0] != 0 {
+            return Err(malformed("fan_in_offsets does not start at 0"));
+        }
+        if self.fan_in_offsets.windows(2).any(|w| w[0] > w[1]) {
+            return Err(malformed("fan_in_offsets is not non-decreasing"));
+        }
+
+        // Indexing `sources[start..end]` is only in bounds if the final offset
+        // is exactly the payload length; a shorter payload panics, a longer one
+        // silently strands synapses.
+        let nnz = self.fan_in_offsets[n];
+        if self.fan_in_sources.len() != nnz || self.weights.len() != nnz {
+            return Err(malformed(
+                "fan_in_sources/weights length != final fan_in_offset",
+            ));
+        }
+
+        if self
+            .fan_in_sources
+            .iter()
+            .any(|&s| s as usize >= self.num_inputs)
+        {
+            return Err(malformed("a CSR source references a nonexistent channel"));
+        }
+
+        Ok(())
+    }
+}
+
 impl TryFrom<SparseGifHiddenLayerRepr> for SparseGifHiddenLayer {
     type Error = GifLayerError;
 
@@ -439,50 +495,7 @@ impl TryFrom<SparseGifHiddenLayerRepr> for SparseGifHiddenLayer {
     /// widths, then the CSR row structure, then the payload lengths the row
     /// offsets imply, and finally that each source names a real channel.
     fn try_from(repr: SparseGifHiddenLayerRepr) -> Result<Self, Self::Error> {
-        let malformed = |detail| GifLayerError::MalformedCheckpoint { detail };
-
-        if repr.num_inputs > MAX_INPUTS {
-            return Err(GifLayerError::TooManyInputs {
-                num_inputs: repr.num_inputs,
-                max: MAX_INPUTS,
-            });
-        }
-
-        let n = repr.num_neurons;
-        if repr.membrane.len() != n || repr.adaptation.len() != n {
-            return Err(malformed("membrane/adaptation length != num_neurons"));
-        }
-        if repr.last_spike_time.len() != n {
-            return Err(malformed("last_spike_time length != num_neurons"));
-        }
-
-        if repr.fan_in_offsets.len() != n + 1 {
-            return Err(malformed("fan_in_offsets length != num_neurons + 1"));
-        }
-        if repr.fan_in_offsets[0] != 0 {
-            return Err(malformed("fan_in_offsets does not start at 0"));
-        }
-        if repr.fan_in_offsets.windows(2).any(|w| w[0] > w[1]) {
-            return Err(malformed("fan_in_offsets is not non-decreasing"));
-        }
-
-        // Indexing `sources[start..end]` is only in bounds if the final offset
-        // is exactly the payload length; a shorter payload panics, a longer one
-        // silently strands synapses.
-        let nnz = repr.fan_in_offsets[n];
-        if repr.fan_in_sources.len() != nnz || repr.weights.len() != nnz {
-            return Err(malformed(
-                "fan_in_sources/weights length != final fan_in_offset",
-            ));
-        }
-
-        if repr
-            .fan_in_sources
-            .iter()
-            .any(|&s| s as usize >= repr.num_inputs)
-        {
-            return Err(malformed("a CSR source references a nonexistent channel"));
-        }
+        repr.validate()?;
 
         Ok(Self {
             num_inputs: repr.num_inputs,
@@ -539,6 +552,41 @@ impl SparseGifHiddenLayer {
             });
         }
 
+        let (fan_in_offsets, fan_in_sources, weights) =
+            Self::generate_topology(num_inputs, num_neurons, fan_in, seed, w_min, w_max);
+
+        Ok(Self {
+            num_inputs,
+            num_neurons,
+            seed,
+            params,
+            fan_in_offsets,
+            fan_in_sources,
+            weights,
+            membrane: vec![0.0; num_neurons],
+            adaptation: vec![0.0; num_neurons],
+            last_spike_time: vec![-1; num_neurons],
+            step_count: 0,
+        })
+    }
+
+    /// Draw the CSR fan-in topology and initial weights for [`Self::new`].
+    ///
+    /// Returns `(offsets, sources, weights)`. Split out of `new` so the
+    /// constructor reads as validate-then-build; all the determinism-critical
+    /// mechanics live here.
+    ///
+    /// Callers must have validated `fan_in <= num_inputs`, `num_inputs <=
+    /// MAX_INPUTS`, and a finite ordered weight range — this drives the
+    /// generator directly and does no checking of its own.
+    fn generate_topology(
+        num_inputs: usize,
+        num_neurons: usize,
+        fan_in: usize,
+        seed: u64,
+        w_min: f32,
+        w_max: f32,
+    ) -> (Vec<usize>, Vec<u32>, Vec<f32>) {
         // Only a capacity hint; saturating keeps a pathological shape from
         // panicking here in debug builds before allocation fails on its own.
         let nnz = num_neurons.saturating_mul(fan_in);
@@ -570,9 +618,9 @@ impl SparseGifHiddenLayer {
                 // Interpolate in f64: `w_max - w_min` overflows to `inf` for a
                 // finite range wider than f32::MAX (e.g. -3e38..3e38), which
                 // would install `inf`/`NaN` synapses from inputs that passed
-                // the finiteness check above. f64 spans any f32 range exactly,
-                // and `next_unit` is an exact 24-bit value, so every range that
-                // did work keeps its previous weights bit for bit.
+                // the finiteness check in `new`. f64 spans any f32 range
+                // exactly, and `next_unit` is an exact 24-bit value, so every
+                // range that did work keeps its previous weights bit for bit.
                 let unit = f64::from(rng.next_unit());
                 let w = f64::from(w_min) + (f64::from(w_max) - f64::from(w_min)) * unit;
                 weights.push(w as f32);
@@ -588,19 +636,7 @@ impl SparseGifHiddenLayer {
             fan_in_offsets.push(fan_in_sources.len());
         }
 
-        Ok(Self {
-            num_inputs,
-            num_neurons,
-            seed,
-            params,
-            fan_in_offsets,
-            fan_in_sources,
-            weights,
-            membrane: vec![0.0; num_neurons],
-            adaptation: vec![0.0; num_neurons],
-            last_spike_time: vec![-1; num_neurons],
-            step_count: 0,
-        })
+        (fan_in_offsets, fan_in_sources, weights)
     }
 
     /// Build a layer from an explicit, caller-supplied topology.

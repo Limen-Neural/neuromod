@@ -214,6 +214,23 @@ impl SpikingNetwork {
         self.global_step += 1;
         self.modulators = *modulators;
 
+        let (stress_multiplier, learning_rate) = self.retarget_lif_from_modulators();
+        let pred_errors = self.update_predictive_state(stimuli);
+        self.encode_input_spikes(stimuli);
+        self.integrate_lif(stimuli, &pred_errors, stress_multiplier);
+        let spike_ids = self.fire_and_inhibit();
+        self.apply_stdp(learning_rate);
+        self.renormalize_weights();
+        self.drive_izhikevich();
+
+        Ok(spike_ids)
+    }
+
+    /// Recompute LIF `decay_rate` and `threshold` from the current modulators.
+    ///
+    /// Returns `(stress_multiplier, learning_rate)` so later phases can scale
+    /// synaptic drive and gate STDP without re-deriving those rates.
+    fn retarget_lif_from_modulators(&mut self) -> (f32, f32) {
         let stress_multiplier = (1.0 - self.modulators.norepinephrine).max(0.1);
         let learning_rate = 0.5 * self.modulators.dopamine;
 
@@ -230,8 +247,12 @@ impl SpikingNetwork {
             neuron.threshold = neuron.threshold.clamp(0.05, 0.50);
         }
 
+        (stress_multiplier, learning_rate)
+    }
+
+    /// Per-channel EMA of `|stimuli|` and the surprise (`pred_errors`) it implies.
+    fn update_predictive_state(&mut self, stimuli: &[f32]) -> Vec<f32> {
         const PRED_ALPHA: f32 = 0.1;
-        const PRED_ERR_WEIGHT: f32 = 0.5;
         let mut pred_errors = vec![0.0_f32; self.num_channels];
 
         for ch in 0..self.num_channels {
@@ -241,6 +262,11 @@ impl SpikingNetwork {
                 PRED_ALPHA * s + (1.0 - PRED_ALPHA) * self.predictive_state[ch];
         }
 
+        pred_errors
+    }
+
+    /// Bernoulli/Poisson input encoding: stamp `input_spike_times` per channel.
+    fn encode_input_spikes(&mut self, stimuli: &[f32]) {
         let mut rng = rand::rng();
         for (ch, &s) in stimuli.iter().enumerate() {
             let abs_s = s.abs().clamp(0.0, 1.0);
@@ -248,7 +274,11 @@ impl SpikingNetwork {
                 self.input_spike_times[ch] = self.global_step;
             }
         }
+    }
 
+    /// Integrate each LIF neuron from weighted stimuli plus surprise.
+    fn integrate_lif(&mut self, stimuli: &[f32], pred_errors: &[f32], stress_multiplier: f32) {
+        const PRED_ERR_WEIGHT: f32 = 0.5;
         for neuron in &mut self.neurons {
             let mut total_current = 0.0;
             for ch in 0..self.num_channels {
@@ -262,13 +292,21 @@ impl SpikingNetwork {
             total_current *= 0.45 * stress_multiplier;
             neuron.integrate(total_current);
         }
+    }
 
+    /// Fire LIF neurons, then laterally inhibit the ones that did not spike.
+    ///
+    /// Membership is an O(1) `fired` mask so this stays linear in neuron count
+    /// even when `with_dimensions` builds a large bank.
+    fn fire_and_inhibit(&mut self) -> Vec<usize> {
         let mut spike_ids = Vec::new();
+        let mut fired = vec![false; self.neurons.len()];
         for (i, neuron) in self.neurons.iter_mut().enumerate() {
             if let Some(_peak_v) = neuron.check_fire() {
                 neuron.last_spike = true;
                 neuron.last_spike_time = self.global_step;
                 spike_ids.push(i);
+                fired[i] = true;
             } else {
                 neuron.last_spike = false;
             }
@@ -277,19 +315,21 @@ impl SpikingNetwork {
         if !spike_ids.is_empty() {
             const INHIBITION_STRENGTH: f32 = 0.05;
             for (i, neuron) in self.neurons.iter_mut().enumerate() {
-                if !spike_ids.contains(&i) {
+                if !fired[i] {
                     neuron.membrane_potential =
                         (neuron.membrane_potential - INHIBITION_STRENGTH).max(0.0);
                 }
             }
         }
 
-        self.apply_stdp(learning_rate);
+        spike_ids
+    }
 
-        // Scale toward the L1 budget, then enforce the configured bounds. The
-        // bounds win where the two disagree: under the defaults they cannot
-        // bind here, so the budget holds exactly; a narrowed range is honored
-        // and leaves the sum off budget. See the `step` contract, item 8.
+    /// Scale toward the L1 budget, then enforce the configured bounds. The
+    /// bounds win where the two disagree: under the defaults they cannot
+    /// bind here, so the budget holds exactly; a narrowed range is honored
+    /// and leaves the sum off budget. See the `step` contract, item 8.
+    fn renormalize_weights(&mut self) {
         let (w_min, w_max) = self.stdp_config.weight_bounds();
         for neuron in &mut self.neurons {
             let total: f32 = neuron.weights.iter().sum();
@@ -311,7 +351,10 @@ impl SpikingNetwork {
                 }
             }
         }
+    }
 
+    /// Drive the Izhikevich bank from mean LIF membrane potential + dopamine.
+    fn drive_izhikevich(&mut self) {
         let lif_mean = if !self.neurons.is_empty() {
             let sum: f32 = self.neurons.iter().map(|n| n.membrane_potential).sum();
             sum / self.neurons.len() as f32
@@ -323,8 +366,6 @@ impl SpikingNetwork {
         for iz in &mut self.iz_neurons {
             iz.step(iz_drive);
         }
-
-        Ok(spike_ids)
     }
 
     /// Reward-modulated STDP over the per-synapse eligibility traces.
@@ -506,6 +547,46 @@ mod tests {
             .expect("valid input length should pass");
         assert_eq!(network.global_step, 1);
         assert!(spikes.len() <= network.neurons.len());
+    }
+
+    #[test]
+    fn test_fire_and_inhibit_spares_firers_and_pulls_down_the_rest() {
+        let mut network = SpikingNetwork::with_dimensions(4, 0, 1);
+        network.global_step = 7;
+
+        network.neurons[0].membrane_potential = 1.0;
+        network.neurons[1].membrane_potential = 1.0;
+        network.neurons[2].threshold = 0.5;
+        network.neurons[3].threshold = 0.5;
+        network.neurons[2].membrane_potential = 0.20;
+        network.neurons[3].membrane_potential = 0.20;
+
+        let spikes = network.fire_and_inhibit();
+
+        assert_eq!(spikes, vec![0, 1]);
+        assert!(network.neurons[0].last_spike && network.neurons[1].last_spike);
+        assert!(!network.neurons[2].last_spike && !network.neurons[3].last_spike);
+        assert_eq!(network.neurons[0].last_spike_time, 7);
+        assert_eq!(network.neurons[0].membrane_potential, 0.0);
+        assert!((network.neurons[2].membrane_potential - 0.15).abs() < 1e-6);
+        assert!((network.neurons[3].membrane_potential - 0.15).abs() < 1e-6);
+    }
+
+    #[test]
+    fn test_fire_and_inhibit_skips_when_nobody_spikes() {
+        let mut network = SpikingNetwork::with_dimensions(3, 0, 1);
+        for neuron in &mut network.neurons {
+            neuron.threshold = 0.5;
+            neuron.membrane_potential = 0.20;
+        }
+
+        let spikes = network.fire_and_inhibit();
+
+        assert!(spikes.is_empty());
+        for neuron in &network.neurons {
+            assert!(!neuron.last_spike);
+            assert!((neuron.membrane_potential - 0.20).abs() < 1e-6);
+        }
     }
 
     #[test]

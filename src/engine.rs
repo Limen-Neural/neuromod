@@ -35,6 +35,9 @@ use super::rm_stdp::*;
 
 /// L1 synaptic weight budget per neuron (total weight sum target).
 const WEIGHT_BUDGET: f32 = 2.0;
+const PRED_ALPHA: f32 = 0.1;
+const PRED_ERR_WEIGHT: f32 = 0.5;
+const INHIBITION_STRENGTH: f32 = 0.05;
 
 /// Errors from [`SpikingNetwork::step`].
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -260,6 +263,19 @@ impl SpikingNetwork {
         let stress_multiplier = (1.0 - self.modulators.norepinephrine).max(0.1);
         let learning_rate = 0.5 * self.modulators.dopamine;
 
+        self.retune_lif_from_modulators(learning_rate);
+        let pred_errors = self.update_predictive_errors(stimuli);
+        self.encode_input_spikes(stimuli, rng);
+        self.integrate_lif_bank(stimuli, &pred_errors, stress_multiplier);
+        let spike_ids = self.fire_lif_and_inhibit();
+        self.apply_stdp(learning_rate);
+        self.renormalize_lif_weights();
+        self.drive_izhikevich_bank();
+
+        Ok(spike_ids)
+    }
+
+    fn retune_lif_from_modulators(&mut self, learning_rate: f32) {
         for neuron in &mut self.neurons {
             let target_decay = 0.15 - (0.05 * self.modulators.acetylcholine);
             neuron.decay_rate = target_decay;
@@ -272,25 +288,33 @@ impl SpikingNetwork {
             neuron.threshold += (target_threshold - neuron.threshold) * learning_rate;
             neuron.threshold = neuron.threshold.clamp(0.05, 0.50);
         }
+    }
 
-        const PRED_ALPHA: f32 = 0.1;
-        const PRED_ERR_WEIGHT: f32 = 0.5;
+    fn update_predictive_errors(&mut self, stimuli: &[f32]) -> Vec<f32> {
         let mut pred_errors = vec![0.0_f32; self.num_channels];
-
         for ch in 0..self.num_channels {
             let s = stimuli[ch].abs().clamp(0.0, 1.0);
             pred_errors[ch] = (s - self.predictive_state[ch]).abs();
             self.predictive_state[ch] =
                 PRED_ALPHA * s + (1.0 - PRED_ALPHA) * self.predictive_state[ch];
         }
+        pred_errors
+    }
 
+    /// Bernoulli-encode `stimuli` into `input_spike_times` from `rng`.
+    ///
+    /// One draw per channel with `|stimuli| > 0.01`. The caller owns `rng`;
+    /// this path does not construct or reseed a generator.
+    fn encode_input_spikes<R: Rng + ?Sized>(&mut self, stimuli: &[f32], rng: &mut R) {
         for (ch, &s) in stimuli.iter().enumerate() {
             let abs_s = s.abs().clamp(0.0, 1.0);
             if abs_s > 0.01 && rng.random_range(0.0..1.0) < abs_s {
                 self.input_spike_times[ch] = self.global_step;
             }
         }
+    }
 
+    fn integrate_lif_bank(&mut self, stimuli: &[f32], pred_errors: &[f32], stress_multiplier: f32) {
         for neuron in &mut self.neurons {
             let mut total_current = 0.0;
             for ch in 0..self.num_channels {
@@ -304,7 +328,9 @@ impl SpikingNetwork {
             total_current *= 0.45 * stress_multiplier;
             neuron.integrate(total_current);
         }
+    }
 
+    fn fire_lif_and_inhibit(&mut self) -> Vec<usize> {
         let mut spike_ids = Vec::new();
         for (i, neuron) in self.neurons.iter_mut().enumerate() {
             if let Some(_peak_v) = neuron.check_fire() {
@@ -317,7 +343,6 @@ impl SpikingNetwork {
         }
 
         if !spike_ids.is_empty() {
-            const INHIBITION_STRENGTH: f32 = 0.05;
             for (i, neuron) in self.neurons.iter_mut().enumerate() {
                 if !spike_ids.contains(&i) {
                     neuron.membrane_potential =
@@ -325,9 +350,10 @@ impl SpikingNetwork {
                 }
             }
         }
+        spike_ids
+    }
 
-        self.apply_stdp(learning_rate);
-
+    fn renormalize_lif_weights(&mut self) {
         // Scale toward the L1 budget, then enforce the configured bounds. The
         // bounds win where the two disagree: under the defaults they cannot
         // bind here, so the budget holds exactly; a narrowed range is honored
@@ -353,7 +379,9 @@ impl SpikingNetwork {
                 }
             }
         }
+    }
 
+    fn drive_izhikevich_bank(&mut self) {
         let lif_mean = if !self.neurons.is_empty() {
             let sum: f32 = self.neurons.iter().map(|n| n.membrane_potential).sum();
             sum / self.neurons.len() as f32
@@ -365,8 +393,6 @@ impl SpikingNetwork {
         for iz in &mut self.iz_neurons {
             iz.step(iz_drive);
         }
-
-        Ok(spike_ids)
     }
 
     /// Reward-modulated STDP over the per-synapse eligibility traces.

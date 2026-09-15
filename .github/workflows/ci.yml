@@ -97,7 +97,15 @@ jobs:
         if: runner.os == 'Linux' && steps.changes.outputs.rust == 'true'
         env:
           RUSTFLAGS: "-C overflow-checks=off"
-        run: cargo test --all-features --lib step_counter_
+        shell: bash
+        run: |
+          set -euo pipefail
+          out="$(cargo test --all-features --lib step_counter_ 2>&1)"
+          printf '%s\n' "$out"
+          grep -Eq '^test result: ok\. [1-9][0-9]* passed' <<<"$out" || {
+            echo 'error: no step_counter tests matched; overflow-checks-off guard would silently pass' >&2
+            exit 1
+          }
 
       - name: Feature matrix (cargo-hack)
         if: runner.os == 'Linux' && steps.changes.outputs.rust == 'true'

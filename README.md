@@ -128,7 +128,7 @@ fn main() {
 
 `step` validates the call **before** mutating the network. A length mismatch or an exhausted tick counter returns a structured [`StepError`](https://docs.rs/neuromod/latest/neuromod/enum.StepError.html) and leaves every field unchanged.
 
-`global_step` is a discrete tick counter in **steps** (not wall-clock time), range `0..=i64::MAX`. Spike timestamps (`LifNeuron::last_spike_time`, `input_spike_times`) use the same unit; `-1` means “never spiked.” A restored checkpoint sitting at `i64::MAX` still deserializes — `step` then returns `StepCounterExhausted` instead of panicking in debug or wrapping to a negative timestamp in release. Call `reset()` to start a new epoch; the engine will not renumber a live network for you.
+`global_step` is a discrete tick counter in **steps** (not wall-clock time), range `0..=i64::MAX`. Spike timestamps (`LifNeuron::last_spike_time`, `input_spike_times`) use the same unit; `-1` is the sentinel for no recorded spike. A restored checkpoint sitting at `i64::MAX` (or with a negative counter) still deserializes — `step` then returns `StepCounterExhausted` instead of panicking in debug, wrapping in release, or stamping the `-1` sentinel. Call `reset()` to start a new epoch; the engine will not renumber a live network for you.
 
 ```rust
 use neuromod::{NeuroModulators, SpikingNetwork, StepError};
@@ -144,7 +144,7 @@ fn main() {
             println!("InputLenMismatch: expected {expected}, got {got}");
         }
         Err(StepError::StepCounterExhausted { global_step }) => {
-            println!("step counter exhausted at {global_step}");
+            println!("step counter cannot advance from {global_step}");
         }
     }
 
@@ -338,8 +338,8 @@ bind, so the budget holds exactly under them.
 overflow `i64::MAX`. Debug and release share this behavior. A rejected tick is atomic (no
 RNG draw, no neuromodulator snapshot, no membrane or trace updates).
 
-**Checkpoints at `i64::MAX` still load.** Serde does not reject an exhausted counter;
-validation is on `step`, so a saturated network can be inspected. Call `reset()` to continue
+**Checkpoints at `i64::MAX` still load.** Serde does not reject an exhausted or negative
+counter; validation is on `step`, so a saturated network can be inspected. Call `reset()` to continue
 from tick 0 — the engine will not renumber timestamps for you. Normal (non-exhausted)
 checkpoints are unchanged.
 

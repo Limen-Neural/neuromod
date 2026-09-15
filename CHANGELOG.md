@@ -8,12 +8,14 @@ All notable changes to this project are documented in this file.
 
 - **`SpikingNetwork::step` no longer panics or wraps at `i64::MAX`.** A restored or
   caller-written checkpoint whose `global_step` is already `i64::MAX` now returns
-  `StepError::StepCounterExhausted` before any mutation or RNG draw (LIM-1227). Debug and
-  release share this checked behavior. Spike timestamps stay in `1..=i64::MAX` or the `-1`
-  never-spiked sentinel; wrapping to `i64::MIN` is refused. Reward-modulated STDP uses
-  `checked_sub` for Δt so the last legal tick cannot overflow independently. Exhausted
-  checkpoints still deserialize so they can be inspected; call `reset()` to start a new
-  epoch. The engine does not renumber a live network.
+  `StepError::StepCounterExhausted` before any mutation or random-number generator
+  draw (LIM-1227). Debug and release share this checked behavior. Engine-stamped spike
+  times are `1..=i64::MAX` or the `-1` no-spike sentinel; wrapping `global_step` to
+  `i64::MIN` is refused, and a negative counter is refused on `step` so incrementing it
+  cannot stamp that sentinel. Δt is computed in `i128` so the last legal tick cannot
+  overflow independently. Exhausted or negative checkpoints still deserialize so they
+  can be inspected; call `reset()` to start a new epoch. The engine does not renumber
+  a live network.
 
 ### Changed
 

@@ -134,7 +134,8 @@ fn main() {
 
 The generator is re-exported from this crate (`StdRng`, `SeedableRng`), so the
 example above does not need a direct `rand` dependency. It is not stored on
-`SpikingNetwork` and is not part of a serde checkpoint. Same seed + same
+`SpikingNetwork` and is not part of a serde checkpoint. With the same `StdRng`
+implementation (this crate's `rand` version and target), the same seed + same
 inputs/state replays a run **from the start**. Resuming a mid-run checkpoint
 needs the generator's advanced state, not only the original seed; see
 [docs/rng.md](docs/rng.md).

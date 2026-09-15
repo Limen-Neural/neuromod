@@ -104,7 +104,8 @@ Verify the core public API surface has not been silently removed:
 
 ```bash
 grep -R 'pub struct SpikingNetwork\|pub enum StepError' src/
-grep -R 'pub fn step_with_rng\|pub fn encode_with_rng' src/
+grep -q 'pub fn step_with_rng' src/ \
+  && grep -q 'pub fn encode_with_rng' src/
 grep -R 'pub struct LifNeuron\|pub struct GifNeuron\|pub struct IzhikevichNeuron\|pub struct LapicqueNeuron\|pub struct FitzHughNagumoNeuron\|pub struct HodgkinHuxleyNeuron' src/
 grep -R 'pub struct NeuroModulators\|pub struct SignalProfile\|pub struct Observation' src/
 grep -R 'pub trait GenericReward\|pub struct UnitReward' src/

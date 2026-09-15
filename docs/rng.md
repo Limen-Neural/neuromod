@@ -52,9 +52,12 @@ These public surfaces do not draw from `rand` during execution:
 Serde snapshots therefore do not capture the random stream.
 
 - **Replay from the start:** persist the original seed with the initial network
-  state. The same seed plus the same inputs reproduces the run.
+  state. The same seed plus the same inputs reproduces the run for a given
+  `rand` version and target (`StdRng` is not a portable bitstream across
+  `rand` upgrades).
 - **Resume a mid-run checkpoint:** persist the generator's *advanced* state
-  (not only the original seed). Reconstructing `StdRng` from the starting seed
+  (not only the original seed), or replay every prior draw from that seed
+  before continuing. Reconstructing `StdRng` from the starting seed alone
   rewinds the stream, so later Bernoulli draws and R-STDP updates diverge from
   the uninterrupted run.
 

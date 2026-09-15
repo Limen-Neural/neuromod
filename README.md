@@ -7,7 +7,7 @@
 
 Biologically grounded spiking neural network (SNN) primitives in Rust: a topology-neutral `SpikingNetwork` engine, generic neuromodulators, STDP building blocks, and standalone neuron models.
 
-`neuromod` is a reusable core library: topology-neutral at initialization, dynamically sizable at runtime, and strict about input shape validation. Dual-licensed MIT OR Apache-2.0.
+`neuromod` is a reusable core library: topology-neutral at initialization, dynamically sizable at runtime, and strict about input shape and finiteness validation. Dual-licensed MIT OR Apache-2.0.
 
 ## Highlights
 
@@ -124,12 +124,16 @@ fn main() {
 }
 ```
 
-## Step Errors (Shape Validation)
+## Step Errors (Shape and Finiteness)
 
-`step` validates that `stimuli.len() == num_channels` and returns an error on mismatch.
+`step` is failure-atomic: it checks `stimuli.len() == num_channels` and that every
+stimulus and modulator field is finite **before** incrementing `global_step`,
+storing modulators, updating predictive state, or drawing RNG. A rejected step
+is a no-op. Finite signed values still go through the existing `abs().clamp`
+magnitude path.
 
 ```rust
-use neuromod::{NeuroModulators, SpikingNetwork, StepError};
+use neuromod::{NeuroModulators, NonFiniteClass, SpikingNetwork, StepError};
 
 fn main() {
     let mut network = SpikingNetwork::with_dimensions(32, 4, 32);
@@ -137,11 +141,27 @@ fn main() {
     let bad_stimuli = vec![0.1_f32; 31];
 
     match network.step(&bad_stimuli, &modulators) {
-        Ok(_) => unreachable!("expected length mismatch"),
+        Ok(_) => unreachable!("expected a structured error"),
         Err(StepError::InputLenMismatch { expected, got }) => {
             println!("InputLenMismatch: expected {expected}, got {got}");
         }
+        Err(StepError::NonFiniteStimulus { index, class }) => {
+            println!("NonFiniteStimulus at {index}: {class:?}");
+        }
+        Err(StepError::NonFiniteModulator { field, class }) => {
+            println!("NonFiniteModulator {field:?}: {class:?}");
+        }
     }
+
+    let mut nonfinite = vec![0.1_f32; 32];
+    nonfinite[31] = f32::NAN;
+    assert!(matches!(
+        network.step(&nonfinite, &modulators),
+        Err(StepError::NonFiniteStimulus {
+            index: 31,
+            class: NonFiniteClass::Nan
+        })
+    ));
 }
 ```
 
@@ -262,6 +282,14 @@ them: [ADR 002](https://github.com/Limen-Neural/neuromod/blob/main/docs/adr/002-
 
 ## Migration Notes
 
+### Unreleased — `StepError` names non-finite ingress
+
+`SpikingNetwork::step` now rejects `NaN` / `±∞` stimuli and modulator fields
+before mutating anything. Exhaustive `match`es on `StepError` must handle the
+new `StepError::NonFiniteStimulus` and `StepError::NonFiniteModulator` arms
+(or a `_` wildcard). Length mismatch is still checked first. Finite signed
+inputs are unchanged.
+
 ### 0.6.0 — eligibility traces wired into the engine
 
 **Serialized state survives in self-describing formats.** `LifNeuron::eligibility` and
@@ -319,7 +347,7 @@ bind, so the budget holds exactly under them.
 
 ## Included Components
 
-- Engine: `SpikingNetwork`, `StepError` (LIF + Izhikevich banks)
+- Engine: `SpikingNetwork`, `StepError`, `NonFiniteClass`, `ModulatorField` (LIF + Izhikevich banks)
 - Neuromodulation: `NeuroModulators`, `SignalProfile`, `Observation`, `GenericReward`, `UnitReward`, `apply_neuromodulation`
 - Engine neuron types: `LifNeuron`, `IzhikevichNeuron`
 - Standalone neuron types: `GifNeuron`, `GifParams`, `LapicqueNeuron`, `FitzHughNagumoNeuron`, `HodgkinHuxleyNeuron`

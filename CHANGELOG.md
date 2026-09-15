@@ -4,8 +4,26 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+### Fixed
+
+- **`SpikingNetwork::step` rejects non-finite stimuli and modulators before mutation**
+  (`src/engine.rs`, LIM-1226). The previous entry guard checked only `stimuli.len()`,
+  then incremented `global_step`, stored the modulator snapshot, and ran
+  `abs().clamp(...)` on each channel. Rust's `f32::clamp` does not sanitize `NaN`,
+  so a non-finite sample could poison predictive state, membranes, thresholds, and
+  later STDP. Preflight is now a linear, allocation-free scan of the whole stimulus
+  slice plus the four modulator fields, and any `Err` is returned before the first
+  mutation or RNG draw. Finite signed values, including `0.0` / `-0.0` and
+  `f32::MAX` / `f32::MIN`, still take the existing clamp/range path.
+
 ### Added
 
+- `StepError::NonFiniteStimulus { index, class }` and
+  `StepError::NonFiniteModulator { field, class }`, plus the `NonFiniteClass` and
+  `ModulatorField` enums so the error names the offending index or field and
+  whether the value was `NaN`, `+∞`, or `−∞`. `StepError` now implements
+  `Display` + `Error` (length-mismatch messages included). Exhaustive matches on
+  `StepError` need the new arms; see the README migration notes.
 - **`SparseGifHiddenLayer` — sparse GIF hidden layer** (`src/gif_layer.rs`, #101). An upstream
   port of the reusable GIF layer from the author's `rmems/corinth-canal` repository
   (`src/funnel.rs`), promoted here so the canonical dynamics live in the dynamics crate. It is a

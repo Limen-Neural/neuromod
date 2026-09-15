@@ -69,7 +69,7 @@ Construction is topology-neutral. `new()` is the legacy default (16 LIF, 5 Izhik
 
 `SpikingNetwork::step(stimuli, modulators)` is the normal per-tick entry point for the default engine. Prefer it for full-network simulation; call lower-level neuron APIs only when testing or embedding a single model. Order of work inside `step`:
 
-1. Validate `stimuli.len() == num_channels`, else `Err(StepError::InputLenMismatch)`.
+1. Validate `stimuli.len() == num_channels` and that every stimulus and modulator field is finite, else `Err(StepError::InputLenMismatch | NonFiniteStimulus | NonFiniteModulator)`. Rejection is a no-op: no `global_step` increment, no modulator store, no predictive-state update, no RNG draw.
 2. Recompute per-neuron `decay_rate`/`threshold` targets from the current `NeuroModulators` (dopamine/serotonin/acetylcholine/norepinephrine each pull thresholds/decay in different directions — see formulas in `engine.rs`).
 3. Update `predictive_state` (exponential moving average (EMA) per channel) and derive `pred_errors` ("surprise") that boost synaptic drive.
 4. Stochastically encode `stimuli` into `input_spike_times` (Poisson-style, probability proportional to stimulus magnitude).

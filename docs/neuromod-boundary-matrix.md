@@ -12,7 +12,7 @@ It is a pure computation library: no I/O, no hardware, no application orchestrat
 ## Owns
 
 - Neuron model implementations (Lapicque, LIF, GIF, Izhikevich, FitzHugh-Nagumo, Hodgkin-Huxley)
-- `SpikingNetwork` (including `new()`, `with_dimensions()`, `step()`, state accessors, `StepError`)
+- `SpikingNetwork` (including `new()`, `with_dimensions()`, `step()`, state accessors, `StepError`, `NonFiniteClass`, `ModulatorField`)
 - `NeuroModulators` (dopamine, serotonin, acetylcholine, norepinephrine), `SignalProfile` (neutral `default()`; unit conventions in [docs/signal-units.md](signal-units.md); `hardware_calibrated()` deprecated since 0.6.0), `Observation`, `GenericReward` trait, `UnitReward`, `apply_reward`, `apply_neuromodulation`
 - Foundational plasticity building blocks:
   - Reward-modulated STDP (`rm_stdp`: `EligibilityTrace`, `RmStdpConfig`, constants)

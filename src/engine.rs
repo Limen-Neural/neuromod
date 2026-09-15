@@ -31,11 +31,42 @@ use super::rm_stdp::*;
 const WEIGHT_BUDGET: f32 = 2.0;
 
 /// Errors from [`SpikingNetwork::step`].
-#[derive(Debug, Clone, PartialEq, Eq)]
+///
+/// Every variant is returned **before** the network is mutated: a failed step
+/// is atomic. The enum is exhaustive today; new failure modes will add
+/// variants and are source-breaking for exhaustive matches.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StepError {
     /// `stimuli.len()` did not match the network's `num_channels`.
     InputLenMismatch { expected: usize, got: usize },
+    /// The discrete step counter cannot advance another tick.
+    ///
+    /// Reached only by a restored or caller-written checkpoint whose
+    /// [`SpikingNetwork::global_step`] is already [`i64::MAX`]. Incrementing it
+    /// would panic in debug builds and wrap to [`i64::MIN`] in release, which
+    /// would stamp a negative timestamp and collide with the `-1` “never
+    /// spiked” sentinel. Reported before any neuron state is mutated and
+    /// before any RNG draw.
+    StepCounterExhausted {
+        /// The counter that cannot be advanced.
+        global_step: i64,
+    },
 }
+
+impl core::fmt::Display for StepError {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            Self::InputLenMismatch { expected, got } => {
+                write!(f, "expected {expected} input channels, got {got}")
+            }
+            Self::StepCounterExhausted { global_step } => {
+                write!(f, "step counter is exhausted at {global_step}")
+            }
+        }
+    }
+}
+
+impl core::error::Error for StepError {}
 
 /// Topology-neutral network: LIF bank + Izhikevich bank + neuromodulators.
 ///
@@ -49,11 +80,26 @@ pub struct SpikingNetwork {
     pub iz_neurons: Vec<IzhikevichNeuron>,
     /// Global neuromodulators.
     pub modulators: NeuroModulators,
-    /// Global step counter for STDP timing.
+    /// Discrete engine tick used for STDP timing, in **steps** (not wall-clock).
+    ///
+    /// Starts at `0` on construction. Each successful [`Self::step`] increments
+    /// it by one **after** preflight checks, so a live network stores the index
+    /// of the last completed tick (`1..=i64::MAX`). Spike timestamps
+    /// ([`LifNeuron::last_spike_time`], [`Self::input_spike_times`]) use the
+    /// same unit and range, with `-1` reserved for “never spiked.”
+    ///
+    /// A tick that would overflow [`i64::MAX`] returns
+    /// [`StepError::StepCounterExhausted`] without mutating the network. The
+    /// counter is not reset automatically; call [`Self::reset`] to start a new
+    /// epoch. Exhausted checkpoints still deserialize so they can be inspected.
     pub global_step: i64,
     /// Number of input channels expected by `step`.
     pub num_channels: usize,
-    /// Pre-synaptic spike times for each input channel.
+    /// Pre-synaptic spike times for each input channel, in engine steps.
+    ///
+    /// `-1` means the channel has never spiked; a non-negative value is the
+    /// [`Self::global_step`] at which it last spiked (`1..=i64::MAX` on a live
+    /// network).
     pub input_spike_times: Vec<i64>,
     /// Per-channel exponential moving average of input stimuli.
     pub predictive_state: Vec<f32>,
@@ -152,25 +198,34 @@ impl SpikingNetwork {
     ///
     /// - `stimuli.len()` must equal [`Self::num_channels`], else
     ///   [`StepError::InputLenMismatch`].
+    /// - [`Self::global_step`] is a discrete tick counter in **steps**, range
+    ///   `0..=i64::MAX`. A call that would increment past [`i64::MAX`] returns
+    ///   [`StepError::StepCounterExhausted`] and leaves the network unchanged.
+    ///   Debug and release builds share this behavior (`checked_add`, not
+    ///   wrapping or panicking arithmetic). The counter is not reset
+    ///   automatically; call [`Self::reset`] to start a new epoch.
+    /// - Preflight checks run before any mutation or RNG draw, so a rejected
+    ///   step is atomic.
     /// - Returns the indices of **LIF** neurons that fired this step (Izhikevich
     ///   spikes are not listed in the return value).
     ///
     /// # Order of work
     ///
-    /// 1. Store `modulators` and derive stress / learning rates.
-    /// 2. Recompute LIF targets from neuromodulators: assign `decay_rate`
+    /// 1. Preflight: reject a length mismatch or an exhausted `global_step`.
+    /// 2. Store `modulators` and derive stress / learning rates.
+    /// 3. Recompute LIF targets from neuromodulators: assign `decay_rate`
     ///    directly; soft-update `threshold` toward its target (learning-rate blend).
-    /// 3. Update per-channel predictive EMA and surprise (`pred_errors`).
-    /// 4. For each channel with `|stimuli| > 0.01`, run a Bernoulli trial
+    /// 4. Update per-channel predictive EMA and surprise (`pred_errors`).
+    /// 5. For each channel with `|stimuli| > 0.01`, run a Bernoulli trial
     ///    with probability `clamp(|stimuli|, 0.0, 1.0)` and stamp
     ///    `input_spike_times` on success.
-    /// 5. Integrate each LIF neuron (weighted stimuli + surprise), then `check_fire`.
-    /// 6. Lateral inhibition on non-firing LIF cells if anyone spiked.
-    /// 7. R-STDP on LIF weights (`apply_stdp`): decay and accumulate every
+    /// 6. Integrate each LIF neuron (weighted stimuli + surprise), then `check_fire`.
+    /// 7. Lateral inhibition on non-firing LIF cells if anyone spiked.
+    /// 8. R-STDP on LIF weights (`apply_stdp`): decay and accumulate every
     ///    [`crate::EligibilityTrace`] regardless of dopamine, then convert traces
     ///    into weight changes only when the dopamine-derived learning rate is
     ///    above ≈ 0.
-    /// 8. Renormalize LIF weights toward an L1 budget, then clamp to the
+    /// 9. Renormalize LIF weights toward an L1 budget, then clamp to the
     ///    [`RmStdpConfig`] bounds. Applies only to a neuron whose weights already
     ///    sum above `1e-6`; a blank neuron stays blank rather than being scaled
     ///    up to the budget, and a synapse at exactly zero is left alone so a
@@ -180,7 +235,7 @@ impl SpikingNetwork {
     ///    equals the budget — so the L1 sum lands on budget exactly. A binding
     ///    bound is still enforced, leaving the sum off budget in whichever
     ///    direction it binds.
-    /// 9. Drive each Izhikevich neuron from mean LIF membrane potential + dopamine.
+    /// 10. Drive each Izhikevich neuron from mean LIF membrane potential + dopamine.
     ///
     /// # Examples
     ///
@@ -198,6 +253,16 @@ impl SpikingNetwork {
     ///
     /// let spikes = net.step(&[0.5; 4], &modulators).expect("length matches");
     /// assert!(spikes.iter().all(|&i| i < 8));
+    ///
+    /// // Exhausted counter → structured error, no wrap, no panic
+    /// net.global_step = i64::MAX;
+    /// assert_eq!(
+    ///     net.step(&[0.5; 4], &modulators),
+    ///     Err(StepError::StepCounterExhausted {
+    ///         global_step: i64::MAX
+    ///     })
+    /// );
+    /// assert_eq!(net.global_step, i64::MAX);
     /// ```
     pub fn step(
         &mut self,
@@ -211,7 +276,17 @@ impl SpikingNetwork {
             });
         }
 
-        self.global_step += 1;
+        // Checked before any state is touched or any RNG is drawn: a restored
+        // checkpoint can carry a counter at i64::MAX, and incrementing it
+        // below would panic in debug or wrap to i64::MIN in release, stamping
+        // a negative timestamp that collides with the -1 never-spiked sentinel.
+        // Failing here leaves the network untouched rather than half-stepped.
+        self.global_step =
+            self.global_step
+                .checked_add(1)
+                .ok_or(StepError::StepCounterExhausted {
+                    global_step: self.global_step,
+                })?;
         self.modulators = *modulators;
 
         let stress_multiplier = (1.0 - self.modulators.norepinephrine).max(0.1);
@@ -380,7 +455,14 @@ impl SpikingNetwork {
                     && post_time >= 0
                     && (post_time == now || (pre_time == now && post_time < pre_time))
                 {
-                    trace.accumulate((post_time - pre_time) as f32);
+                    // Engine-stamped times are `1..=i64::MAX` (or a planted `0`),
+                    // so this subtraction cannot overflow. `checked_sub` still
+                    // refuses a deserialized pair that would wrap independently
+                    // of the counter increment — the kernel then never sees a
+                    // wrapping `i64` cast to `f32`.
+                    if let Some(dt) = post_time.checked_sub(pre_time) {
+                        trace.accumulate(dt as f32);
+                    }
                 }
 
                 if rewarding && trace.value != 0.0 {
@@ -459,6 +541,7 @@ impl Default for SpikingNetwork {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::BTreeSet;
 
     #[test]
     fn test_network_creation_defaults() {
@@ -529,6 +612,315 @@ mod tests {
         assert_eq!(network.global_step, before_step);
         assert_eq!(network.predictive_state, before_pred);
         assert_eq!(network.modulators, before_mod);
+    }
+
+    // --- global_step exhaustion (LIM-1227) ---
+
+    /// Names every [`StepError`] variant in an exhaustive match so adding one
+    /// breaks the build here and must be listed in [`all_step_error_variants`].
+    #[expect(
+        clippy::match_same_arms,
+        reason = "one arm per variant is the point; collapsing them defeats the guard"
+    )]
+    fn assert_step_error_variants_exhaustive(e: &StepError) {
+        match e {
+            StepError::InputLenMismatch { .. } => {}
+            StepError::StepCounterExhausted { .. } => {}
+        }
+    }
+
+    fn all_step_error_variants() -> [StepError; 2] {
+        [
+            StepError::InputLenMismatch {
+                expected: 4,
+                got: 2,
+            },
+            StepError::StepCounterExhausted {
+                global_step: i64::MAX,
+            },
+        ]
+    }
+
+    fn capture_engine(net: &SpikingNetwork) -> EngineSnapshot {
+        EngineSnapshot {
+            global_step: net.global_step,
+            modulators: net.modulators,
+            input_spike_times: net.input_spike_times.clone(),
+            predictive_state: net.predictive_state.clone(),
+            stdp_config: net.stdp_config,
+            neurons: net.neurons.clone(),
+            iz_neurons: net.iz_neurons.clone(),
+        }
+    }
+
+    struct EngineSnapshot {
+        global_step: i64,
+        modulators: NeuroModulators,
+        input_spike_times: Vec<i64>,
+        predictive_state: Vec<f32>,
+        stdp_config: RmStdpConfig,
+        neurons: Vec<LifNeuron>,
+        iz_neurons: Vec<IzhikevichNeuron>,
+    }
+
+    fn assert_engine_unchanged(before: &EngineSnapshot, net: &SpikingNetwork) {
+        assert_eq!(before.global_step, net.global_step);
+        assert_eq!(before.modulators, net.modulators);
+        assert_eq!(before.input_spike_times, net.input_spike_times);
+        assert_eq!(before.predictive_state, net.predictive_state);
+        assert_eq!(before.stdp_config, net.stdp_config);
+        assert_eq!(before.neurons.len(), net.neurons.len());
+        for (a, b) in before.neurons.iter().zip(&net.neurons) {
+            assert_eq!(a.membrane_potential, b.membrane_potential);
+            assert_eq!(a.decay_rate, b.decay_rate);
+            assert_eq!(a.threshold, b.threshold);
+            assert_eq!(a.base_threshold, b.base_threshold);
+            assert_eq!(a.last_spike, b.last_spike);
+            assert_eq!(a.weights, b.weights);
+            assert_eq!(a.last_spike_time, b.last_spike_time);
+            assert_eq!(a.eligibility, b.eligibility);
+        }
+        assert_eq!(before.iz_neurons.len(), net.iz_neurons.len());
+        for (a, b) in before.iz_neurons.iter().zip(&net.iz_neurons) {
+            assert_eq!(a.v, b.v);
+            assert_eq!(a.u, b.u);
+            assert_eq!(a.last_spike_time, b.last_spike_time);
+            assert_eq!(a.a, b.a);
+            assert_eq!(a.b, b.b);
+            assert_eq!(a.c, b.c);
+            assert_eq!(a.d, b.d);
+        }
+    }
+
+    #[test]
+    fn step_counter_error_variants_render_distinct_messages() {
+        let variants = all_step_error_variants();
+        let messages: Vec<String> = variants.iter().map(ToString::to_string).collect();
+        for (v, m) in variants.iter().zip(&messages) {
+            assert_step_error_variants_exhaustive(v);
+            assert!(!m.is_empty(), "{v:?} rendered an empty message");
+        }
+        let unique: BTreeSet<&str> = messages.iter().map(String::as_str).collect();
+        assert_eq!(
+            unique.len(),
+            messages.len(),
+            "each StepError variant must render a distinct message, got {messages:?}"
+        );
+    }
+
+    #[test]
+    fn step_counter_at_i64_max_minus_one_completes_and_stamps_max() {
+        // The last legal tick: incrementing MAX-1 is defined in both debug
+        // (no overflow panic) and release (no wrap). Spike times land on
+        // i64::MAX, never on the -1 sentinel.
+        let mut network = SpikingNetwork::with_dimensions(1, 1, 1);
+        network.global_step = i64::MAX - 1;
+        network.neurons[0].membrane_potential = 10.0;
+        network.neurons[0].threshold = 0.05;
+        let modulators = NeuroModulators::default();
+
+        let spikes = network
+            .step(&[0.0], &modulators)
+            .expect("MAX-1 must still tick");
+
+        assert_eq!(network.global_step, i64::MAX);
+        assert_eq!(spikes, vec![0]);
+        assert_eq!(network.neurons[0].last_spike_time, i64::MAX);
+        assert_ne!(network.neurons[0].last_spike_time, -1);
+        assert_eq!(
+            network.input_spike_times[0], -1,
+            "zero stimulus must leave the never-spiked sentinel in place"
+        );
+    }
+
+    #[test]
+    fn step_counter_exhausted_is_reported_without_mutating_state() {
+        // Reachable from a restored checkpoint or a public-field write.
+        // Incrementing past i64::MAX would panic in debug and wrap to i64::MIN
+        // in release, which would make every later last_spike_time comparison
+        // collide with the never-spiked class of timestamps.
+        let mut network = SpikingNetwork::with_dimensions(2, 1, 2);
+        network.global_step = i64::MAX;
+        network.predictive_state = vec![0.25, 0.5];
+        network.neurons[0].membrane_potential = 0.4;
+        network.neurons[0].eligibility[0].value = 0.3;
+        network.iz_neurons[0].v = -40.0;
+        let modulators = NeuroModulators {
+            dopamine: 0.9,
+            ..Default::default()
+        };
+        let before = capture_engine(&network);
+
+        let err = network.step(&[1.0, 1.0], &modulators).unwrap_err();
+
+        assert_eq!(
+            err,
+            StepError::StepCounterExhausted {
+                global_step: i64::MAX
+            }
+        );
+        assert!(err.to_string().contains("exhausted"));
+        assert_engine_unchanged(&before, &network);
+        assert_eq!(network.neurons[0].last_spike_time, -1);
+        assert_eq!(network.input_spike_times, vec![-1, -1]);
+    }
+
+    #[test]
+    fn step_counter_exhausted_checkpoint_still_deserializes() {
+        // Exhaustion is recoverable at the checkpoint boundary: serde must
+        // still load i64::MAX so the network can be inspected or reset.
+        // Validation does *not* reject the state on the way in.
+        let mut network = SpikingNetwork::with_dimensions(1, 1, 1);
+        network.global_step = i64::MAX;
+        let json = serde_json::to_value(&network).expect("network serializes");
+        let mut restored: SpikingNetwork =
+            serde_json::from_value(json).expect("exhausted checkpoint still deserializes");
+        assert_eq!(restored.global_step, i64::MAX);
+
+        let before = capture_engine(&restored);
+        let err = restored
+            .step(&[0.0], &NeuroModulators::default())
+            .unwrap_err();
+        assert_eq!(
+            err,
+            StepError::StepCounterExhausted {
+                global_step: i64::MAX
+            }
+        );
+        assert_engine_unchanged(&before, &restored);
+    }
+
+    #[test]
+    fn step_counter_preserves_never_spiked_sentinel() {
+        let mut network = SpikingNetwork::with_dimensions(1, 1, 1);
+        network.global_step = i64::MAX - 1;
+        assert_eq!(network.neurons[0].last_spike_time, -1);
+        assert_eq!(network.input_spike_times[0], -1);
+
+        network
+            .step(&[0.0], &NeuroModulators::default())
+            .expect("MAX-1 must still tick");
+
+        assert_eq!(network.global_step, i64::MAX);
+        assert_eq!(
+            network.neurons[0].last_spike_time, -1,
+            "a silent neuron must keep the never-spiked sentinel at the boundary"
+        );
+        assert_eq!(network.input_spike_times[0], -1);
+    }
+
+    #[test]
+    fn step_counter_rstdp_delta_at_i64_max_does_not_overflow() {
+        // The last legal tick stamps a pre spike at i64::MAX. A planted post
+        // 20 steps earlier keeps Δt inside the kernel's numeric range so the
+        // depression is observable; `checked_sub` is what refuses a wrapping
+        // pair. The extreme `0 - i64::MAX` subtraction is still defined.
+        assert_eq!(0i64.checked_sub(i64::MAX), Some(-i64::MAX));
+
+        let mut network = SpikingNetwork::with_dimensions(1, 1, 1);
+        network.global_step = i64::MAX - 1;
+        network.neurons[0].weights = vec![0.0];
+        network.neurons[0].last_spike_time = i64::MAX - 20;
+        let no_reward = NeuroModulators::default();
+
+        network
+            .step(&[1.0], &no_reward)
+            .expect("MAX-1 must still tick");
+
+        assert_eq!(network.global_step, i64::MAX);
+        assert_eq!(network.input_spike_times[0], i64::MAX);
+        assert_eq!(
+            network.neurons[0].last_spike_time,
+            i64::MAX - 20,
+            "must not have fired"
+        );
+        assert!(
+            network.neurons[0].eligibility[0].value < 0.0,
+            "post-before-pre at the i64::MAX boundary is depression, got {}",
+            network.neurons[0].eligibility[0].value
+        );
+        assert!(network.neurons[0].eligibility[0].value.is_finite());
+    }
+
+    #[test]
+    fn step_counter_rstdp_same_step_coincidence_at_i64_max() {
+        let mut network = SpikingNetwork::with_dimensions(1, 1, 1);
+        network.global_step = i64::MAX - 1;
+        network.neurons[0].weights = vec![0.0];
+        network.neurons[0].membrane_potential = 10.0;
+        network.neurons[0].threshold = 0.05;
+
+        network
+            .step(&[1.0], &NeuroModulators::default())
+            .expect("MAX-1 must still tick");
+
+        assert_eq!(network.global_step, i64::MAX);
+        assert_eq!(network.input_spike_times[0], i64::MAX);
+        assert_eq!(network.neurons[0].last_spike_time, i64::MAX);
+        assert!(
+            network.neurons[0].eligibility[0].value > 0.0,
+            "pre and post both at i64::MAX is Δt = 0 potentiation, got {}",
+            network.neurons[0].eligibility[0].value
+        );
+        assert!(network.neurons[0].eligibility[0].value.is_finite());
+    }
+
+    #[test]
+    fn step_counter_rstdp_skips_sentinel_pairs() {
+        // A -1 timestamp is "never spiked", not a legal Δt operand. Even at
+        // i64::MAX the engine must not treat it as a coincidence.
+        let mut network = SpikingNetwork::with_dimensions(1, 1, 1);
+        network.global_step = i64::MAX - 1;
+        network.neurons[0].weights = vec![0.0];
+        network.neurons[0].last_spike_time = -1;
+        network.neurons[0].eligibility[0].value = 0.0;
+
+        network
+            .step(&[1.0], &NeuroModulators::default())
+            .expect("MAX-1 must still tick");
+
+        assert_eq!(network.input_spike_times[0], i64::MAX);
+        assert_eq!(network.neurons[0].last_spike_time, -1);
+        assert_eq!(
+            network.neurons[0].eligibility[0].value, 0.0,
+            "a never-spiked post must not accumulate against a pre at i64::MAX"
+        );
+    }
+
+    #[test]
+    fn step_counter_rstdp_skips_wrapped_negative_timestamps() {
+        // A deserialized wrap (`i64::MIN`) must not reach `post - pre`, which
+        // would overflow independently of the counter increment.
+        let mut network = SpikingNetwork::with_dimensions(1, 1, 1);
+        network.global_step = i64::MAX - 1;
+        network.neurons[0].weights = vec![0.0];
+        network.neurons[0].last_spike_time = i64::MIN;
+        network.neurons[0].eligibility[0].value = 0.0;
+
+        network
+            .step(&[1.0], &NeuroModulators::default())
+            .expect("MAX-1 must still tick");
+
+        assert_eq!(network.input_spike_times[0], i64::MAX);
+        assert_eq!(network.neurons[0].last_spike_time, i64::MIN);
+        assert_eq!(
+            network.neurons[0].eligibility[0].value, 0.0,
+            "a wrapped-negative post must not participate in Δt"
+        );
+    }
+
+    #[test]
+    fn step_counter_checked_add_at_i64_max() {
+        // The operation `step` uses. Identical with overflow checks on or off:
+        // wrapping_add would yield i64::MIN, which is a negative timestamp.
+        assert_eq!(i64::MAX.checked_add(1), None);
+        assert_eq!((i64::MAX - 1).checked_add(1), Some(i64::MAX));
+        assert_eq!(i64::MAX.wrapping_add(1), i64::MIN);
+        assert_ne!(
+            i64::MIN,
+            -1,
+            "wrap is not the never-spiked sentinel, but both are negative"
+        );
     }
 
     #[test]

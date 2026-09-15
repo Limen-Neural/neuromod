@@ -4,6 +4,23 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+### Fixed
+
+- **`SpikingNetwork::step` no longer panics or wraps at `i64::MAX`.** A restored or
+  caller-written checkpoint whose `global_step` is already `i64::MAX` now returns
+  `StepError::StepCounterExhausted` before any mutation or RNG draw (LIM-1227). Debug and
+  release share this checked behavior. Spike timestamps stay in `1..=i64::MAX` or the `-1`
+  never-spiked sentinel; wrapping to `i64::MIN` is refused. Reward-modulated STDP uses
+  `checked_sub` for Δt so the last legal tick cannot overflow independently. Exhausted
+  checkpoints still deserialize so they can be inspected; call `reset()` to start a new
+  epoch. The engine does not renumber a live network.
+
+### Changed
+
+- **`StepError` gained `StepCounterExhausted`.** Exhaustive matches that only named
+  `InputLenMismatch` need a new arm. `StepError` now also implements `Display` and
+  `std::error::Error`. Normal non-exhausted checkpoints are unchanged.
+
 ### Added
 
 - **`SparseGifHiddenLayer` — sparse GIF hidden layer** (`src/gif_layer.rs`, #101). An upstream

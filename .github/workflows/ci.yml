@@ -90,6 +90,15 @@ jobs:
           cargo install cargo-nextest --locked
           cargo nextest run --all-features --no-fail-fast
 
+      # Debug already ran the same tests with overflow checks on. This rebuilds
+      # just the lib tests with wrapping arithmetic so a regression to `+= 1`
+      # cannot hide behind a debug panic. LTO is left off (dev profile).
+      - name: Step-counter overflow semantics (overflow-checks off)
+        if: runner.os == 'Linux' && steps.changes.outputs.rust == 'true'
+        env:
+          RUSTFLAGS: "-C overflow-checks=off"
+        run: cargo test --all-features --lib step_counter_
+
       - name: Feature matrix (cargo-hack)
         if: runner.os == 'Linux' && steps.changes.outputs.rust == 'true'
         run: |

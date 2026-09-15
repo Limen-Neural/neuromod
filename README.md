@@ -117,9 +117,7 @@ The only live stochastic work inside `step` is Bernoulli encoding of
 For replay, inject one caller RNG and reuse it for the whole run:
 
 ```rust
-use neuromod::{NeuroModulators, SpikingNetwork};
-use rand::rngs::StdRng;
-use rand::SeedableRng;
+use neuromod::{NeuroModulators, SeedableRng, SpikingNetwork, StdRng};
 
 fn main() {
     let mut network = SpikingNetwork::new();
@@ -134,9 +132,11 @@ fn main() {
 }
 ```
 
-The generator is not stored on `SpikingNetwork` and is not part of a serde
-checkpoint. Same seed + same inputs/state replays the same trace; see
-[docs/rng.md](docs/rng.md) for the full stochastic-vs-deterministic inventory.
+The generator is re-exported from this crate (`StdRng`, `SeedableRng`), so the
+example above does not need a direct `rand` dependency. It is not stored on
+`SpikingNetwork` and is not part of a serde checkpoint. Same seed + same
+inputs/state replays the same trace; see [docs/rng.md](docs/rng.md) for the
+full stochastic-vs-deterministic inventory.
 
 ## Dynamic Dimensions
 
@@ -351,7 +351,7 @@ bind, so the budget holds exactly under them.
 - Engine: `SpikingNetwork`, `StepError` (LIF + Izhikevich banks)
 - Neuromodulation: `NeuroModulators`, `SignalProfile`, `Observation`, `GenericReward`, `UnitReward`, `apply_neuromodulation`
 - Engine neuron types: `LifNeuron`, `IzhikevichNeuron`
-- Stochastic helpers: `lif::PoissonEncoder` (`encode` / `encode_with_rng`)
+- Stochastic helpers: `lif::PoissonEncoder` (`encode` / `encode_with_rng`); re-exported `Rng`, `SeedableRng`, `StdRng` for caller-injected streams
 - Standalone neuron types: `GifNeuron`, `GifParams`, `LapicqueNeuron`, `FitzHughNagumoNeuron`, `HodgkinHuxleyNeuron`
 - Standalone layer: `SparseGifHiddenLayer`, `SparseGifLayerConfig`, `SpikeRaster`, `GifLayerError`
 - Learning/plasticity:

@@ -20,10 +20,11 @@ dynamics:
 | [`lif::PoissonEncoder::encode`](../src/lif.rs) | `encode` uses the thread-local RNG | [`PoissonEncoder::encode_with_rng`](../src/lif.rs) | One Bernoulli trial per output step at the clamped intensity |
 
 `step` and `encode` remain source-compatible. The injected methods take
-`rng: &mut impl rand::Rng` (`R: Rng + ?Sized` in the signature so `&mut dyn Rng`
-also works). Pass the same `&mut` generator on every step of a run; the
-injected path does not construct, reseed, or store an RNG per neuron or per
-step.
+`rng: &mut impl Rng` (`R: Rng + ?Sized`, so `&mut dyn Rng` also works).
+`Rng`, `SeedableRng`, and `StdRng` are re-exported from this crate so a
+downstream `neuromod` dependency is enough to seed a stream. Pass the same
+`&mut` generator on every step of a run; the injected path does not construct,
+reseed, or store an RNG per neuron or per step.
 
 A length-mismatch error from `step_with_rng` returns before any draw, so a
 rejected step does not advance the caller stream.

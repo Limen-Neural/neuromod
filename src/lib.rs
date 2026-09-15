@@ -100,6 +100,7 @@ pub use lif::LifNeuron;
 pub use modulators::{
     GenericReward, NeuroModulators, Observation, SignalProfile, UnitReward, apply_neuromodulation,
 };
+pub use rand::{Rng, SeedableRng, rngs::StdRng};
 pub use rm_stdp::{EligibilityTrace, RmStdpConfig};
 
 /// Number of input channels supported by default.

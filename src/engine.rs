@@ -232,9 +232,7 @@ impl SpikingNetwork {
     /// # Examples
     ///
     /// ```
-    /// use neuromod::{NeuroModulators, SpikingNetwork};
-    /// use rand::rngs::StdRng;
-    /// use rand::SeedableRng;
+    /// use neuromod::{NeuroModulators, SeedableRng, SpikingNetwork, StdRng};
     ///
     /// let mut net = SpikingNetwork::with_dimensions(4, 1, 4);
     /// let modulators = NeuroModulators::default();
@@ -1444,6 +1442,17 @@ mod tests {
             continuing.input_spike_times, reseeded.input_spike_times,
             "one caller stream must keep advancing instead of reseeding per step"
         );
+    }
+
+    #[test]
+    fn step_with_rng_accepts_dyn_rng() {
+        let mut network = rng_test_network();
+        let modulators = NeuroModulators::default();
+        let mut rng = StdRng::seed_from_u64(3);
+        let rng: &mut dyn Rng = &mut rng;
+        network
+            .step_with_rng(&[0.5; 8], &modulators, rng)
+            .expect("length matches");
     }
 
     #[test]

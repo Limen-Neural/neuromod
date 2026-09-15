@@ -20,6 +20,7 @@
 
 # Compiled output
 /target/
+examples/crates-io-standalone/target/
 
 # IDE / editor
 .idea/

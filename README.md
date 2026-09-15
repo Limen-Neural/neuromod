@@ -342,13 +342,36 @@ See the full planning documents:
 
 ## Examples
 
-Run included examples:
+In-repo examples use the **local** crate (clone this repository):
 
 ```bash
 cargo run --example basic
 cargo run --example rstdp_demo
 cargo run --example sparse_gif_layer
 ```
+
+### Standalone crates.io demo
+
+Outsiders who are not on the Limen git graph can depend only on crates.io. The runnable package is [`examples/crates-io-standalone`](examples/crates-io-standalone) — a detached Cargo workspace so it cannot pick up this path crate.
+
+```bash
+cd examples/crates-io-standalone
+cargo run
+```
+
+Or start a binary anywhere with this `Cargo.toml` (no `git =`, no `path =`):
+
+```toml
+[package]
+name = "neuromod-crates-io-demo"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+neuromod = "0.5"
+```
+
+`neuromod = "0.5"` stays on the published 0.5.x line. This repository's 0.6.0 APIs (wired R-STDP, `SparseGifHiddenLayer`) are not on crates.io until that tag is published — use the in-repo examples above for those.
 
 ## Development
 

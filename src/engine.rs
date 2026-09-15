@@ -1613,11 +1613,13 @@ mod tests {
 
     #[test]
     fn test_serde_constructed_non_finite_inputs_are_rejected() {
-        // JSON has no NaN token; overflowed exponents deserialize as ±inf.
+        // JSON has no NaN/Inf token. A magnitude past `f32::MAX` (~3.4e38) is
+        // still a finite JSON/`f64` number and deserializes to `±inf` as `f32`.
+        // (A magnitude past `f64::MAX` is rejected by serde_json entirely.)
         // NaN is reconstituted from a serde-decoded IEEE-754 bit pattern so
         // the invalid payload still arrived through Deserialize.
-        let pos_inf: f32 = serde_json::from_str("1e309").expect("overflow is +inf");
-        let neg_inf: f32 = serde_json::from_str("-1e309").expect("overflow is -inf");
+        let pos_inf: f32 = serde_json::from_str("1e39").expect("f32 overflow is +inf");
+        let neg_inf: f32 = serde_json::from_str("-1e39").expect("f32 overflow is -inf");
         assert_eq!(
             NonFiniteClass::classify(pos_inf),
             Some(NonFiniteClass::PosInfinity)
@@ -1643,7 +1645,7 @@ mod tests {
         let before = capture_network(&restored);
 
         let inf_stimuli: Vec<f32> =
-            serde_json::from_str("[0.1, 1e309, 0.2]").expect("stimulus frame deserializes");
+            serde_json::from_str("[0.1, 1e39, 0.2]").expect("stimulus frame deserializes");
         assert_eq!(
             restored.step(&inf_stimuli, &NeuroModulators::default()),
             Err(StepError::NonFiniteStimulus {
@@ -1654,7 +1656,7 @@ mod tests {
         assert_network_unchanged(&restored, &before);
 
         let inf_mods: NeuroModulators = serde_json::from_str(
-            r#"{"dopamine":0.0,"serotonin":-1e309,"acetylcholine":0.0,"norepinephrine":0.0}"#,
+            r#"{"dopamine":0.0,"serotonin":-1e39,"acetylcholine":0.0,"norepinephrine":0.0}"#,
         )
         .expect("modulator snapshot deserializes");
         assert_eq!(

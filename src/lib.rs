@@ -100,11 +100,10 @@ pub use lif::LifNeuron;
 pub use modulators::{
     GenericReward, NeuroModulators, Observation, SignalProfile, UnitReward, apply_neuromodulation,
 };
-pub use rand::{Rng, rngs::StdRng};
-// Hidden so rustdoc does not copy rand's SeedableRng page, which contains
-// "non-crypto" and fails the domain-hygiene grep on `\bcrypto\b`.
-#[doc(hidden)]
+/// Bring this into scope to call [`StdRng::seed_from_u64`].
+#[doc(no_inline)]
 pub use rand::SeedableRng;
+pub use rand::{Rng, rngs::StdRng};
 pub use rm_stdp::{EligibilityTrace, RmStdpConfig};
 
 /// Number of input channels supported by default.

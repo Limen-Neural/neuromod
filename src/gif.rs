@@ -165,9 +165,10 @@ pub struct GifNeuron {
     ///
     /// This is the value [`Self::check_for_spike`] reads. Adaptation still
     /// inflates it: `θ_eff = threshold + w · adaptation_scale`. Seeded from
-    /// [`Self::base_threshold`] at construction; neuromodulation (for example
-    /// [`crate::apply_neuromodulation`]) should move this field, not the
-    /// restore point.
+    /// [`Self::base_threshold`] at construction; neuromodulation should move
+    /// this field, not the restore point. Do not pass it to
+    /// [`crate::apply_neuromodulation`]: that helper clamps to `0.05..=0.50`,
+    /// below the GIF default of [`GIF_BASE_THRESHOLD`].
     pub threshold: f32,
     /// Resting threshold baseline — the restore point for dynamic modulation.
     ///
@@ -382,14 +383,14 @@ mod tests {
     #[test]
     fn mutating_threshold_changes_when_the_neuron_fires() {
         // Default θ_0 is GIF_BASE_THRESHOLD; adaptation is 0 so θ_eff == threshold.
-        let mut at_rest = GifNeuron::new();
+        let mut at_rest = GifNeuron::default();
         at_rest.membrane_potential = at_rest.base_threshold;
         assert!(
             at_rest.check_for_spike(0),
             "membrane at default θ_0 must fire"
         );
 
-        let mut raised = GifNeuron::new();
+        let mut raised = GifNeuron::default();
         raised.membrane_potential = raised.base_threshold;
         raised.threshold = raised.base_threshold + 0.25;
         assert!(
@@ -397,7 +398,7 @@ mod tests {
             "raising threshold above the membrane must suppress the spike"
         );
 
-        let mut lowered = GifNeuron::new();
+        let mut lowered = GifNeuron::default();
         lowered.membrane_potential = lowered.base_threshold - 0.2;
         lowered.threshold = lowered.base_threshold - 0.2;
         assert!(
@@ -408,7 +409,7 @@ mod tests {
 
     #[test]
     fn base_threshold_is_restore_point_not_live_firing_knob() {
-        let mut neuron = GifNeuron::new();
+        let mut neuron = GifNeuron::default();
         neuron.membrane_potential = neuron.threshold;
         neuron.base_threshold = 1.0e6;
         assert!(

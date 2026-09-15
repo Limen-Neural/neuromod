@@ -24,6 +24,8 @@
 //!    (wired into the engine) and classical Hebbian STDP (standalone).
 //! 6. Standalone models ([`lapicque`], [`gif`], [`fitzhugh_nagumo`], [`hodgkin_huxley`])
 //!    for research use outside the engine.
+//! 7. [`gif_layer`] — [`SparseGifHiddenLayer`], a structure-of-arrays bank of GIF
+//!    neurons with deterministic sparse fan-in and batched execution.
 //!
 //! ## Engine vs standalone models
 //!
@@ -61,6 +63,7 @@
 pub mod engine;
 pub mod fitzhugh_nagumo;
 pub mod gif;
+pub mod gif_layer;
 pub mod hebbian;
 pub mod hodgkin_huxley;
 pub mod izhikevich;
@@ -71,7 +74,8 @@ pub mod rm_stdp;
 
 pub use engine::{SpikingNetwork, StepError};
 pub use fitzhugh_nagumo::FitzHughNagumoNeuron;
-pub use gif::GifNeuron;
+pub use gif::{GifNeuron, GifParams};
+pub use gif_layer::{GifLayerError, SparseGifHiddenLayer, SparseGifLayerConfig, SpikeRaster};
 pub use hebbian::{HebbianIzhikevichNetwork, StdpParams, apply_classical_stdp};
 pub use hodgkin_huxley::HodgkinHuxleyNeuron;
 pub use izhikevich::IzhikevichNeuron;

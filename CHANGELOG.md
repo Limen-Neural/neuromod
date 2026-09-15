@@ -4,6 +4,46 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+### Added
+
+- **`SparseGifHiddenLayer` — sparse GIF hidden layer** (`src/gif_layer.rs`, #101). An upstream
+  port of the reusable GIF layer from the author's `rmems/corinth-canal` repository
+  (`src/funnel.rs`), promoted here so the canonical dynamics live in the dynamics crate. It is a
+  standalone layer abstraction, not an engine bank:
+  - Structure-of-arrays state — `membrane` / `adaptation` / `last_spike_time` are parallel `Vec`s
+    indexed by neuron, never a `Vec<GifNeuron>`.
+  - Layer-owned CSR fan-in topology (`offsets`, `sources`, `weights`), generated deterministically
+    from a seeded SplitMix64 stream with a per-neuron sub-stream. Sub-streams (rather than one
+    shared stream) mean a neuron's fan-in does not shift when the layer grows. An internal
+    SplitMix64 is used instead of a `rand` generator so topology stays reproducible across `rand`
+    releases and platforms — no new dependency was added.
+  - Batched `run()` over spike trains, generic over `AsRef<[f32]>` so `&[Vec<f32>]` and `&[&[f32]]`
+    both work, plus single-step `step` / allocation-free `step_into`. Execution is a sequential
+    fold with no threading and no order-varying reduction, so identical input yields bit-identical
+    output.
+  - `SparseGifLayerConfig`, `SpikeRaster`, and `GifLayerError` round out the surface;
+    `from_topology` accepts an explicit caller-supplied topology, and the layer derives
+    `Serialize`/`Deserialize` for checkpointing.
+  - The layer takes **no** `NeuroModulators`. A GIF hidden layer is a pure integrate-and-fire
+    structure with no reward signal or dopamine gate, and wiring one in would perturb the numerics
+    a port is meant to preserve. `weights_mut()` and `params_mut()` are the hooks for external
+    modulation or plasticity.
+  - Regression fixtures are **internal goldens** produced by this implementation (topology,
+    weights, spike raster, and final SoA state all pinned), plus edge cases: zero fan-in, zero
+    input, fully dense fan-in, single neuron, zero-neuron layer, and empty spike train. True
+    cross-repo bit-parity vectors against `corinth-canal` are blocked on access to that repository
+    and must land in a follow-up.
+  - Out of scope and deliberately not ported: `SignedSplitBankBridge`, telemetry-funnel
+    orchestration, checkpoint parsing, and encoding schemas — all downstream concerns.
+- `GifParams` — the shared GIF parameter block and dynamics (`integrate`, `check_for_spike`,
+  `effective_threshold`), with the default constants exposed as `GIF_LEAK`, `GIF_DRIVE_SCALE`,
+  `GIF_BASE_THRESHOLD`, and friends. `GifNeuron` now delegates to it via new `GifNeuron::from_params`
+  / `GifNeuron::params`, so the single-neuron and structure-of-arrays paths execute the same
+  arithmetic in the same order. A test pins them together bitwise. No behavior change to `GifNeuron`;
+  its fields and methods are unchanged.
+- `examples/sparse_gif_layer.rs` — runnable demo of the layer's topology, batched run, and
+  reproducibility.
+
 ### Removed
 
 - **Qodana** — dropped `.github/workflows/qodana_code_quality.yml` and `qodana.yaml` after the Qodana Cloud membership expired. README CI bullet and `REVIEW.md` local scan instructions removed with it.

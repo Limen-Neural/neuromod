@@ -31,8 +31,108 @@
 //! `SparseGifHiddenLayer` in that crate's `funnel.rs`). They are a good
 //! starting point for ternary-spike driven hidden layers; tune for other
 //! regimes.
+//!
+//! The dynamics live on [`GifParams`], a plain-old-data parameter block shared
+//! by the single-neuron [`GifNeuron`] and the structure-of-arrays
+//! [`crate::gif_layer::SparseGifHiddenLayer`]. Both paths therefore execute the
+//! *same* arithmetic in the same order; there is no second copy of the
+//! equations to drift.
 
 use serde::{Deserialize, Serialize};
+
+/// Default passive membrane retention per step.
+pub const GIF_LEAK: f32 = 0.92;
+/// Default scaling applied to incoming stimulus before integration.
+pub const GIF_DRIVE_SCALE: f32 = 0.75;
+/// Default resting firing threshold `θ_0`.
+pub const GIF_BASE_THRESHOLD: f32 = 0.65;
+/// Default coupling from adaptation into the effective threshold.
+pub const GIF_ADAPTATION_SCALE: f32 = 0.22;
+/// Default per-step exponential decay of the adaptation variable.
+pub const GIF_ADAPTATION_DECAY: f32 = 0.94;
+/// Default hyperpolarizing coupling from adaptation into the membrane.
+pub const GIF_ADAPTATION_COUPLING: f32 = 0.05;
+/// Default jump added to the adaptation variable on each spike.
+pub const GIF_ADAPTATION_INCREMENT: f32 = 1.0;
+/// Default fraction of the effective threshold removed by the soft reset.
+pub const GIF_RESET_RATIO: f32 = 0.35;
+
+/// Parameter block for the Generalized Integrate-and-Fire dynamics.
+///
+/// This is the *shared* definition of the GIF equations. [`GifNeuron`] holds
+/// per-neuron state alongside its own copy of these parameters;
+/// [`crate::gif_layer::SparseGifHiddenLayer`] holds one `GifParams` for a whole
+/// bank of neurons whose state lives in parallel arrays. Keeping the arithmetic
+/// here is what makes those two representations numerically identical.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub struct GifParams {
+    /// Passive membrane retention per step (`v ← v · leak`).
+    pub leak: f32,
+    /// Scaling applied to incoming stimulus before integration.
+    pub drive_scale: f32,
+    /// Resting threshold baseline `θ_0`.
+    pub base_threshold: f32,
+    /// How strongly `w` inflates the effective threshold.
+    pub adaptation_scale: f32,
+    /// Exponential decay applied to `w` every step.
+    pub adaptation_decay: f32,
+    /// Hyperpolarizing coupling pulling the membrane down proportionally to `w`.
+    pub adaptation_coupling: f32,
+    /// Jump added to `w` on each emitted spike.
+    pub adaptation_increment: f32,
+    /// Fraction of the effective threshold subtracted from `v` on a spike.
+    pub reset_ratio: f32,
+}
+
+impl Default for GifParams {
+    fn default() -> Self {
+        Self {
+            leak: GIF_LEAK,
+            drive_scale: GIF_DRIVE_SCALE,
+            base_threshold: GIF_BASE_THRESHOLD,
+            adaptation_scale: GIF_ADAPTATION_SCALE,
+            adaptation_decay: GIF_ADAPTATION_DECAY,
+            adaptation_coupling: GIF_ADAPTATION_COUPLING,
+            adaptation_increment: GIF_ADAPTATION_INCREMENT,
+            reset_ratio: GIF_RESET_RATIO,
+        }
+    }
+}
+
+impl GifParams {
+    /// Effective firing threshold `θ_eff = θ_0 + w · adaptation_scale`.
+    #[inline]
+    pub fn effective_threshold(&self, adaptation: f32) -> f32 {
+        self.base_threshold + adaptation * self.adaptation_scale
+    }
+
+    /// Advance one integration step in place: decay adaptation, then update the
+    /// membrane with leak, scaled drive, and adaptation-current coupling.
+    ///
+    /// State is passed by reference rather than owned so that a
+    /// structure-of-arrays bank can call this on `membrane[i]` / `adaptation[i]`
+    /// without materialising a per-neuron struct.
+    #[inline]
+    pub fn integrate(&self, membrane: &mut f32, adaptation: &mut f32, stimulus: f32) {
+        *adaptation *= self.adaptation_decay;
+        *membrane = *membrane * self.leak + stimulus * self.drive_scale
+            - *adaptation * self.adaptation_coupling;
+    }
+
+    /// Apply the threshold test in place. On spike: soft-reset the membrane and
+    /// increment the adaptation variable. Returns whether a spike was emitted.
+    #[inline]
+    pub fn check_for_spike(&self, membrane: &mut f32, adaptation: &mut f32) -> bool {
+        let theta = self.effective_threshold(*adaptation);
+        if *membrane >= theta {
+            *membrane -= theta * self.reset_ratio;
+            *adaptation += self.adaptation_increment;
+            true
+        } else {
+            false
+        }
+    }
+}
 
 /// Single Generalized Integrate-and-Fire neuron with spike-triggered
 /// adaptation and soft reset.
@@ -77,22 +177,7 @@ pub struct GifNeuron {
 
 impl Default for GifNeuron {
     fn default() -> Self {
-        Self {
-            membrane_potential: 0.0,
-            adaptation: 0.0,
-            leak: 0.92,
-            drive_scale: 0.75,
-            threshold: 0.65,
-            base_threshold: 0.65,
-            adaptation_scale: 0.22,
-            adaptation_decay: 0.94,
-            adaptation_coupling: 0.05,
-            adaptation_increment: 1.0,
-            reset_ratio: 0.35,
-            last_spike: false,
-            weights: Vec::new(),
-            last_spike_time: -1,
-        }
+        Self::from_params(GifParams::default())
     }
 }
 
@@ -102,29 +187,62 @@ impl GifNeuron {
         Self::default()
     }
 
+    /// Build a resting neuron from a shared [`GifParams`] block.
+    ///
+    /// `threshold` is seeded from `base_threshold`; it is the runtime-mutable
+    /// copy that neuromodulation may move, while `base_threshold` stays the
+    /// `θ_0` term of the effective-threshold equation.
+    pub fn from_params(params: GifParams) -> Self {
+        Self {
+            membrane_potential: 0.0,
+            adaptation: 0.0,
+            leak: params.leak,
+            drive_scale: params.drive_scale,
+            threshold: params.base_threshold,
+            base_threshold: params.base_threshold,
+            adaptation_scale: params.adaptation_scale,
+            adaptation_decay: params.adaptation_decay,
+            adaptation_coupling: params.adaptation_coupling,
+            adaptation_increment: params.adaptation_increment,
+            reset_ratio: params.reset_ratio,
+            last_spike: false,
+            weights: Vec::new(),
+            last_spike_time: -1,
+        }
+    }
+
+    /// Snapshot this neuron's dynamics parameters as a shared [`GifParams`].
+    pub fn params(&self) -> GifParams {
+        GifParams {
+            leak: self.leak,
+            drive_scale: self.drive_scale,
+            base_threshold: self.base_threshold,
+            adaptation_scale: self.adaptation_scale,
+            adaptation_decay: self.adaptation_decay,
+            adaptation_coupling: self.adaptation_coupling,
+            adaptation_increment: self.adaptation_increment,
+            reset_ratio: self.reset_ratio,
+        }
+    }
+
     /// Integrate one timestep: decay adaptation, then update the membrane with
     /// leak, scaled drive, and adaptation-current coupling.
     pub fn integrate(&mut self, stimulus: f32) {
-        self.adaptation *= self.adaptation_decay;
-        self.membrane_potential = self.membrane_potential * self.leak + stimulus * self.drive_scale
-            - self.adaptation * self.adaptation_coupling;
+        let params = self.params();
+        params.integrate(&mut self.membrane_potential, &mut self.adaptation, stimulus);
     }
 
     /// Check whether the neuron fires this step against its effective
     /// threshold. On spike: performs a soft reset on the membrane, increments
     /// `w`, and records the spike time.
     pub fn check_for_spike(&mut self, current_time: i64) -> bool {
-        let theta = self.base_threshold + self.adaptation * self.adaptation_scale;
-        if self.membrane_potential >= theta {
-            self.membrane_potential -= theta * self.reset_ratio;
-            self.adaptation += self.adaptation_increment;
-            self.last_spike = true;
+        let params = self.params();
+        let fired = params.check_for_spike(&mut self.membrane_potential, &mut self.adaptation);
+        self.last_spike = fired;
+        if fired {
             self.last_spike_time = current_time;
-            true
-        } else {
-            self.last_spike = false;
-            false
         }
+        fired
     }
 
     /// Reset the neuron's dynamic state (membrane and adaptation) without
@@ -199,6 +317,36 @@ mod tests {
             "soft reset should leave residual potential (got {}), not clamp to 0",
             n.membrane_potential
         );
+    }
+
+    #[test]
+    fn test_params_round_trip() {
+        let params = GifParams::default();
+        assert_eq!(GifNeuron::from_params(params).params(), params);
+        assert_eq!(GifNeuron::new().params(), GifParams::default());
+    }
+
+    #[test]
+    fn test_neuron_and_params_dynamics_agree_bitwise() {
+        // `GifNeuron` delegates to `GifParams`; a structure-of-arrays bank uses
+        // the same call. This pins them together so a refactor cannot
+        // reintroduce a divergent second copy of the equations.
+        let params = GifParams::default();
+        let mut neuron = GifNeuron::new();
+        let (mut v, mut w) = (0.0f32, 0.0f32);
+
+        for t in 0..100i64 {
+            let stimulus = if t % 4 == 0 { 1.1 } else { 0.05 };
+            neuron.integrate(stimulus);
+            let neuron_fired = neuron.check_for_spike(t);
+
+            params.integrate(&mut v, &mut w, stimulus);
+            let params_fired = params.check_for_spike(&mut v, &mut w);
+
+            assert_eq!(neuron_fired, params_fired, "spike mismatch at t={t}");
+            assert_eq!(neuron.membrane_potential, v, "membrane mismatch at t={t}");
+            assert_eq!(neuron.adaptation, w, "adaptation mismatch at t={t}");
+        }
     }
 
     #[test]

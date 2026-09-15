@@ -40,6 +40,36 @@ These types ship in the crate for research and composition, but are **not** wire
 
 Use them directly; use `HebbianIzhikevichNetwork` for a small classical-STDP Izhikevich helper separate from `SpikingNetwork`.
 
+### Sparse GIF hidden layer
+
+`SparseGifHiddenLayer` is a structure-of-arrays bank of GIF neurons with deterministic sparse fan-in and batched execution — a layer abstraction rather than a single neuron, and also **not** an engine bank.
+
+- **SoA state:** membrane, adaptation, and last-spike-time live in parallel `Vec`s indexed by neuron, never a `Vec<GifNeuron>`.
+- **CSR topology:** the layer owns its `(offsets, sources, weights)` fan-in.
+- **Deterministic:** topology and initial weights come from a seeded SplitMix64 stream with a per-neuron sub-stream, so the same `SparseGifLayerConfig` — seed, shape, `weight_range`, and `params` alike — always yields the same layer; `run()` is a sequential fold with no threading, so the same input always yields the same raster.
+- **Shared dynamics:** both the layer and `GifNeuron` execute the equations on `GifParams`, so the two representations agree bit for bit (pinned by a test).
+
+```rust
+use neuromod::{SparseGifHiddenLayer, SparseGifLayerConfig};
+
+let mut layer = SparseGifHiddenLayer::new(&SparseGifLayerConfig {
+    num_inputs: 32,
+    num_neurons: 8,
+    fan_in: 6,
+    seed: 0xC0FF_EE01,
+    ..Default::default()
+})
+.unwrap();
+
+let train: Vec<Vec<f32>> = (0..24).map(|t| vec![(t % 3) as f32 * 0.4; 32]).collect();
+let raster = layer.run(&train).unwrap();
+println!("{:?}", raster.per_neuron_counts());
+```
+
+The layer takes no `NeuroModulators`: a GIF hidden layer is a pure integrate-and-fire structure with no reward signal. Callers that want modulation apply it themselves between steps — `weights_mut()` for synaptic strength, `params_mut()` for the shared dynamics (`base_threshold` and friends). `apply_neuromodulation` is **not** usable here: it expects a per-neuron `&mut [f32]` threshold slice, whereas this layer holds one shared `GifParams` for the whole bank rather than a threshold per neuron.
+
+This module is an upstream port of the equivalent layer from the author's `corinth-canal` repository (issue #101). Its regression fixtures are internal goldens produced by this implementation, not cross-repo bit-parity vectors; true parity vectors are a follow-up blocked on access to that repository. See `cargo run --example sparse_gif_layer`.
+
 ## Requirements
 
 | | |
@@ -292,7 +322,8 @@ bind, so the budget holds exactly under them.
 - Engine: `SpikingNetwork`, `StepError` (LIF + Izhikevich banks)
 - Neuromodulation: `NeuroModulators`, `SignalProfile`, `Observation`, `GenericReward`, `UnitReward`, `apply_neuromodulation`
 - Engine neuron types: `LifNeuron`, `IzhikevichNeuron`
-- Standalone neuron types: `GifNeuron`, `LapicqueNeuron`, `FitzHughNagumoNeuron`, `HodgkinHuxleyNeuron`
+- Standalone neuron types: `GifNeuron`, `GifParams`, `LapicqueNeuron`, `FitzHughNagumoNeuron`, `HodgkinHuxleyNeuron`
+- Standalone layer: `SparseGifHiddenLayer`, `SparseGifLayerConfig`, `SpikeRaster`, `GifLayerError`
 - Learning/plasticity:
   - Classical (unmodulated): `apply_classical_stdp`, `StdpParams`, `HebbianIzhikevichNetwork`
   - Reward-modulated, wired into `SpikingNetwork`: `EligibilityTrace`, `RmStdpConfig`,
@@ -316,6 +347,7 @@ Run included examples:
 ```bash
 cargo run --example basic
 cargo run --example rstdp_demo
+cargo run --example sparse_gif_layer
 ```
 
 ## Development

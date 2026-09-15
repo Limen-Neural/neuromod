@@ -128,9 +128,9 @@ fn main() {
 
 `step` is failure-atomic: it checks `stimuli.len() == num_channels` and that every
 stimulus and modulator field is finite **before** incrementing `global_step`,
-storing modulators, updating predictive state, or drawing RNG. A rejected step
-is a no-op. Finite signed values still go through the existing `abs().clamp`
-magnitude path.
+storing modulators, updating predictive state, or drawing from the
+random-number generator (RNG). A rejected step is a no-op. Finite signed values
+still go through the existing `abs().clamp` magnitude path.
 
 ```rust
 use neuromod::{NeuroModulators, NonFiniteClass, SpikingNetwork, StepError};

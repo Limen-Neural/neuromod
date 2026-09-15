@@ -107,8 +107,10 @@ impl fmt::Display for ModulatorField {
 /// Errors from [`SpikingNetwork::step`].
 ///
 /// Every variant is returned **before** the step mutates network state or
-/// draws from the RNG. Matching exhaustively? New variants are additive; handle
-/// [`Self::NonFiniteStimulus`] and [`Self::NonFiniteModulator`] or use `_`.
+/// draws from the random-number generator (RNG). Adding a variant is a
+/// source-level break for exhaustive `match`es: handle
+/// [`Self::NonFiniteStimulus`] and [`Self::NonFiniteModulator`], or use a
+/// `_` wildcard.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StepError {
     /// `stimuli.len()` did not match the network's `num_channels`.
@@ -299,7 +301,7 @@ impl SpikingNetwork {
     /// - **Failure-atomic:** any `Err` is returned before `global_step`
     ///   increments, before the modulator snapshot is stored, before
     ///   predictive state / membranes / traces / weights change, and before
-    ///   any RNG draw. A rejected step is a no-op.
+    ///   any random-number generator (RNG) draw. A rejected step is a no-op.
     /// - Preflight is a single linear pass over the stimulus slice plus the
     ///   four modulator fields and allocates nothing.
     /// - Returns the indices of **LIF** neurons that fired this step (Izhikevich
@@ -1387,6 +1389,14 @@ mod tests {
         );
     }
 
+    fn restored_blank_network(channels: usize) -> SpikingNetwork {
+        serde_json::from_value(
+            serde_json::to_value(SpikingNetwork::with_dimensions(2, 1, channels))
+                .expect("blank network serializes"),
+        )
+        .expect("round-trip restores a network")
+    }
+
     /// Four LIF / four channels with L1-neutral weights, driven once at `|s| =
     /// 1.0` so Bernoulli outcomes are deterministic while still leaving
     /// non-trivial spike, trace, and predictive state to protect.
@@ -1612,38 +1622,17 @@ mod tests {
     }
 
     #[test]
-    fn test_serde_constructed_non_finite_inputs_are_rejected() {
-        // JSON has no NaN/Inf token. A magnitude past `f32::MAX` (~3.4e38) is
-        // still a finite JSON/`f64` number and deserializes to `±inf` as `f32`.
-        // (A magnitude past `f64::MAX` is rejected by serde_json entirely.)
-        // NaN is reconstituted from a serde-decoded IEEE-754 bit pattern so
-        // the invalid payload still arrived through Deserialize.
+    fn test_serde_json_overflow_stimuli_are_rejected() {
+        // JSON has no Inf token. A magnitude past `f32::MAX` (~3.4e38) is still
+        // a finite JSON/`f64` number and deserializes to `+inf` as `f32`.
         let pos_inf: f32 = serde_json::from_str("1e39").expect("f32 overflow is +inf");
-        let neg_inf: f32 = serde_json::from_str("-1e39").expect("f32 overflow is -inf");
         assert_eq!(
             NonFiniteClass::classify(pos_inf),
             Some(NonFiniteClass::PosInfinity)
         );
-        assert_eq!(
-            NonFiniteClass::classify(neg_inf),
-            Some(NonFiniteClass::NegInfinity)
-        );
 
-        let nan_bits: u32 =
-            serde_json::from_str("2143289344").expect("canonical quiet NaN payload");
-        let nan = f32::from_bits(nan_bits);
-        assert!(
-            nan.is_nan(),
-            "serde-decoded bits must be NaN, got {nan} from {nan_bits}"
-        );
-
-        let mut restored: SpikingNetwork = serde_json::from_value(
-            serde_json::to_value(SpikingNetwork::with_dimensions(2, 1, 3))
-                .expect("blank network serializes"),
-        )
-        .expect("round-trip restores a network");
+        let mut restored = restored_blank_network(3);
         let before = capture_network(&restored);
-
         let inf_stimuli: Vec<f32> =
             serde_json::from_str("[0.1, 1e39, 0.2]").expect("stimulus frame deserializes");
         assert_eq!(
@@ -1654,7 +1643,18 @@ mod tests {
             })
         );
         assert_network_unchanged(&restored, &before);
+    }
 
+    #[test]
+    fn test_serde_json_overflow_modulators_are_rejected() {
+        let neg_inf: f32 = serde_json::from_str("-1e39").expect("f32 overflow is -inf");
+        assert_eq!(
+            NonFiniteClass::classify(neg_inf),
+            Some(NonFiniteClass::NegInfinity)
+        );
+
+        let mut restored = restored_blank_network(3);
+        let before = capture_network(&restored);
         let inf_mods: NeuroModulators = serde_json::from_str(
             r#"{"dopamine":0.0,"serotonin":-1e39,"acetylcholine":0.0,"norepinephrine":0.0}"#,
         )
@@ -1667,7 +1667,22 @@ mod tests {
             })
         );
         assert_network_unchanged(&restored, &before);
+    }
 
+    #[test]
+    fn test_serde_bit_pattern_nan_modulator_is_rejected() {
+        // JSON has no NaN token; reconstitute it from a serde-decoded IEEE-754
+        // bit pattern so the invalid payload still arrived through Deserialize.
+        let nan_bits: u32 =
+            serde_json::from_str("2143289344").expect("canonical quiet NaN payload");
+        let nan = f32::from_bits(nan_bits);
+        assert!(
+            nan.is_nan(),
+            "serde-decoded bits must be NaN, got {nan} from {nan_bits}"
+        );
+
+        let mut restored = restored_blank_network(3);
+        let before = capture_network(&restored);
         let nan_mods: NeuroModulators = serde_json::from_value(serde_json::json!({
             "dopamine": 0.0,
             "serotonin": 0.0,

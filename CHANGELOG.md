@@ -6,6 +6,15 @@ All notable changes to this project are documented in this file.
 
 ### Added
 
+- **Caller-injected RNG on live stochastic paths** ([LIM-1221](https://linear.app/rpd-34/issue/LIM-1221/featrng-inject-caller-rng-into-stochastic-neuromod-dynamics)).
+  `SpikingNetwork::step_with_rng` and `PoissonEncoder::encode_with_rng` take
+  `&mut impl rand::Rng` so one caller stream can drive a multi-step run without
+  reseeding inside the loop. `step` and `encode` keep using the thread-local
+  generator and remain source-compatible. `Rng`, `SeedableRng`, and `StdRng` are
+  re-exported so downstream crates do not need a matching direct `rand`
+  dependency to copy the seeded example. The generator is not stored on the
+  network and is not part of a serde checkpoint. Inventory of stochastic vs
+  deterministic public paths: [docs/rng.md](docs/rng.md).
 - **`SparseGifHiddenLayer` — sparse GIF hidden layer** (`src/gif_layer.rs`, #101). An upstream
   port of the reusable GIF layer from the author's `rmems/corinth-canal` repository
   (`src/funnel.rs`), promoted here so the canonical dynamics live in the dynamics crate. It is a

@@ -67,7 +67,9 @@ It also holds a `NeuroModulators` snapshot, a `global_step` counter, and per-cha
 
 Construction is topology-neutral. `new()` is the legacy default (16 LIF, 5 Izhikevich, 16 channels). `with_dimensions(num_lif, num_izh, num_channels)` builds arbitrary sizes with blank synaptic weights. No domain topology is hardcoded.
 
-`SpikingNetwork::step(stimuli, modulators)` is the normal per-tick entry point for the default engine. Prefer it for full-network simulation; call lower-level neuron APIs only when testing or embedding a single model. `step` is an orchestrator: the length guard stays inline, and each numbered phase is a private helper on `SpikingNetwork`. Order of work:
+`SpikingNetwork::step(stimuli, modulators)` is the normal per-tick entry point for the default engine. Prefer it for full-network simulation. Call lower-level neuron APIs only when testing or embedding a single model.
+
+`step` is an orchestrator. The length guard stays inline. Each numbered phase below is a private helper on `SpikingNetwork`:
 
 1. Validate `stimuli.len() == num_channels`, else `Err(StepError::InputLenMismatch)`.
 2. `retarget_lif_from_modulators` — recompute per-neuron `decay_rate`/`threshold` targets from the current `NeuroModulators` (dopamine/serotonin/acetylcholine/norepinephrine each pull thresholds/decay in different directions — see formulas in `engine.rs`).

@@ -10,12 +10,18 @@
 //! ```text
 //! w        ← w · adaptation_decay
 //! v        ← v · leak + I · drive_scale − w · adaptation_coupling
-//! θ_eff    = base_threshold + w · adaptation_scale
+//! θ_eff    = θ_0 + w · adaptation_scale
 //! if v ≥ θ_eff:
 //!     emit spike
 //!     v    ← v − θ_eff · reset_ratio           (soft reset)
 //!     w    ← w + adaptation_increment
 //! ```
+//!
+//! `θ_0` is [`GifParams::base_threshold`]. On [`GifNeuron`] the live `θ_0` is
+//! [`GifNeuron::threshold`] — the runtime-mutable neuromodulation knob —
+//! while [`GifNeuron::base_threshold`] is the restore point, matching
+//! [`crate::LifNeuron`]. [`GifNeuron::params`] feeds the live value into the
+//! shared `GifParams` arithmetic so both representations stay one equation.
 //!
 //! References:
 //! - Mensi, S., Naud, R., Pozzorini, C., Avermann, M., Petersen, C. C. H., &
@@ -70,7 +76,13 @@ pub struct GifParams {
     pub leak: f32,
     /// Scaling applied to incoming stimulus before integration.
     pub drive_scale: f32,
-    /// Resting threshold baseline `θ_0`.
+    /// Resting / live threshold baseline `θ_0`.
+    ///
+    /// This is the only `θ_0` the shared arithmetic has. A
+    /// [`crate::gif_layer::SparseGifHiddenLayer`] stores it once for the whole
+    /// bank. [`GifNeuron::params`] copies the neuron's runtime
+    /// [`GifNeuron::threshold`] here so firing uses the live knob rather than
+    /// the restore point.
     pub base_threshold: f32,
     /// How strongly `w` inflates the effective threshold.
     pub adaptation_scale: f32,
@@ -101,6 +113,9 @@ impl Default for GifParams {
 
 impl GifParams {
     /// Effective firing threshold `θ_eff = θ_0 + w · adaptation_scale`.
+    ///
+    /// `θ_0` is [`Self::base_threshold`]. Callers going through [`GifNeuron`]
+    /// get the live [`GifNeuron::threshold`] here via [`GifNeuron::params`].
     #[inline]
     pub fn effective_threshold(&self, adaptation: f32) -> f32 {
         self.base_threshold + adaptation * self.adaptation_scale
@@ -146,13 +161,23 @@ pub struct GifNeuron {
     pub leak: f32,
     /// Scaling applied to incoming stimulus before integration.
     pub drive_scale: f32,
-    /// Current effective firing threshold (runtime-mutable for neuromodulation).
+    /// Live firing threshold `θ_0` (runtime-mutable for neuromodulation).
+    ///
+    /// This is the value [`Self::check_for_spike`] reads. Adaptation still
+    /// inflates it: `θ_eff = threshold + w · adaptation_scale`. Seeded from
+    /// [`Self::base_threshold`] at construction; neuromodulation (for example
+    /// [`crate::apply_neuromodulation`]) should move this field, not the
+    /// restore point.
     pub threshold: f32,
-    /// Resting threshold baseline, used as the `θ_0` term for the effective
-    /// threshold computation and as a restore point for dynamic modulation.
+    /// Resting threshold baseline — the restore point for dynamic modulation.
+    ///
+    /// Construction copies this into [`Self::threshold`]. Subsequent writes
+    /// here do not change firing until the caller (or a modulator) also
+    /// updates `threshold`, matching [`crate::LifNeuron`].
     #[serde(default)]
     pub base_threshold: f32,
-    /// How strongly `w` inflates the effective threshold (`θ_eff = θ_0 + w · adaptation_scale`).
+    /// How strongly `w` inflates the effective threshold
+    /// (`θ_eff = threshold + w · adaptation_scale`).
     pub adaptation_scale: f32,
     /// Exponential decay applied to `w` every step (`w ← w · adaptation_decay`).
     pub adaptation_decay: f32,
@@ -189,9 +214,8 @@ impl GifNeuron {
 
     /// Build a resting neuron from a shared [`GifParams`] block.
     ///
-    /// `threshold` is seeded from `base_threshold`; it is the runtime-mutable
-    /// copy that neuromodulation may move, while `base_threshold` stays the
-    /// `θ_0` term of the effective-threshold equation.
+    /// Both [`Self::threshold`] (live `θ_0`) and [`Self::base_threshold`]
+    /// (restore point) are seeded from `params.base_threshold`.
     pub fn from_params(params: GifParams) -> Self {
         Self {
             membrane_potential: 0.0,
@@ -211,12 +235,17 @@ impl GifNeuron {
         }
     }
 
-    /// Snapshot this neuron's dynamics parameters as a shared [`GifParams`].
+    /// Snapshot this neuron's live dynamics parameters as a shared [`GifParams`].
+    ///
+    /// [`GifParams::base_threshold`] is filled from [`Self::threshold`], not
+    /// from [`Self::base_threshold`]. The restore point is a `GifNeuron`
+    /// concern; the shared arithmetic only has one `θ_0`, and firing must
+    /// use the runtime-mutable knob.
     pub fn params(&self) -> GifParams {
         GifParams {
             leak: self.leak,
             drive_scale: self.drive_scale,
-            base_threshold: self.base_threshold,
+            base_threshold: self.threshold,
             adaptation_scale: self.adaptation_scale,
             adaptation_decay: self.adaptation_decay,
             adaptation_coupling: self.adaptation_coupling,
@@ -233,8 +262,9 @@ impl GifNeuron {
     }
 
     /// Check whether the neuron fires this step against its effective
-    /// threshold. On spike: performs a soft reset on the membrane, increments
-    /// `w`, and records the spike time.
+    /// threshold (`threshold + adaptation * adaptation_scale`). On spike:
+    /// performs a soft reset on the membrane, increments `w`, and records
+    /// the spike time.
     pub fn check_for_spike(&mut self, current_time: i64) -> bool {
         let params = self.params();
         let fired = params.check_for_spike(&mut self.membrane_potential, &mut self.adaptation);
@@ -329,8 +359,8 @@ mod tests {
     #[test]
     fn test_neuron_and_params_dynamics_agree_bitwise() {
         // `GifNeuron` delegates to `GifParams`; a structure-of-arrays bank uses
-        // the same call. This pins them together so a refactor cannot
-        // reintroduce a divergent second copy of the equations.
+        // the same call. Agreement holds while `threshold == base_threshold`
+        // (the default). Mutating the live knob is covered separately.
         let params = GifParams::default();
         let mut neuron = GifNeuron::new();
         let (mut v, mut w) = (0.0f32, 0.0f32);
@@ -347,6 +377,49 @@ mod tests {
             assert_eq!(neuron.membrane_potential, v, "membrane mismatch at t={t}");
             assert_eq!(neuron.adaptation, w, "adaptation mismatch at t={t}");
         }
+    }
+
+    #[test]
+    fn mutating_threshold_changes_when_the_neuron_fires() {
+        // Default θ_0 is GIF_BASE_THRESHOLD; adaptation is 0 so θ_eff == threshold.
+        let mut at_rest = GifNeuron::new();
+        at_rest.membrane_potential = at_rest.base_threshold;
+        assert!(
+            at_rest.check_for_spike(0),
+            "membrane at default θ_0 must fire"
+        );
+
+        let mut raised = GifNeuron::new();
+        raised.membrane_potential = raised.base_threshold;
+        raised.threshold = raised.base_threshold + 0.25;
+        assert!(
+            !raised.check_for_spike(0),
+            "raising threshold above the membrane must suppress the spike"
+        );
+
+        let mut lowered = GifNeuron::new();
+        lowered.membrane_potential = lowered.base_threshold - 0.2;
+        lowered.threshold = lowered.base_threshold - 0.2;
+        assert!(
+            lowered.check_for_spike(0),
+            "lowering threshold to the membrane must produce a spike"
+        );
+    }
+
+    #[test]
+    fn base_threshold_is_restore_point_not_live_firing_knob() {
+        let mut neuron = GifNeuron::new();
+        neuron.membrane_potential = neuron.threshold;
+        neuron.base_threshold = 1.0e6;
+        assert!(
+            neuron.check_for_spike(0),
+            "mutating base_threshold must not by itself change firing"
+        );
+        assert_eq!(
+            neuron.params().base_threshold,
+            neuron.threshold,
+            "params() must snapshot the live threshold, not the restore point"
+        );
     }
 
     #[test]

@@ -4,6 +4,15 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+### Fixed
+
+- **`GifNeuron::threshold` now affects firing** (#119, LIM-1168). The field was documented as the
+  runtime-mutable neuromodulation knob but `check_for_spike` read `base_threshold` instead, so
+  callers who tuned `threshold` saw no change. `GifNeuron::params` now snapshots the live
+  `threshold` into `GifParams::base_threshold`, matching `LifNeuron` (`threshold` is live;
+  `base_threshold` is the restore point). Defaults still seed both from the same value, so
+  `SparseGifHiddenLayer` bit-parity is unchanged unless a caller writes to `threshold`.
+
 ### Added
 
 - **`SparseGifHiddenLayer` — sparse GIF hidden layer** (`src/gif_layer.rs`, #101). An upstream

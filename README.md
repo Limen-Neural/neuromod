@@ -19,6 +19,7 @@ Biologically grounded spiking neural network (SNN) primitives in Rust: a topolog
 - `GenericReward` trait for domain-specific reward shaping in downstream crates
 - Reward-modulated STDP wired into the engine: per-synapse `EligibilityTrace` accumulation with a dopamine-gated payout, tuned by `RmStdpConfig`
 - Classical (unmodulated) Hebbian STDP utilities for the biological root case
+- Caller-injected RNG on the live stochastic paths (`SpikingNetwork::step_with_rng`, `PoissonEncoder::encode_with_rng`) so a seeded stream can replay a run
 
 ### Engine (`SpikingNetwork`)
 
@@ -108,6 +109,34 @@ fn main() {
     println!("Spiking neuron indices: {spikes:?}");
 }
 ```
+
+### Reproducible steps
+
+The only live stochastic work inside `step` is Bernoulli encoding of
+`input_spike_times`. Keep using `step` when you do not care about the stream.
+For replay, inject one caller RNG and reuse it for the whole run:
+
+```rust
+use neuromod::{NeuroModulators, SpikingNetwork};
+use rand::rngs::StdRng;
+use rand::SeedableRng;
+
+fn main() {
+    let mut network = SpikingNetwork::new();
+    let stimuli = [0.5_f32; 16];
+    let modulators = NeuroModulators::default();
+    let mut rng = StdRng::seed_from_u64(0xC0FF_EE01);
+
+    let spikes = network
+        .step_with_rng(&stimuli, &modulators, &mut rng)
+        .unwrap();
+    println!("Spiking neuron indices: {spikes:?}");
+}
+```
+
+The generator is not stored on `SpikingNetwork` and is not part of a serde
+checkpoint. Same seed + same inputs/state replays the same trace; see
+[docs/rng.md](docs/rng.md) for the full stochastic-vs-deterministic inventory.
 
 ## Dynamic Dimensions
 
@@ -322,6 +351,7 @@ bind, so the budget holds exactly under them.
 - Engine: `SpikingNetwork`, `StepError` (LIF + Izhikevich banks)
 - Neuromodulation: `NeuroModulators`, `SignalProfile`, `Observation`, `GenericReward`, `UnitReward`, `apply_neuromodulation`
 - Engine neuron types: `LifNeuron`, `IzhikevichNeuron`
+- Stochastic helpers: `lif::PoissonEncoder` (`encode` / `encode_with_rng`)
 - Standalone neuron types: `GifNeuron`, `GifParams`, `LapicqueNeuron`, `FitzHughNagumoNeuron`, `HodgkinHuxleyNeuron`
 - Standalone layer: `SparseGifHiddenLayer`, `SparseGifLayerConfig`, `SpikeRaster`, `GifLayerError`
 - Learning/plasticity:
@@ -339,6 +369,7 @@ See the full planning documents:
 - [neuromod Boundary Matrix](https://github.com/Limen-Neural/neuromod/blob/main/docs/neuromod-boundary-matrix.md) — runtime/deployment role, owns/does-not-own, allowed/forbidden dependencies vs. limbic-critic, brainstem-daemon, axon-encoder, synaptic-mesh, silicon-bridge, Spikenaut-Hardware, plasticity-lab, etc. (LIM-9).
 - [ADR 001: Shared traits live in neuromod](https://github.com/Limen-Neural/neuromod/blob/main/docs/adr/001-traits-in-neuromod.md) — why traits are hosted here.
 - [ADR 002: Wire eligibility traces into the engine](https://github.com/Limen-Neural/neuromod/blob/main/docs/adr/002-wire-eligibility-traces.md) — why R-STDP is wired rather than demoted, and what changed in the learning path.
+- [RNG inventory](https://github.com/Limen-Neural/neuromod/blob/main/docs/rng.md) — live stochastic paths, caller-injected RNG variants, and deterministic surfaces.
 
 ## Examples
 

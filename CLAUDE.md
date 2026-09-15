@@ -67,12 +67,12 @@ It also holds a `NeuroModulators` snapshot, a `global_step` counter, and per-cha
 
 Construction is topology-neutral. `new()` is the legacy default (16 LIF, 5 Izhikevich, 16 channels). `with_dimensions(num_lif, num_izh, num_channels)` builds arbitrary sizes with blank synaptic weights. No domain topology is hardcoded.
 
-`SpikingNetwork::step(stimuli, modulators)` is the normal per-tick entry point for the default engine. Prefer it for full-network simulation; call lower-level neuron APIs only when testing or embedding a single model. Order of work inside `step`:
+`SpikingNetwork::step(stimuli, modulators)` is the normal per-tick entry point for the default engine. Prefer it for full-network simulation; call lower-level neuron APIs only when testing or embedding a single model. `SpikingNetwork::step_with_rng` is the same pipeline with a caller-owned `&mut impl rand::Rng` for the Bernoulli encoding of `input_spike_times` (the only live stochastic work). Order of work inside `step`:
 
 1. Validate `stimuli.len() == num_channels`, else `Err(StepError::InputLenMismatch)`.
 2. Recompute per-neuron `decay_rate`/`threshold` targets from the current `NeuroModulators` (dopamine/serotonin/acetylcholine/norepinephrine each pull thresholds/decay in different directions — see formulas in `engine.rs`).
 3. Update `predictive_state` (exponential moving average (EMA) per channel) and derive `pred_errors` ("surprise") that boost synaptic drive.
-4. Stochastically encode `stimuli` into `input_spike_times` (Poisson-style, probability proportional to stimulus magnitude).
+4. Stochastically encode `stimuli` into `input_spike_times` (Poisson-style, probability proportional to stimulus magnitude). The convenience `step` draws from the thread-local RNG; `step_with_rng` draws from the caller generator and does not construct or reseed an RNG per neuron or per step.
 5. Integrate LIF membrane potentials, fire (`check_fire`), apply lateral inhibition to non-firing LIF neurons.
 6. Apply reward-modulated STDP (`apply_stdp`). Runs every step: per-synapse eligibility traces decay and accumulate regardless of dopamine; the `dopamine`-derived `learning_rate` gates only the trace → weight conversion.
 7. Re-normalize each neuron's weights to `WEIGHT_BUDGET` (L1 budget) and clamp to the `stdp_config` bounds (`RmStdpConfig::w_min`/`w_max`).

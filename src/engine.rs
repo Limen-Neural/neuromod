@@ -1638,7 +1638,7 @@ mod tests {
         );
 
         let mut restored: SpikingNetwork = serde_json::from_value(
-            serde_json::to_value(&SpikingNetwork::with_dimensions(2, 1, 3))
+            serde_json::to_value(SpikingNetwork::with_dimensions(2, 1, 3))
                 .expect("blank network serializes"),
         )
         .expect("round-trip restores a network");

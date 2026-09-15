@@ -135,8 +135,9 @@ fn main() {
 The generator is re-exported from this crate (`StdRng`, `SeedableRng`), so the
 example above does not need a direct `rand` dependency. It is not stored on
 `SpikingNetwork` and is not part of a serde checkpoint. Same seed + same
-inputs/state replays the same trace; see [docs/rng.md](docs/rng.md) for the
-full stochastic-vs-deterministic inventory.
+inputs/state replays a run **from the start**. Resuming a mid-run checkpoint
+needs the generator's advanced state, not only the original seed; see
+[docs/rng.md](docs/rng.md).
 
 ## Dynamic Dimensions
 

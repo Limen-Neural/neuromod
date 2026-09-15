@@ -49,9 +49,14 @@ These public surfaces do not draw from `rand` during execution:
 ## Checkpoints
 
 `SpikingNetwork`, `LifNeuron`, and `PoissonEncoder` do not store an RNG.
-Serde snapshots therefore do not capture the random stream. Replay requires
-the caller to persist their own seed (or generator state) alongside the
-network checkpoint.
+Serde snapshots therefore do not capture the random stream.
+
+- **Replay from the start:** persist the original seed with the initial network
+  state. The same seed plus the same inputs reproduces the run.
+- **Resume a mid-run checkpoint:** persist the generator's *advanced* state
+  (not only the original seed). Reconstructing `StdRng` from the starting seed
+  rewinds the stream, so later Bernoulli draws and R-STDP updates diverge from
+  the uninterrupted run.
 
 `SparseGifHiddenLayer` serializes the generated topology and SoA state, not a
 live generator. Reconstructing from `SparseGifLayerConfig` (including `seed`)

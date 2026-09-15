@@ -72,7 +72,7 @@ pub mod lif;
 pub mod modulators;
 pub mod rm_stdp;
 
-pub use engine::{SpikingNetwork, StepError};
+pub use engine::{ModulatorField, NonFiniteClass, SpikingNetwork, StepError};
 pub use fitzhugh_nagumo::FitzHughNagumoNeuron;
 pub use gif::{GifNeuron, GifParams};
 pub use gif_layer::{GifLayerError, SparseGifHiddenLayer, SparseGifLayerConfig, SpikeRaster};

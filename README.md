@@ -3,7 +3,7 @@
 [![Crates.io](https://img.shields.io/crates/v/neuromod.svg?label=crates.io)](https://crates.io/crates/neuromod)
 [![docs.rs](https://docs.rs/neuromod/badge.svg)](https://docs.rs/neuromod)
 [![License](https://img.shields.io/crates/l/neuromod.svg)](https://github.com/Limen-Neural/neuromod#license)
-[![codecov](https://codecov.io/gh/Limen-Neural/neuromod/graph/badge.svg?token=V0U0K5P6PW)](https://codecov.io/gh/Limen-Neural/neuromod)
+[![codecov](https://codecov.io/gh/Limen-Neural/neuromod/graph/badge.svg)](https://codecov.io/gh/Limen-Neural/neuromod)
 
 Biologically grounded spiking neural network (SNN) primitives in Rust: a topology-neutral `SpikingNetwork` engine, generic neuromodulators, STDP building blocks, and standalone neuron models.
 
@@ -434,13 +434,13 @@ cargo hack check --feature-powerset --exclude-no-default-features --keep-going
 
 ### Codecov
 
-[![codecov](https://codecov.io/gh/Limen-Neural/neuromod/graph/badge.svg?token=V0U0K5P6PW)](https://codecov.io/gh/Limen-Neural/neuromod)
+[![codecov](https://codecov.io/gh/Limen-Neural/neuromod/graph/badge.svg)](https://codecov.io/gh/Limen-Neural/neuromod)
 
 - Configuration: [`codecov.yml`](codecov.yml)
 - Workflow: [`.github/workflows/coverage.yml`](.github/workflows/coverage.yml)
 - Dashboard: [codecov.io/gh/Limen-Neural/neuromod](https://codecov.io/gh/Limen-Neural/neuromod)
 
-The badge uses Codecov’s graph token (from **Configuration → Badges & Graphs**).
+The badge links to Codecov's test coverage report.
 **Uploads** need the repository secret **`CODECOV_TOKEN`** (tokenless uploads return
 HTTP 400 for this org). The coverage workflow passes that token and sets
 `fail_ci_if_error: false`, so a missing/stale token does **not** fail CI—only the

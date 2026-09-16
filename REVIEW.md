@@ -59,11 +59,17 @@ cargo run --example basic_lif
 cargo run --example hebbian_learning
 cargo run --example rstdp_demo
 
+# Outsider crates.io-only demo (detached workspace; GH#82)
+# Must resolve neuromod from the registry, not this path crate.
+( cd examples/crates-io-standalone && cargo run )
+
+
 # Release-mode smoke
 cargo run --example basic --release
 cargo run --example basic_lif --release
 cargo run --example hebbian_learning --release
 cargo run --example rstdp_demo --release
+( cd examples/crates-io-standalone && cargo run --release )
 ```
 
 ## Benchmarks smoke

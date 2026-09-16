@@ -161,9 +161,11 @@ fn main() {
 }
 ```
 
-## Step Errors (Shape Validation)
+## Step Errors
 
-`step` validates that `stimuli.len() == num_channels` and returns an error on mismatch.
+`step` validates the call **before** mutating the network. A length mismatch or an exhausted tick counter returns a structured [`StepError`](https://docs.rs/neuromod/latest/neuromod/enum.StepError.html) and leaves every field unchanged.
+
+`global_step` is a discrete tick counter in **steps** (not wall-clock time), range `0..=i64::MAX`. Spike timestamps (`LifNeuron::last_spike_time`, `input_spike_times`) use the same unit; `-1` is the sentinel for no recorded spike. A restored checkpoint sitting at `i64::MAX` (or with a negative counter) still deserializes — `step` then returns `StepCounterExhausted` instead of panicking in debug, wrapping in release, or stamping the `-1` sentinel. Call `reset()` to start a new epoch; the engine will not renumber a live network for you.
 
 ```rust
 use neuromod::{NeuroModulators, SpikingNetwork, StepError};
@@ -178,7 +180,19 @@ fn main() {
         Err(StepError::InputLenMismatch { expected, got }) => {
             println!("InputLenMismatch: expected {expected}, got {got}");
         }
+        Err(StepError::StepCounterExhausted { global_step }) => {
+            println!("step counter cannot advance from {global_step}");
+        }
     }
+
+    network.global_step = i64::MAX;
+    assert!(matches!(
+        network.step(&[0.0; 32], &modulators),
+        Err(StepError::StepCounterExhausted {
+            global_step: i64::MAX
+        })
+    ));
+    assert_eq!(network.global_step, i64::MAX);
 }
 ```
 
@@ -353,6 +367,29 @@ scales toward the budget and then clamps, so a binding bound leaves the sum **of
 whichever direction it binds — a lowered `w_max` caps weights and leaves the sum short, while
 a raised `w_min` lifts weights after scaling and can push the sum past it. The defaults cannot
 bind, so the budget holds exactly under them.
+
+### Unreleased — `StepError::StepCounterExhausted`
+
+**Exhaustive matches on `StepError` need a new arm.** `SpikingNetwork::step` now returns
+`StepError::StepCounterExhausted { global_step }` when incrementing `global_step` would
+overflow `i64::MAX`. Debug and release share this behavior. A rejected tick is atomic (no
+RNG draw, no neuromodulator snapshot, no membrane or trace updates).
+
+**Checkpoints at `i64::MAX` still load.** Serde does not reject an exhausted or negative
+counter; validation is on `step`, so a saturated network can be inspected. Call `reset()` to continue
+from tick 0 — the engine will not renumber timestamps for you. Normal (non-exhausted)
+checkpoints are unchanged.
+
+```rust
+use neuromod::{NeuroModulators, SpikingNetwork, StepError};
+
+let mut net = SpikingNetwork::new();
+net.global_step = i64::MAX;
+assert!(matches!(
+    net.step(&[0.0; 16], &NeuroModulators::default()),
+    Err(StepError::StepCounterExhausted { global_step: i64::MAX })
+));
+```
 
 ## Included Components
 

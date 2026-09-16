@@ -97,7 +97,10 @@ pub struct LifNeuron {
     #[serde(default)]
     pub weights: Vec<f32>,
     /// Timestep of the most recent spike (for STDP delta-t calculation).
-    /// Uses a global step counter maintained by the engine.
+    ///
+    /// Shares the engine's discrete step unit: `-1` means this neuron has never
+    /// spiked; a non-negative value is the [`crate::SpikingNetwork::global_step`]
+    /// at which it last fired (`1..=i64::MAX` on a live network).
     #[serde(default)]
     pub last_spike_time: i64,
     /// Per-synapse eligibility traces — one per input channel, indexed exactly

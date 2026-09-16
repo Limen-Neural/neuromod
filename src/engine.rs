@@ -25,6 +25,8 @@
 //! so one stream can drive a multi-step run. The generator is not stored on
 //! the network and is not serialized.
 
+use core::fmt;
+
 use rand::{Rng, RngExt};
 use serde::{Deserialize, Serialize};
 
@@ -39,32 +41,110 @@ const PRED_ALPHA: f32 = 0.1;
 const PRED_ERR_WEIGHT: f32 = 0.5;
 const INHIBITION_STRENGTH: f32 = 0.05;
 
+/// Classification of a non-finite `f32` rejected by [`SpikingNetwork::step`].
+///
+/// The error reports the class, not the payload: every NaN (any sign / quiet
+/// bit) is [`Self::Nan`], and the infinities are distinguished by sign. Finite
+/// values, including signed zero and [`f32::MAX`] / [`f32::MIN`], are not
+/// represented here.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NonFiniteClass {
+    /// IEEE-754 NaN (any payload or sign).
+    Nan,
+    /// Positive infinity.
+    PosInfinity,
+    /// Negative infinity.
+    NegInfinity,
+}
+
+impl NonFiniteClass {
+    /// Classify `x` as NaN, `+∞`, or `−∞`.
+    ///
+    /// Returns `None` when `x` is finite.
+    pub const fn classify(x: f32) -> Option<Self> {
+        if x.is_nan() {
+            Some(Self::Nan)
+        } else if x.is_infinite() {
+            if x.is_sign_positive() {
+                Some(Self::PosInfinity)
+            } else {
+                Some(Self::NegInfinity)
+            }
+        } else {
+            None
+        }
+    }
+}
+
+impl fmt::Display for NonFiniteClass {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Nan => f.write_str("NaN"),
+            Self::PosInfinity => f.write_str("+inf"),
+            Self::NegInfinity => f.write_str("-inf"),
+        }
+    }
+}
+
+/// Named neuromodulator field rejected by [`SpikingNetwork::step`].
+///
+/// Variant order matches [`NeuroModulators`] field order and the preflight
+/// scan: dopamine, serotonin, acetylcholine, norepinephrine.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ModulatorField {
+    /// [`NeuroModulators::dopamine`].
+    Dopamine,
+    /// [`NeuroModulators::serotonin`].
+    Serotonin,
+    /// [`NeuroModulators::acetylcholine`].
+    Acetylcholine,
+    /// [`NeuroModulators::norepinephrine`].
+    Norepinephrine,
+}
+
+impl fmt::Display for ModulatorField {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Dopamine => f.write_str("dopamine"),
+            Self::Serotonin => f.write_str("serotonin"),
+            Self::Acetylcholine => f.write_str("acetylcholine"),
+            Self::Norepinephrine => f.write_str("norepinephrine"),
+        }
+    }
+}
+
 /// Errors from [`SpikingNetwork::step`].
 ///
 /// Every variant is returned **before** the network is mutated: a failed step
-/// is atomic. The enum is exhaustive today; new failure modes will add
-/// variants and are source-breaking for exhaustive matches.
+/// is atomic. Adding a variant is a source-level break for exhaustive `match`es:
+/// handle [`Self::NonFiniteStimulus`], [`Self::NonFiniteModulator`], and
+/// [`Self::StepCounterExhausted`], or use a `_` wildcard.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StepError {
     /// `stimuli.len()` did not match the network's `num_channels`.
     InputLenMismatch { expected: usize, got: usize },
-    /// The discrete step counter cannot advance another tick.
-    ///
-    /// Fired when [`SpikingNetwork::global_step`] is already [`i64::MAX`]
-    /// (increment would overflow) or is negative (increment could stamp `-1`,
-    /// the sentinel for no recorded spike). Reported before any neuron state
-    /// is mutated and before any random-number generator draw.
-    StepCounterExhausted {
-        /// The counter that cannot be advanced.
-        global_step: i64,
+    /// A stimulus sample was NaN or infinite.
+    NonFiniteStimulus { index: usize, class: NonFiniteClass },
+    /// A neuromodulator field was NaN or infinite.
+    NonFiniteModulator {
+        field: ModulatorField,
+        class: NonFiniteClass,
     },
+    /// `global_step` has reached `i64::MAX` or is negative.
+    StepCounterExhausted { global_step: i64 },
 }
 
-impl core::fmt::Display for StepError {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+impl fmt::Display for StepError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::InputLenMismatch { expected, got } => {
                 write!(f, "expected {expected} input channels, got {got}")
+            }
+            Self::NonFiniteStimulus { index, class } => {
+                write!(f, "non-finite stimulus at index {index}: {class}")
+            }
+            Self::NonFiniteModulator { field, class } => {
+                write!(f, "non-finite modulator {field}: {class}")
             }
             Self::StepCounterExhausted { global_step } => {
                 write!(f, "step counter cannot advance from {global_step}")
@@ -74,6 +154,41 @@ impl core::fmt::Display for StepError {
 }
 
 impl core::error::Error for StepError {}
+
+/// Length, then every stimulus, then each modulator field. Returns on the first
+/// problem; never allocates. Callers must invoke this before any mutation or
+/// RNG draw so a rejected step is a no-op.
+fn validate_step_inputs(
+    stimuli: &[f32],
+    num_channels: usize,
+    modulators: &NeuroModulators,
+) -> Result<(), StepError> {
+    if stimuli.len() != num_channels {
+        return Err(StepError::InputLenMismatch {
+            expected: num_channels,
+            got: stimuli.len(),
+        });
+    }
+
+    for (index, &value) in stimuli.iter().enumerate() {
+        if let Some(class) = NonFiniteClass::classify(value) {
+            return Err(StepError::NonFiniteStimulus { index, class });
+        }
+    }
+
+    for (field, value) in [
+        (ModulatorField::Dopamine, modulators.dopamine),
+        (ModulatorField::Serotonin, modulators.serotonin),
+        (ModulatorField::Acetylcholine, modulators.acetylcholine),
+        (ModulatorField::Norepinephrine, modulators.norepinephrine),
+    ] {
+        if let Some(class) = NonFiniteClass::classify(value) {
+            return Err(StepError::NonFiniteModulator { field, class });
+        }
+    }
+
+    Ok(())
+}
 
 /// Topology-neutral network: LIF bank + Izhikevich bank + neuromodulators.
 ///
@@ -207,6 +322,12 @@ impl SpikingNetwork {
     ///
     /// - `stimuli.len()` must equal [`Self::num_channels`], else
     ///   [`StepError::InputLenMismatch`].
+    /// - Every stimulus and every modulator field must be **finite**. `NaN`,
+    ///   `+∞`, and `−∞` return [`StepError::NonFiniteStimulus`] (with the
+    ///   offending index) or [`StepError::NonFiniteModulator`] (with the
+    ///   field name) plus the [`NonFiniteClass`]. Finite signed values,
+    ///   including `0.0` / `-0.0` and [`f32::MAX`] / [`f32::MIN`], still
+    ///   pass through the existing `abs().clamp(0.0, 1.0)` magnitude path.
     /// - [`Self::global_step`] is a discrete tick counter in **steps**, range
     ///   `0..=i64::MAX`. A call that would increment past [`i64::MAX`], or a
     ///   negative counter, returns [`StepError::StepCounterExhausted`] and
@@ -214,14 +335,18 @@ impl SpikingNetwork {
     ///   behavior (`checked_add`, not wrapping or panicking arithmetic). The
     ///   counter is not reset automatically; call [`Self::reset`] to start a
     ///   new epoch.
-    /// - Preflight checks run before any mutation or RNG draw, so a rejected
-    ///   step is atomic.
+    /// - **Failure-atomic:** any `Err` is returned before `global_step`
+    ///   increments, before the modulator snapshot is stored, before
+    ///   predictive state / membranes / traces / weights change, and before
+    ///   any random-number generator (RNG) draw. A rejected step is a no-op.
+    /// - Preflight is a single linear pass over the stimulus slice plus the
+    ///   four modulator fields and allocates nothing.
     /// - Returns the indices of **LIF** neurons that fired this step (Izhikevich
     ///   spikes are not listed in the return value).
     ///
     /// # Order of work
     ///
-    /// 1. Preflight: reject a length mismatch or an exhausted `global_step`.
+    /// 1. Preflight: reject a length mismatch, non-finite input, or an exhausted `global_step`.
     /// 2. Store `modulators` and derive stress / learning rates.
     /// 3. Recompute LIF targets from neuromodulators: assign `decay_rate`
     ///    directly; soft-update `threshold` toward its target (learning-rate blend).
@@ -253,18 +378,27 @@ impl SpikingNetwork {
     /// # Examples
     ///
     /// ```
-    /// use neuromod::{NeuroModulators, SpikingNetwork, StepError};
+    /// use neuromod::{NeuroModulators, NonFiniteClass, SpikingNetwork, StepError};
     ///
     /// let mut net = SpikingNetwork::with_dimensions(8, 2, 4);
     /// let modulators = NeuroModulators::default();
     ///
-    /// // Wrong length → structured error
+    /// // Wrong length → structured error, network untouched
     /// assert!(matches!(
     ///     net.step(&[0.1, 0.2], &modulators),
     ///     Err(StepError::InputLenMismatch { expected: 4, got: 2 })
     /// ));
     ///
-    /// let spikes = net.step(&[0.5; 4], &modulators).expect("length matches");
+    /// // Non-finite stimulus → indexed class, still a no-op
+    /// assert!(matches!(
+    ///     net.step(&[0.1, f32::NAN, 0.2, 0.3], &modulators),
+    ///     Err(StepError::NonFiniteStimulus {
+    ///         index: 1,
+    ///         class: NonFiniteClass::Nan
+    ///     })
+    /// ));
+    ///
+    /// let spikes = net.step(&[0.5; 4], &modulators).expect("finite, length matches");
     /// assert!(spikes.iter().all(|&i| i < 8));
     ///
     /// // Exhausted counter → structured error, no wrap, no panic
@@ -314,12 +448,7 @@ impl SpikingNetwork {
         modulators: &NeuroModulators,
         rng: &mut R,
     ) -> Result<Vec<usize>, StepError> {
-        if stimuli.len() != self.num_channels {
-            return Err(StepError::InputLenMismatch {
-                expected: self.num_channels,
-                got: stimuli.len(),
-            });
-        }
+        validate_step_inputs(stimuli, self.num_channels, modulators)?;
 
         // Checked before any state is touched or any random-number generator is
         // drawn. A restored checkpoint can carry a counter at i64::MAX
@@ -716,9 +845,7 @@ mod tests {
         let mut network = SpikingNetwork::new();
         let modulators = NeuroModulators::default();
         let wrong = vec![0.5; network.num_channels - 1];
-        let before_step = network.global_step;
-        let before_pred = network.predictive_state.clone();
-        let before_mod = network.modulators;
+        let before = capture_network(&network);
 
         let result = network.step(&wrong, &modulators);
 
@@ -729,9 +856,7 @@ mod tests {
                 got: network.num_channels - 1
             })
         );
-        assert_eq!(network.global_step, before_step);
-        assert_eq!(network.predictive_state, before_pred);
-        assert_eq!(network.modulators, before_mod);
+        assert_network_unchanged(&network, &before);
     }
 
     // --- global_step exhaustion (LIM-1227) ---
@@ -745,15 +870,25 @@ mod tests {
     fn assert_step_error_variants_exhaustive(e: &StepError) {
         match e {
             StepError::InputLenMismatch { .. } => {}
+            StepError::NonFiniteStimulus { .. } => {}
+            StepError::NonFiniteModulator { .. } => {}
             StepError::StepCounterExhausted { .. } => {}
         }
     }
 
-    fn all_step_error_variants() -> [StepError; 2] {
+    fn all_step_error_variants() -> [StepError; 4] {
         [
             StepError::InputLenMismatch {
                 expected: 4,
                 got: 2,
+            },
+            StepError::NonFiniteStimulus {
+                index: 0,
+                class: NonFiniteClass::Nan,
+            },
+            StepError::NonFiniteModulator {
+                field: ModulatorField::Dopamine,
+                class: NonFiniteClass::PosInfinity,
             },
             StepError::StepCounterExhausted {
                 global_step: i64::MAX,
@@ -1752,6 +1887,366 @@ mod tests {
                 .iter()
                 .all(|t| t.tau == RmStdpConfig::default().tau_eligibility)
         );
+    }
+    // --- Non-finite step ingress (LIM-1226) ---
+
+    /// Full serialized snapshot so a rejected step cannot hide a mutation in
+    /// any serde-visible field (`global_step`, membranes, traces, weights,
+    /// predictive state, Izhikevich bank, …).
+    fn capture_network(network: &SpikingNetwork) -> serde_json::Value {
+        serde_json::to_value(network).expect("network serializes")
+    }
+
+    fn assert_network_unchanged(network: &SpikingNetwork, before: &serde_json::Value) {
+        assert_eq!(
+            &capture_network(network),
+            before,
+            "rejected step must be a no-op on every serialized field"
+        );
+    }
+
+    fn restored_blank_network(channels: usize) -> SpikingNetwork {
+        serde_json::from_value(
+            serde_json::to_value(SpikingNetwork::with_dimensions(2, 1, channels))
+                .expect("blank network serializes"),
+        )
+        .expect("round-trip restores a network")
+    }
+
+    /// Four LIF / four channels with L1-neutral weights, driven once at `|s| =
+    /// 1.0` so Bernoulli outcomes are deterministic while still leaving
+    /// non-trivial spike, trace, and predictive state to protect.
+    fn ingress_test_network() -> SpikingNetwork {
+        let mut network = rstdp_test_network();
+        let mods = NeuroModulators {
+            dopamine: 0.4,
+            serotonin: 0.1,
+            acetylcholine: 0.2,
+            norepinephrine: 0.3,
+        };
+        network
+            .step(&[1.0; 4], &mods)
+            .expect("finite warm-up must succeed");
+        network
+    }
+
+    const NON_FINITE_CASES: [(f32, NonFiniteClass); 3] = [
+        (f32::NAN, NonFiniteClass::Nan),
+        (f32::INFINITY, NonFiniteClass::PosInfinity),
+        (f32::NEG_INFINITY, NonFiniteClass::NegInfinity),
+    ];
+
+    #[test]
+    fn test_non_finite_class_distinguishes_nan_and_signed_infinities() {
+        assert_eq!(NonFiniteClass::classify(0.0), None);
+        assert_eq!(NonFiniteClass::classify(-0.0), None);
+        assert_eq!(NonFiniteClass::classify(f32::MAX), None);
+        assert_eq!(NonFiniteClass::classify(f32::MIN), None);
+        assert_eq!(
+            NonFiniteClass::classify(f32::NAN),
+            Some(NonFiniteClass::Nan)
+        );
+        assert_eq!(
+            NonFiniteClass::classify(-f32::NAN),
+            Some(NonFiniteClass::Nan)
+        );
+        assert_eq!(
+            NonFiniteClass::classify(f32::INFINITY),
+            Some(NonFiniteClass::PosInfinity)
+        );
+        assert_eq!(
+            NonFiniteClass::classify(f32::NEG_INFINITY),
+            Some(NonFiniteClass::NegInfinity)
+        );
+    }
+
+    #[test]
+    fn test_non_finite_stimulus_rejected_atomically_for_each_class() {
+        let mods = NeuroModulators::default();
+        for (bad, class) in NON_FINITE_CASES {
+            let mut network = ingress_test_network();
+            let before = capture_network(&network);
+            let mut stimuli = [0.5_f32; 4];
+            stimuli[2] = bad;
+
+            assert_eq!(
+                network.step(&stimuli, &mods),
+                Err(StepError::NonFiniteStimulus { index: 2, class })
+            );
+            assert_network_unchanged(&network, &before);
+        }
+    }
+
+    #[test]
+    fn test_non_finite_modulator_rejected_atomically_for_each_field() {
+        let fields = [
+            ModulatorField::Dopamine,
+            ModulatorField::Serotonin,
+            ModulatorField::Acetylcholine,
+            ModulatorField::Norepinephrine,
+        ];
+        for field in fields {
+            for (bad, class) in NON_FINITE_CASES {
+                let mut network = ingress_test_network();
+                let before = capture_network(&network);
+                let mut mods = NeuroModulators {
+                    dopamine: 0.4,
+                    serotonin: 0.1,
+                    acetylcholine: 0.2,
+                    norepinephrine: 0.3,
+                };
+                match field {
+                    ModulatorField::Dopamine => mods.dopamine = bad,
+                    ModulatorField::Serotonin => mods.serotonin = bad,
+                    ModulatorField::Acetylcholine => mods.acetylcholine = bad,
+                    ModulatorField::Norepinephrine => mods.norepinephrine = bad,
+                }
+
+                assert_eq!(
+                    network.step(&[0.5; 4], &mods),
+                    Err(StepError::NonFiniteModulator { field, class })
+                );
+                assert_network_unchanged(&network, &before);
+            }
+        }
+    }
+
+    #[test]
+    fn test_non_finite_late_in_a_long_stimulus_slice_is_a_complete_preflight() {
+        const CHANNELS: usize = 518;
+        let mut network = SpikingNetwork::with_dimensions(4, 1, CHANNELS);
+        for neuron in &mut network.neurons {
+            neuron.weights = vec![WEIGHT_BUDGET / CHANNELS as f32; CHANNELS];
+        }
+        let mods = NeuroModulators::default();
+        let before = capture_network(&network);
+
+        let mut stimuli = vec![0.25_f32; CHANNELS];
+        stimuli[CHANNELS - 1] = f32::NAN;
+
+        assert_eq!(
+            network.step(&stimuli, &mods),
+            Err(StepError::NonFiniteStimulus {
+                index: CHANNELS - 1,
+                class: NonFiniteClass::Nan
+            })
+        );
+        assert_network_unchanged(&network, &before);
+    }
+
+    #[test]
+    fn test_rejected_step_then_valid_step_matches_control_network() {
+        // Control never sees the invalid call. Treatment rejects it, then both
+        // take the same finite step. `|s| = 1.0` makes the Bernoulli outcome
+        // deterministic so the serialized states can match without a
+        // caller-owned RNG (LIM-1221). Because `rand::rng()` is reached only
+        // after preflight, the rejected call also cannot consume a draw.
+        let mut treatment = ingress_test_network();
+        let mut control = ingress_test_network();
+        assert_eq!(capture_network(&treatment), capture_network(&control));
+
+        let mods = NeuroModulators {
+            dopamine: 0.4,
+            serotonin: 0.1,
+            acetylcholine: 0.2,
+            norepinephrine: 0.3,
+        };
+        let mut bad = [1.0_f32; 4];
+        bad[3] = f32::INFINITY;
+        assert_eq!(
+            treatment.step(&bad, &mods),
+            Err(StepError::NonFiniteStimulus {
+                index: 3,
+                class: NonFiniteClass::PosInfinity
+            })
+        );
+        assert_eq!(capture_network(&treatment), capture_network(&control));
+
+        let spikes_t = treatment
+            .step(&[1.0; 4], &mods)
+            .expect("finite retry must succeed");
+        let spikes_c = control
+            .step(&[1.0; 4], &mods)
+            .expect("control step must succeed");
+        assert_eq!(spikes_t, spikes_c);
+        assert_eq!(capture_network(&treatment), capture_network(&control));
+    }
+
+    #[test]
+    fn test_length_mismatch_wins_over_non_finite_samples() {
+        let mut network = SpikingNetwork::with_dimensions(2, 1, 4);
+        let before = capture_network(&network);
+        let mods = NeuroModulators {
+            dopamine: f32::NAN,
+            ..Default::default()
+        };
+
+        assert_eq!(
+            network.step(&[f32::NAN, 0.1], &mods),
+            Err(StepError::InputLenMismatch {
+                expected: 4,
+                got: 2
+            })
+        );
+        assert_network_unchanged(&network, &before);
+    }
+
+    #[test]
+    fn test_stimulus_error_wins_over_modulator_error() {
+        let mut network = SpikingNetwork::with_dimensions(2, 1, 4);
+        let before = capture_network(&network);
+        let mods = NeuroModulators {
+            dopamine: f32::NAN,
+            ..Default::default()
+        };
+        let stimuli = [0.1, f32::NEG_INFINITY, 0.2, 0.3];
+
+        assert_eq!(
+            network.step(&stimuli, &mods),
+            Err(StepError::NonFiniteStimulus {
+                index: 1,
+                class: NonFiniteClass::NegInfinity
+            })
+        );
+        assert_network_unchanged(&network, &before);
+    }
+
+    #[test]
+    fn test_finite_signed_and_extreme_stimuli_still_step() {
+        let mods = NeuroModulators::default();
+        for value in [
+            0.0,
+            -0.0,
+            1.0,
+            -1.0,
+            -0.5,
+            f32::MAX,
+            f32::MIN,
+            f32::MIN_POSITIVE,
+        ] {
+            let mut network = SpikingNetwork::with_dimensions(2, 1, 4);
+            network
+                .step(&[value; 4], &mods)
+                .unwrap_or_else(|_| panic!("{value} is finite and must be accepted"));
+            assert_eq!(network.global_step, 1);
+            assert!(
+                network.predictive_state.iter().all(|s| s.is_finite()),
+                "finite input must not poison predictive state: {:?}",
+                network.predictive_state
+            );
+        }
+    }
+
+    #[test]
+    fn test_serde_json_overflow_stimuli_are_rejected() {
+        // JSON has no Inf token. A magnitude past `f32::MAX` (~3.4e38) is still
+        // a finite JSON/`f64` number and deserializes to `+inf` as `f32`.
+        let pos_inf: f32 = serde_json::from_str("1e39").expect("f32 overflow is +inf");
+        assert_eq!(
+            NonFiniteClass::classify(pos_inf),
+            Some(NonFiniteClass::PosInfinity)
+        );
+
+        let mut restored = restored_blank_network(3);
+        let before = capture_network(&restored);
+        let inf_stimuli: Vec<f32> =
+            serde_json::from_str("[0.1, 1e39, 0.2]").expect("stimulus frame deserializes");
+        assert_eq!(
+            restored.step(&inf_stimuli, &NeuroModulators::default()),
+            Err(StepError::NonFiniteStimulus {
+                index: 1,
+                class: NonFiniteClass::PosInfinity
+            })
+        );
+        assert_network_unchanged(&restored, &before);
+    }
+
+    #[test]
+    fn test_serde_json_overflow_modulators_are_rejected() {
+        let neg_inf: f32 = serde_json::from_str("-1e39").expect("f32 overflow is -inf");
+        assert_eq!(
+            NonFiniteClass::classify(neg_inf),
+            Some(NonFiniteClass::NegInfinity)
+        );
+
+        let mut restored = restored_blank_network(3);
+        let before = capture_network(&restored);
+        let inf_mods: NeuroModulators = serde_json::from_str(
+            r#"{"dopamine":0.0,"serotonin":-1e39,"acetylcholine":0.0,"norepinephrine":0.0}"#,
+        )
+        .expect("modulator snapshot deserializes");
+        assert_eq!(
+            restored.step(&[0.1, 0.2, 0.3], &inf_mods),
+            Err(StepError::NonFiniteModulator {
+                field: ModulatorField::Serotonin,
+                class: NonFiniteClass::NegInfinity
+            })
+        );
+        assert_network_unchanged(&restored, &before);
+    }
+
+    #[test]
+    fn test_serde_bit_pattern_nan_modulator_is_rejected() {
+        // JSON has no NaN token; reconstitute it from a serde-decoded IEEE-754
+        // bit pattern so the invalid payload still arrived through Deserialize.
+        let nan_bits: u32 =
+            serde_json::from_str("2143289344").expect("canonical quiet NaN payload");
+        let nan = f32::from_bits(nan_bits);
+        assert!(
+            nan.is_nan(),
+            "serde-decoded bits must be NaN, got {nan} from {nan_bits}"
+        );
+
+        let mut restored = restored_blank_network(3);
+        let before = capture_network(&restored);
+        let nan_mods: NeuroModulators = serde_json::from_value(serde_json::json!({
+            "dopamine": 0.0,
+            "serotonin": 0.0,
+            "acetylcholine": 0.0,
+            "norepinephrine": 0.0
+        }))
+        .expect("finite modulator object deserializes");
+        let nan_mods = NeuroModulators {
+            acetylcholine: nan,
+            ..nan_mods
+        };
+        assert_eq!(
+            restored.step(&[0.1, 0.2, 0.3], &nan_mods),
+            Err(StepError::NonFiniteModulator {
+                field: ModulatorField::Acetylcholine,
+                class: NonFiniteClass::Nan
+            })
+        );
+        assert_network_unchanged(&restored, &before);
+    }
+
+    #[test]
+    fn test_step_error_display_names_index_field_and_class() {
+        assert_eq!(
+            StepError::InputLenMismatch {
+                expected: 16,
+                got: 2
+            }
+            .to_string(),
+            "expected 16 input channels, got 2"
+        );
+        assert_eq!(
+            StepError::NonFiniteStimulus {
+                index: 7,
+                class: NonFiniteClass::Nan
+            }
+            .to_string(),
+            "non-finite stimulus at index 7: NaN"
+        );
+        assert_eq!(
+            StepError::NonFiniteModulator {
+                field: ModulatorField::Norepinephrine,
+                class: NonFiniteClass::PosInfinity
+            }
+            .to_string(),
+            "non-finite modulator norepinephrine: +inf"
+        );
+        assert_eq!(NonFiniteClass::NegInfinity.to_string(), "-inf");
     }
 
     // --- Caller-injected RNG (LIM-1221) ---------------------------------

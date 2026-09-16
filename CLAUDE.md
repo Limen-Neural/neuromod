@@ -73,7 +73,7 @@ Construction is topology-neutral. `new()` is the legacy default (16 LIF, 5 Izhik
 
 `step_with_rng` is an orchestrator. The length guard stays inline. Each numbered phase below is a private helper on `SpikingNetwork`:
 
-1. Validate `stimuli.len() == num_channels`, else `Err(StepError::InputLenMismatch)`.
+1. Validate `stimuli.len() == num_channels` and that every stimulus and modulator field is finite, else `Err(StepError::InputLenMismatch | NonFiniteStimulus | NonFiniteModulator)`. Rejection is a no-op: no `global_step` increment, no modulator store, no predictive-state update, no random-number generator (RNG) draw.
 2. If `global_step` is negative or already `i64::MAX`, return
    `Err(StepError::StepCounterExhausted)` before any mutation or random-number
    generator (RNG) draw. The counter is in discrete **steps** (not wall-clock),

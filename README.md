@@ -7,7 +7,7 @@
 
 Biologically grounded spiking neural network (SNN) primitives in Rust: a topology-neutral `SpikingNetwork` engine, generic neuromodulators, STDP building blocks, and standalone neuron models.
 
-`neuromod` is a reusable core library: topology-neutral at initialization, dynamically sizable at runtime, and strict about input shape validation. Dual-licensed MIT OR Apache-2.0.
+`neuromod` is a reusable core library: topology-neutral at initialization, dynamically sizable at runtime, and strict about input shape and finiteness validation. Dual-licensed MIT OR Apache-2.0.
 
 ## Highlights
 
@@ -163,12 +163,12 @@ fn main() {
 
 ## Step Errors
 
-`step` validates the call **before** mutating the network. A length mismatch or an exhausted tick counter returns a structured [`StepError`](https://docs.rs/neuromod/latest/neuromod/enum.StepError.html) and leaves every field unchanged.
+`step` validates the call **before** mutating the network or drawing from the random-number generator (RNG). A length mismatch, a non-finite input, or an exhausted tick counter returns a structured [`StepError`](https://docs.rs/neuromod/latest/neuromod/enum.StepError.html) and leaves every field unchanged (failure-atomic no-op). Finite signed values still go through the existing `abs().clamp` magnitude path.
 
 `global_step` is a discrete tick counter in **steps** (not wall-clock time), range `0..=i64::MAX`. Spike timestamps (`LifNeuron::last_spike_time`, `input_spike_times`) use the same unit; `-1` is the sentinel for no recorded spike. A restored checkpoint sitting at `i64::MAX` (or with a negative counter) still deserializes — `step` then returns `StepCounterExhausted` instead of panicking in debug, wrapping in release, or stamping the `-1` sentinel. Call `reset()` to start a new epoch; the engine will not renumber a live network for you.
 
 ```rust
-use neuromod::{NeuroModulators, SpikingNetwork, StepError};
+use neuromod::{NeuroModulators, NonFiniteClass, SpikingNetwork, StepError};
 
 fn main() {
     let mut network = SpikingNetwork::with_dimensions(32, 4, 32);
@@ -176,14 +176,30 @@ fn main() {
     let bad_stimuli = vec![0.1_f32; 31];
 
     match network.step(&bad_stimuli, &modulators) {
-        Ok(_) => unreachable!("expected length mismatch"),
+        Ok(_) => unreachable!("expected a structured error"),
         Err(StepError::InputLenMismatch { expected, got }) => {
             println!("InputLenMismatch: expected {expected}, got {got}");
+        }
+        Err(StepError::NonFiniteStimulus { index, class }) => {
+            println!("NonFiniteStimulus at {index}: {class:?}");
+        }
+        Err(StepError::NonFiniteModulator { field, class }) => {
+            println!("NonFiniteModulator {field:?}: {class:?}");
         }
         Err(StepError::StepCounterExhausted { global_step }) => {
             println!("step counter cannot advance from {global_step}");
         }
     }
+
+    let mut nonfinite = vec![0.1_f32; 32];
+    nonfinite[31] = f32::NAN;
+    assert!(matches!(
+        network.step(&nonfinite, &modulators),
+        Err(StepError::NonFiniteStimulus {
+            index: 31,
+            class: NonFiniteClass::Nan
+        })
+    ));
 
     network.global_step = i64::MAX;
     assert!(matches!(
@@ -313,6 +329,14 @@ them: [ADR 002](https://github.com/Limen-Neural/neuromod/blob/main/docs/adr/002-
 
 ## Migration Notes
 
+### Unreleased — `StepError` names non-finite ingress
+
+`SpikingNetwork::step` now rejects `NaN` / `±∞` stimuli and modulator fields
+before mutating anything. Exhaustive `match`es on `StepError` must handle the
+new `StepError::NonFiniteStimulus` and `StepError::NonFiniteModulator` arms
+(or a `_` wildcard). Length mismatch is still checked first. Finite signed
+inputs are unchanged.
+
 ### 0.6.0 — eligibility traces wired into the engine
 
 **Serialized state survives in self-describing formats.** `LifNeuron::eligibility` and
@@ -393,7 +417,7 @@ assert!(matches!(
 
 ## Included Components
 
-- Engine: `SpikingNetwork`, `StepError` (LIF + Izhikevich banks)
+- Engine: `SpikingNetwork`, `StepError`, `NonFiniteClass`, `ModulatorField` (LIF + Izhikevich banks)
 - Neuromodulation: `NeuroModulators`, `SignalProfile`, `Observation`, `GenericReward`, `UnitReward`, `apply_neuromodulation`
 - Engine neuron types: `LifNeuron`, `IzhikevichNeuron`
 - Stochastic helpers: `lif::PoissonEncoder` (`encode` / `encode_with_rng`); re-exported `Rng`, `SeedableRng`, `StdRng` for caller-injected streams

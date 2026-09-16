@@ -6,6 +6,15 @@ All notable changes to this project are documented in this file.
 
 ### Fixed
 
+- **`SpikingNetwork::step` rejects non-finite stimuli and modulators before mutation**
+  (`src/engine.rs`, LIM-1226). The previous entry guard checked only `stimuli.len()`,
+  then incremented `global_step`, stored the modulator snapshot, and ran
+  `abs().clamp(...)` on each channel. Rust's `f32::clamp` does not sanitize `NaN`,
+  so a non-finite sample could poison predictive state, membranes, thresholds, and
+  later STDP. Preflight is now a linear, allocation-free scan of the whole stimulus
+  slice plus the four modulator fields, and any `Err` is returned before the first
+  mutation or RNG draw. Finite signed values, including `0.0` / `-0.0` and
+  `f32::MAX` / `f32::MIN`, still take the existing clamp/range path.
 - **`SpikingNetwork::step` no longer panics or wraps at `i64::MAX`.** A restored or
   caller-written checkpoint whose `global_step` is already `i64::MAX` now returns
   `StepError::StepCounterExhausted` before any mutation or random-number generator
@@ -25,9 +34,9 @@ All notable changes to this project are documented in this file.
 
 ### Changed
 
-- **`StepError` gained `StepCounterExhausted`.** Exhaustive matches that only named
-  `InputLenMismatch` need a new arm. `StepError` now also implements `Display` and
-  `std::error::Error`. Normal non-exhausted checkpoints are unchanged.
+- **`StepError` gained `StepCounterExhausted`, `NonFiniteStimulus`, and `NonFiniteModulator`.**
+  Exhaustive matches that only named `InputLenMismatch` need new arms. `StepError` now also
+  implements `Display` and `std::error::Error`. Normal non-exhausted checkpoints are unchanged.
 
 ### Added
 
@@ -45,6 +54,7 @@ All notable changes to this project are documented in this file.
   no sibling Limen crates — so an outsider can onboard without the monorepo
   graph. Linked from the README; CI on Linux asserts the resolved `neuromod`
   source is the crates.io registry and `cargo run`s the binary.
+>>>>>>> main
 - **`SparseGifHiddenLayer` — sparse GIF hidden layer** (`src/gif_layer.rs`, #101). An upstream
   port of the reusable GIF layer from the author's `rmems/corinth-canal` repository
   (`src/funnel.rs`), promoted here so the canonical dynamics live in the dynamics crate. It is a

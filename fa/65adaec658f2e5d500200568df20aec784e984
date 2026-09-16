@@ -1,0 +1,19 @@
+CHANGELOG.md
+  s_bca1cc157f930d::t_dd5800af0295e7 8,15
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "fa65adaec658f2e5d500200568df20aec784e984",
+  "prompts": {},
+  "sessions": {
+    "s_bca1cc157f930d": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "163e1970-6e6c-450a-a1dc-bd8de015fa4d",
+        "model": "grok-4.6"
+      },
+      "human_author": "Raul Cardenas Montoya <montoyaraul34@gmail.com>"
+    }
+  }
+}

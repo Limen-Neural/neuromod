@@ -106,10 +106,18 @@ jobs:
             --target wasm32-unknown-unknown \
             --no-default-features \
             --features wasm-js
+          enabled_feature_tree=$(cargo +1.98.1 tree --locked \
+            --target wasm32-unknown-unknown \
+            --no-default-features \
+            --features wasm-js \
+            --edges features \
+            --invert getrandom@0.4.3)
+          grep -F 'getrandom feature "wasm_js"' <<<"$enabled_feature_tree"
           no_feature_tree=$(cargo +1.98.1 tree --locked \
             --target wasm32-unknown-unknown \
             --no-default-features \
-            --edges features)
+            --edges features \
+            --invert getrandom@0.4.3)
           ! grep -F 'getrandom feature "wasm_js"' <<<"$no_feature_tree"
 
       - name: Verify docs are domain-agnostic

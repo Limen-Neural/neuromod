@@ -9,6 +9,22 @@ encoding (that last belongs to `axon-encoder`). Callers that need replay pass
 their own `&mut impl rand::Rng` into the injected variants below and keep that
 one stream for the whole run.
 
+## WebAssembly entropy backends
+
+Browser, Web Worker, and other supported JavaScript-hosted
+`wasm32-unknown-unknown` applications must explicitly enable Neuromod's
+`neuromod/wasm-js` feature:
+
+```toml
+[dependencies]
+neuromod = { version = "0.6", features = ["wasm-js"] }
+```
+
+This selects getrandom's upstream-supported `wasm_js` backend. It remains
+opt-in because not every `wasm32-unknown-unknown` host provides JavaScript
+bindings. Non-Web WASM applications should leave `wasm-js` disabled and select
+an entropy backend appropriate for their final application.
+
 ## Live stochastic paths
 
 These are the only public APIs that draw from a `rand` generator during

@@ -120,3 +120,22 @@ jobs:
           set -euo pipefail
           cargo doc --all-features --no-deps
           ! grep -riE 'spikenaut|\bhft\b|\bmining\b|\bcrypto\b|eagle-lander' target/doc/neuromod/
+
+      # GH#82 / LIM-953: outsider demo must build with crates.io neuromod only.
+      - name: Standalone crates.io demo
+        if: runner.os == 'Linux'
+        shell: bash
+        working-directory: examples/crates-io-standalone
+        run: |
+          set -euo pipefail
+          # No git / path deps in the demo manifest.
+          ! grep -E '^\s*(git|path)\s*=' Cargo.toml
+          cargo fmt --check
+          cargo fetch
+          source=$(cargo metadata --format-version 1 --offline \
+            | python3 -c "import json,sys; d=json.load(sys.stdin); print(next(p['source'] for p in d['packages'] if p['name']=='neuromod'))")
+          echo "neuromod source=$source"
+          test "$source" = "registry+https://github.com/rust-lang/crates.io-index"
+          cargo clippy --all-targets -- -D warnings
+          cargo run
+

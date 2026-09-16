@@ -3,7 +3,7 @@
 [![Crates.io](https://img.shields.io/crates/v/neuromod.svg?label=crates.io)](https://crates.io/crates/neuromod)
 [![docs.rs](https://docs.rs/neuromod/badge.svg)](https://docs.rs/neuromod)
 [![License](https://img.shields.io/crates/l/neuromod.svg)](https://github.com/Limen-Neural/neuromod#license)
-[![codecov](https://codecov.io/gh/Limen-Neural/neuromod/graph/badge.svg?token=V0U0K5P6PW)](https://codecov.io/gh/Limen-Neural/neuromod)
+[![codecov](https://codecov.io/gh/Limen-Neural/neuromod/graph/badge.svg)](https://codecov.io/gh/Limen-Neural/neuromod)
 
 Biologically grounded spiking neural network (SNN) primitives in Rust: a topology-neutral `SpikingNetwork` engine, generic neuromodulators, STDP building blocks, and standalone neuron models.
 
@@ -19,6 +19,7 @@ Biologically grounded spiking neural network (SNN) primitives in Rust: a topolog
 - `GenericReward` trait for domain-specific reward shaping in downstream crates
 - Reward-modulated STDP wired into the engine: per-synapse `EligibilityTrace` accumulation with a dopamine-gated payout, tuned by `RmStdpConfig`
 - Classical (unmodulated) Hebbian STDP utilities for the biological root case
+- Caller-injected RNG on the live stochastic paths (`SpikingNetwork::step_with_rng`, `PoissonEncoder::encode_with_rng`) so a seeded stream can replay a run
 
 ### Engine (`SpikingNetwork`)
 
@@ -108,6 +109,36 @@ fn main() {
     println!("Spiking neuron indices: {spikes:?}");
 }
 ```
+
+### Reproducible steps
+
+The only live stochastic work inside `step` is Bernoulli encoding of
+`input_spike_times`. Keep using `step` when you do not care about the stream.
+For replay, inject one caller RNG and reuse it for the whole run:
+
+```rust
+use neuromod::{NeuroModulators, SeedableRng, SpikingNetwork, StdRng};
+
+fn main() {
+    let mut network = SpikingNetwork::new();
+    let stimuli = [0.5_f32; 16];
+    let modulators = NeuroModulators::default();
+    let mut rng = StdRng::seed_from_u64(0xC0FF_EE01);
+
+    let spikes = network
+        .step_with_rng(&stimuli, &modulators, &mut rng)
+        .unwrap();
+    println!("Spiking neuron indices: {spikes:?}");
+}
+```
+
+The generator is re-exported from this crate (`StdRng`, `SeedableRng`), so the
+example above does not need a direct `rand` dependency. It is not stored on
+`SpikingNetwork` and is not part of a serde checkpoint. With the same `StdRng`
+implementation (this crate's `rand` version and target), the same seed + same
+inputs/state replays a run **from the start**. Resuming a mid-run checkpoint
+needs the generator's advanced state, not only the original seed; see
+[docs/rng.md](docs/rng.md).
 
 ## Dynamic Dimensions
 
@@ -359,6 +390,7 @@ assert!(matches!(
 - Engine: `SpikingNetwork`, `StepError` (LIF + Izhikevich banks)
 - Neuromodulation: `NeuroModulators`, `SignalProfile`, `Observation`, `GenericReward`, `UnitReward`, `apply_neuromodulation`
 - Engine neuron types: `LifNeuron`, `IzhikevichNeuron`
+- Stochastic helpers: `lif::PoissonEncoder` (`encode` / `encode_with_rng`); re-exported `Rng`, `SeedableRng`, `StdRng` for caller-injected streams
 - Standalone neuron types: `GifNeuron`, `GifParams`, `LapicqueNeuron`, `FitzHughNagumoNeuron`, `HodgkinHuxleyNeuron`
 - Standalone layer: `SparseGifHiddenLayer`, `SparseGifLayerConfig`, `SpikeRaster`, `GifLayerError`
 - Learning/plasticity:
@@ -376,16 +408,40 @@ See the full planning documents:
 - [neuromod Boundary Matrix](https://github.com/Limen-Neural/neuromod/blob/main/docs/neuromod-boundary-matrix.md) — runtime/deployment role, owns/does-not-own, allowed/forbidden dependencies vs. limbic-critic, brainstem-daemon, axon-encoder, synaptic-mesh, silicon-bridge, Spikenaut-Hardware, plasticity-lab, etc. (LIM-9).
 - [ADR 001: Shared traits live in neuromod](https://github.com/Limen-Neural/neuromod/blob/main/docs/adr/001-traits-in-neuromod.md) — why traits are hosted here.
 - [ADR 002: Wire eligibility traces into the engine](https://github.com/Limen-Neural/neuromod/blob/main/docs/adr/002-wire-eligibility-traces.md) — why R-STDP is wired rather than demoted, and what changed in the learning path.
+- [RNG inventory](https://github.com/Limen-Neural/neuromod/blob/main/docs/rng.md) — live stochastic paths, caller-injected RNG variants, and deterministic surfaces.
 
 ## Examples
 
-Run included examples:
+In-repo examples use the **local** crate (clone this repository):
 
 ```bash
 cargo run --example basic
 cargo run --example rstdp_demo
 cargo run --example sparse_gif_layer
 ```
+
+### Standalone crates.io demo
+
+Outsiders who are not on the Limen git graph can depend only on crates.io. The runnable package is [`examples/crates-io-standalone`](examples/crates-io-standalone) — a detached Cargo workspace so it cannot pick up this path crate.
+
+```bash
+cd examples/crates-io-standalone
+cargo run
+```
+
+Or start a binary anywhere with this `Cargo.toml` (no `git =`, no `path =`):
+
+```toml
+[package]
+name = "neuromod-crates-io-demo"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+neuromod = "0.5"
+```
+
+`neuromod = "0.5"` stays on the published 0.5.x line. This repository's 0.6.0 APIs (wired R-STDP, `SparseGifHiddenLayer`) are not on crates.io until that tag is published — use the in-repo examples above for those.
 
 ## Development
 
@@ -415,13 +471,13 @@ cargo hack check --feature-powerset --exclude-no-default-features --keep-going
 
 ### Codecov
 
-[![codecov](https://codecov.io/gh/Limen-Neural/neuromod/graph/badge.svg?token=V0U0K5P6PW)](https://codecov.io/gh/Limen-Neural/neuromod)
+[![codecov](https://codecov.io/gh/Limen-Neural/neuromod/graph/badge.svg)](https://codecov.io/gh/Limen-Neural/neuromod)
 
 - Configuration: [`codecov.yml`](codecov.yml)
 - Workflow: [`.github/workflows/coverage.yml`](.github/workflows/coverage.yml)
 - Dashboard: [codecov.io/gh/Limen-Neural/neuromod](https://codecov.io/gh/Limen-Neural/neuromod)
 
-The badge uses Codecov’s graph token (from **Configuration → Badges & Graphs**).
+The badge links to Codecov's test coverage report.
 **Uploads** need the repository secret **`CODECOV_TOKEN`** (tokenless uploads return
 HTTP 400 for this org). The coverage workflow passes that token and sets
 `fail_ci_if_error: false`, so a missing/stale token does **not** fail CI—only the

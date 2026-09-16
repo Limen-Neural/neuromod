@@ -9,12 +9,14 @@
 //! [`PoissonEncoder`] is a small helper that turns a scalar intensity into a
 //! binary spike train (Bernoulli trials). It is **not** required by
 //! `SpikingNetwork::step` (the engine encodes stimuli itself), but is useful in
-//! demos and tests.
+//! demos and tests. [`PoissonEncoder::encode_with_rng`] accepts a caller RNG so
+//! a seeded stream can reproduce a train; [`PoissonEncoder::encode`] keeps the
+//! thread-local convenience wrapper.
 //!
 //! For the classical Lapicque root model, see [`crate::lapicque`]. For the
 //! secondary engine bank, see [`crate::izhikevich`].
 
-use rand::RngExt;
+use rand::{Rng, RngExt};
 use serde::{Deserialize, Serialize};
 
 use crate::rm_stdp::EligibilityTrace;
@@ -34,8 +36,22 @@ impl PoissonEncoder {
     /// PHYSICS ANALOGY:
     /// This acts like a "Geiger Counter" for your data.
     /// High Intensity (Molarity/Voltage) = High Click Rate (Spikes).
+    ///
+    /// Draws from the thread-local RNG ([`rand::rng`]). For a reproducible
+    /// train, use [`Self::encode_with_rng`].
     pub fn encode(&self, input: f32) -> Vec<u8> {
-        let mut rng = rand::rng();
+        self.encode_with_rng(input, &mut rand::rng())
+    }
+
+    /// Encode using a caller-injected RNG for the Bernoulli trials.
+    ///
+    /// Same contract as [`Self::encode`]: `input` is clamped to `[0, 1]`, a
+    /// zero probability yields an all-zero train, and a probability of `1.0`
+    /// yields an all-ones train without drawing from `rng`. Intermediate
+    /// probabilities consume one uniform draw per step from the same `rng`.
+    ///
+    /// The generator is not stored on [`PoissonEncoder`] and is not serialized.
+    pub fn encode_with_rng<R: Rng + ?Sized>(&self, input: f32, rng: &mut R) -> Vec<u8> {
         let mut spikes = Vec::with_capacity(self.num_steps);
 
         // Clamp input to ensure probability is valid (0% to 100%)
@@ -147,6 +163,8 @@ impl LifNeuron {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rand::SeedableRng;
+    use rand::rngs::StdRng;
 
     #[test]
     fn default_neuron_has_expected_initial_state() {
@@ -235,5 +253,61 @@ mod tests {
             let encoder = PoissonEncoder::new(steps);
             assert_eq!(encoder.encode(0.5).len(), steps);
         }
+    }
+
+    fn poisson_rng_hash(spikes: &[u8]) -> u64 {
+        spikes.iter().fold(0xC0FF_EE01_u64, |h, &s| {
+            h.wrapping_mul(0x9E37_79B9_7F4A_7C15).wrapping_add(s as u64)
+        })
+    }
+
+    #[test]
+    fn poisson_encoder_rng_injection_is_reproducible() {
+        let encoder = PoissonEncoder::new(256);
+        let mut rng_a = StdRng::seed_from_u64(0xA11CE);
+        let mut rng_b = StdRng::seed_from_u64(0xA11CE);
+        let spikes_a = encoder.encode_with_rng(0.4, &mut rng_a);
+        let spikes_b = encoder.encode_with_rng(0.4, &mut rng_b);
+        assert_eq!(spikes_a, spikes_b);
+        let hash = poisson_rng_hash(&spikes_a);
+        println!("poisson seeded trace hash: {hash:#018x}");
+        assert_eq!(hash, poisson_rng_hash(&spikes_b));
+    }
+
+    #[test]
+    fn poisson_encoder_different_rng_seeds_diverge() {
+        let encoder = PoissonEncoder::new(512);
+        let mut rng_a = StdRng::seed_from_u64(1);
+        let mut rng_b = StdRng::seed_from_u64(2);
+        let spikes_a = encoder.encode_with_rng(0.5, &mut rng_a);
+        let spikes_b = encoder.encode_with_rng(0.5, &mut rng_b);
+        let mismatches = spikes_a
+            .iter()
+            .zip(spikes_b.iter())
+            .filter(|(a, b)| a != b)
+            .count();
+        assert!(
+            mismatches > 50,
+            "independent seeds should disagree often at p=0.5, got {mismatches} / 512"
+        );
+    }
+
+    #[test]
+    fn poisson_encoder_rng_stream_is_not_recreated_per_step() {
+        let encoder = PoissonEncoder::new(32);
+        let mut rng = StdRng::seed_from_u64(99);
+        let first = encoder.encode_with_rng(0.5, &mut rng);
+        let second = encoder.encode_with_rng(0.5, &mut rng);
+
+        let mut reseeded = StdRng::seed_from_u64(99);
+        let reseeded_first = encoder.encode_with_rng(0.5, &mut reseeded);
+        let mut reseeded_again = StdRng::seed_from_u64(99);
+        let reseeded_second = encoder.encode_with_rng(0.5, &mut reseeded_again);
+
+        assert_eq!(first, reseeded_first);
+        assert_ne!(
+            second, reseeded_second,
+            "continuing the same stream must not match a fresh seed"
+        );
     }
 }

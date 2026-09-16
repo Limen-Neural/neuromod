@@ -12,7 +12,7 @@ It is a pure computation library: no I/O, no hardware, no application orchestrat
 ## Owns
 
 - Neuron model implementations (Lapicque, LIF, GIF, Izhikevich, FitzHugh-Nagumo, Hodgkin-Huxley)
-- `SpikingNetwork` (including `new()`, `with_dimensions()`, `step()`, state accessors, `StepError`)
+- `SpikingNetwork` (including `new()`, `with_dimensions()`, `step()`, `step_with_rng()`, state accessors, `StepError`)
 - `NeuroModulators` (dopamine, serotonin, acetylcholine, norepinephrine), `SignalProfile` (neutral `default()`; unit conventions in [docs/signal-units.md](signal-units.md); `hardware_calibrated()` deprecated since 0.6.0), `Observation`, `GenericReward` trait, `UnitReward`, `apply_reward`, `apply_neuromodulation`
 - Foundational plasticity building blocks:
   - Reward-modulated STDP (`rm_stdp`: `EligibilityTrace`, `RmStdpConfig`, constants)
@@ -37,7 +37,7 @@ It is a pure computation library: no I/O, no hardware, no application orchestrat
 ## Allowed Dependencies
 
 - `serde` (with derive) — for serialization of core types
-- `rand` — for stochastic elements inside neuron models
+- `rand` — for stochastic elements inside neuron models; callers may inject `&mut impl rand::Rng` into `step_with_rng` / `encode_with_rng`. Inventory: [docs/rng.md](rng.md).
 - Minimal std + the above; keep the crate lightweight and portable
 
 ## Forbidden Dependencies / Domains

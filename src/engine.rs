@@ -18,8 +18,14 @@
 //! dopamine gates only the trace → weight conversion, so a coincidence recorded
 //! while reward was absent can still be paid out later (see [`crate::rm_stdp`]
 //! and [`RmStdpConfig`]).
+//!
+//! The only live stochastic work in `step` is Bernoulli encoding of
+//! `input_spike_times`. [`SpikingNetwork::step`] uses the thread-local RNG;
+//! [`SpikingNetwork::step_with_rng`] takes a caller-owned `&mut impl rand::Rng`
+//! so one stream can drive a multi-step run. The generator is not stored on
+//! the network and is not serialized.
 
-use rand::RngExt;
+use rand::{Rng, RngExt};
 use serde::{Deserialize, Serialize};
 
 use super::izhikevich::IzhikevichNeuron;
@@ -29,6 +35,9 @@ use super::rm_stdp::*;
 
 /// L1 synaptic weight budget per neuron (total weight sum target).
 const WEIGHT_BUDGET: f32 = 2.0;
+const PRED_ALPHA: f32 = 0.1;
+const PRED_ERR_WEIGHT: f32 = 0.5;
+const INHIBITION_STRENGTH: f32 = 0.05;
 
 /// Errors from [`SpikingNetwork::step`].
 ///
@@ -219,7 +228,10 @@ impl SpikingNetwork {
     /// 4. Update per-channel predictive EMA and surprise (`pred_errors`).
     /// 5. For each channel with `|stimuli| > 0.01`, run a Bernoulli trial
     ///    with probability `clamp(|stimuli|, 0.0, 1.0)` and stamp
-    ///    `input_spike_times` on success.
+    ///    `input_spike_times` on success. This convenience wrapper draws from
+    ///    the thread-local RNG ([`rand::rng`]). For a reproducible multi-step
+    ///    run, use [`Self::step_with_rng`] with one caller-owned generator and
+    ///    do not reseed it between steps.
     /// 6. Integrate each LIF neuron (weighted stimuli + surprise), then `check_fire`.
     /// 7. Lateral inhibition on non-firing LIF cells if anyone spiked.
     /// 8. R-STDP on LIF weights (`apply_stdp`): decay and accumulate every
@@ -270,6 +282,38 @@ impl SpikingNetwork {
         stimuli: &[f32],
         modulators: &NeuroModulators,
     ) -> Result<Vec<usize>, StepError> {
+        self.step_with_rng(stimuli, modulators, &mut rand::rng())
+    }
+
+    /// Advance one step using a caller-injected RNG for Bernoulli encoding.
+    ///
+    /// Same contract and order of work as [`Self::step`], except the stochastic
+    /// channel encoding (item 4) draws from `rng` instead of the thread-local
+    /// generator. Pass the same `&mut` generator on every step of a run so the
+    /// stream is not recreated or reseeded inside the loop.
+    ///
+    /// `rng` is never stored on [`SpikingNetwork`] and is not part of the serde
+    /// checkpoint.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use neuromod::{NeuroModulators, SeedableRng, SpikingNetwork, StdRng};
+    ///
+    /// let mut net = SpikingNetwork::with_dimensions(4, 1, 4);
+    /// let modulators = NeuroModulators::default();
+    /// let mut rng = StdRng::seed_from_u64(0xC0FF_EE01);
+    /// let spikes = net
+    ///     .step_with_rng(&[0.5; 4], &modulators, &mut rng)
+    ///     .expect("length matches");
+    /// assert!(spikes.iter().all(|&i| i < 4));
+    /// ```
+    pub fn step_with_rng<R: Rng + ?Sized>(
+        &mut self,
+        stimuli: &[f32],
+        modulators: &NeuroModulators,
+        rng: &mut R,
+    ) -> Result<Vec<usize>, StepError> {
         if stimuli.len() != self.num_channels {
             return Err(StepError::InputLenMismatch {
                 expected: self.num_channels,
@@ -298,6 +342,20 @@ impl SpikingNetwork {
         let stress_multiplier = (1.0 - self.modulators.norepinephrine).max(0.1);
         let learning_rate = 0.5 * self.modulators.dopamine;
 
+        self.retune_lif_from_modulators(learning_rate);
+        let pred_errors = self.update_predictive_errors(stimuli);
+        self.encode_input_spikes(stimuli, rng);
+        self.integrate_lif_bank(stimuli, &pred_errors, stress_multiplier);
+        let spike_ids = self.fire_lif_and_inhibit();
+        self.apply_stdp(learning_rate);
+        self.renormalize_lif_weights();
+        self.drive_izhikevich_bank();
+
+        Ok(spike_ids)
+    }
+
+    /// Recompute LIF `decay_rate` and `threshold` from the current modulators.
+    fn retune_lif_from_modulators(&mut self, learning_rate: f32) {
         for neuron in &mut self.neurons {
             let target_decay = 0.15 - (0.05 * self.modulators.acetylcholine);
             neuron.decay_rate = target_decay;
@@ -310,26 +368,35 @@ impl SpikingNetwork {
             neuron.threshold += (target_threshold - neuron.threshold) * learning_rate;
             neuron.threshold = neuron.threshold.clamp(0.05, 0.50);
         }
+    }
 
-        const PRED_ALPHA: f32 = 0.1;
-        const PRED_ERR_WEIGHT: f32 = 0.5;
+    /// Per-channel EMA of `|stimuli|` and the surprise (`pred_errors`) it implies.
+    fn update_predictive_errors(&mut self, stimuli: &[f32]) -> Vec<f32> {
         let mut pred_errors = vec![0.0_f32; self.num_channels];
-
         for ch in 0..self.num_channels {
             let s = stimuli[ch].abs().clamp(0.0, 1.0);
             pred_errors[ch] = (s - self.predictive_state[ch]).abs();
             self.predictive_state[ch] =
                 PRED_ALPHA * s + (1.0 - PRED_ALPHA) * self.predictive_state[ch];
         }
+        pred_errors
+    }
 
-        let mut rng = rand::rng();
+    /// Bernoulli-encode `stimuli` into `input_spike_times` from `rng`.
+    ///
+    /// One draw per channel with `|stimuli| > 0.01`. The caller owns `rng`;
+    /// this path does not construct or reseed a generator.
+    fn encode_input_spikes<R: Rng + ?Sized>(&mut self, stimuli: &[f32], rng: &mut R) {
         for (ch, &s) in stimuli.iter().enumerate() {
             let abs_s = s.abs().clamp(0.0, 1.0);
             if abs_s > 0.01 && rng.random_range(0.0..1.0) < abs_s {
                 self.input_spike_times[ch] = self.global_step;
             }
         }
+    }
 
+    /// Integrate each LIF neuron from weighted stimuli plus surprise.
+    fn integrate_lif_bank(&mut self, stimuli: &[f32], pred_errors: &[f32], stress_multiplier: f32) {
         for neuron in &mut self.neurons {
             let mut total_current = 0.0;
             for ch in 0..self.num_channels {
@@ -343,47 +410,54 @@ impl SpikingNetwork {
             total_current *= 0.45 * stress_multiplier;
             neuron.integrate(total_current);
         }
+    }
 
+    /// Fire LIF neurons, then laterally inhibit the ones that did not spike.
+    ///
+    /// Membership is an O(1) `fired` mask so this stays linear in neuron count
+    /// even when `with_dimensions` builds a large bank.
+    fn fire_lif_and_inhibit(&mut self) -> Vec<usize> {
         let mut spike_ids = Vec::new();
+        let mut fired = vec![false; self.neurons.len()];
         for (i, neuron) in self.neurons.iter_mut().enumerate() {
             if let Some(_peak_v) = neuron.check_fire() {
                 neuron.last_spike = true;
                 neuron.last_spike_time = self.global_step;
                 spike_ids.push(i);
+                fired[i] = true;
             } else {
                 neuron.last_spike = false;
             }
         }
 
         if !spike_ids.is_empty() {
-            const INHIBITION_STRENGTH: f32 = 0.05;
             for (i, neuron) in self.neurons.iter_mut().enumerate() {
-                if !spike_ids.contains(&i) {
+                if !fired[i] {
                     neuron.membrane_potential =
                         (neuron.membrane_potential - INHIBITION_STRENGTH).max(0.0);
                 }
             }
         }
+        spike_ids
+    }
 
-        self.apply_stdp(learning_rate);
+    #[inline]
+    #[cfg(test)]
+    fn fire_and_inhibit(&mut self) -> Vec<usize> {
+        self.fire_lif_and_inhibit()
+    }
 
-        // Scale toward the L1 budget, then enforce the configured bounds. The
-        // bounds win where the two disagree: under the defaults they cannot
-        // bind here, so the budget holds exactly; a narrowed range is honored
-        // and leaves the sum off budget. See the `step` contract, item 8.
+    /// Scale toward the L1 budget, then enforce the configured bounds. The
+    /// bounds win where the two disagree: under the defaults they cannot
+    /// bind here, so the budget holds exactly; a narrowed range is honored
+    /// and leaves the sum off budget. See the `step` contract, item 8.
+    fn renormalize_lif_weights(&mut self) {
         let (w_min, w_max) = self.stdp_config.weight_bounds();
         for neuron in &mut self.neurons {
             let total: f32 = neuron.weights.iter().sum();
             if total > 1e-6 {
                 let scale = WEIGHT_BUDGET / total;
                 for w in &mut neuron.weights {
-                    // A synapse at exactly zero is unconnected. Rescaling and
-                    // capping the connected ones is this pass's job, but a
-                    // positive `w_min` must not conjure a connection here: this
-                    // loop runs every step, dopamine or not, and an unrewarded
-                    // step must leave weights alone. Learning raises a synapse
-                    // to the floor in `apply_stdp`, and only on a step where it
-                    // actually applies an update.
                     if *w == 0.0 {
                         continue;
                     }
@@ -392,7 +466,10 @@ impl SpikingNetwork {
                 }
             }
         }
+    }
 
+    /// Drive the Izhikevich bank from mean LIF membrane potential + dopamine.
+    fn drive_izhikevich_bank(&mut self) {
         let lif_mean = if !self.neurons.is_empty() {
             let sum: f32 = self.neurons.iter().map(|n| n.membrane_potential).sum();
             sum / self.neurons.len() as f32
@@ -404,8 +481,6 @@ impl SpikingNetwork {
         for iz in &mut self.iz_neurons {
             iz.step(iz_drive);
         }
-
-        Ok(spike_ids)
     }
 
     /// Reward-modulated STDP over the per-synapse eligibility traces.
@@ -545,6 +620,8 @@ impl Default for SpikingNetwork {
 mod tests {
     use super::*;
     use std::collections::BTreeSet;
+    use rand::SeedableRng;
+    use rand::rngs::StdRng;
 
     #[test]
     fn test_network_creation_defaults() {
@@ -592,6 +669,46 @@ mod tests {
             .expect("valid input length should pass");
         assert_eq!(network.global_step, 1);
         assert!(spikes.len() <= network.neurons.len());
+    }
+
+    #[test]
+    fn test_fire_and_inhibit_spares_firers_and_pulls_down_the_rest() {
+        let mut network = SpikingNetwork::with_dimensions(4, 0, 1);
+        network.global_step = 7;
+
+        network.neurons[0].membrane_potential = 1.0;
+        network.neurons[1].membrane_potential = 1.0;
+        network.neurons[2].threshold = 0.5;
+        network.neurons[3].threshold = 0.5;
+        network.neurons[2].membrane_potential = 0.20;
+        network.neurons[3].membrane_potential = 0.20;
+
+        let spikes = network.fire_and_inhibit();
+
+        assert_eq!(spikes, vec![0, 1]);
+        assert!(network.neurons[0].last_spike && network.neurons[1].last_spike);
+        assert!(!network.neurons[2].last_spike && !network.neurons[3].last_spike);
+        assert_eq!(network.neurons[0].last_spike_time, 7);
+        assert_eq!(network.neurons[0].membrane_potential, 0.0);
+        assert!((network.neurons[2].membrane_potential - 0.15).abs() < 1e-6);
+        assert!((network.neurons[3].membrane_potential - 0.15).abs() < 1e-6);
+    }
+
+    #[test]
+    fn test_fire_and_inhibit_skips_when_nobody_spikes() {
+        let mut network = SpikingNetwork::with_dimensions(3, 0, 1);
+        for neuron in &mut network.neurons {
+            neuron.threshold = 0.5;
+            neuron.membrane_potential = 0.20;
+        }
+
+        let spikes = network.fire_and_inhibit();
+
+        assert!(spikes.is_empty());
+        for neuron in &network.neurons {
+            assert!(!neuron.last_spike);
+            assert!((neuron.membrane_potential - 0.20).abs() < 1e-6);
+        }
     }
 
     #[test]
@@ -1634,6 +1751,210 @@ mod tests {
                 .eligibility
                 .iter()
                 .all(|t| t.tau == RmStdpConfig::default().tau_eligibility)
+        );
+    }
+
+    // --- Caller-injected RNG (LIM-1221) ---------------------------------
+
+    fn rng_test_network() -> SpikingNetwork {
+        const CHANNELS: usize = 8;
+        let mut network = SpikingNetwork::with_dimensions(8, 2, CHANNELS);
+        let seed = WEIGHT_BUDGET / CHANNELS as f32;
+        for neuron in &mut network.neurons {
+            neuron.weights = vec![seed; CHANNELS];
+        }
+        network
+    }
+
+    fn mix_u64(h: u64, x: u64) -> u64 {
+        h.wrapping_mul(0x9E37_79B9_7F4A_7C15).wrapping_add(x)
+    }
+
+    fn mix_f32(h: u64, x: f32) -> u64 {
+        mix_u64(h, u64::from(x.to_bits()))
+    }
+
+    /// Hash LIF spike ids plus the RNG-visible / learned state after a run.
+    fn network_trace_hash(network: &SpikingNetwork, spikes: &[Vec<usize>]) -> u64 {
+        let mut h = 0xC0FF_EE01_u64;
+        h = mix_u64(h, network.global_step as u64);
+        for ids in spikes {
+            h = mix_u64(h, ids.len() as u64);
+            for &i in ids {
+                h = mix_u64(h, i as u64);
+            }
+            h = mix_u64(h, 0xFF);
+        }
+        for &t in &network.input_spike_times {
+            h = mix_u64(h, t as u64);
+        }
+        for neuron in &network.neurons {
+            h = mix_f32(h, neuron.membrane_potential);
+            h = mix_f32(h, neuron.threshold);
+            for &w in &neuron.weights {
+                h = mix_f32(h, w);
+            }
+            for trace in &neuron.eligibility {
+                h = mix_f32(h, trace.value);
+            }
+        }
+        for iz in &network.iz_neurons {
+            h = mix_f32(h, iz.v);
+            h = mix_f32(h, iz.u);
+        }
+        h
+    }
+
+    fn run_seeded_trace(seed: u64, steps: usize) -> (u64, Vec<Vec<usize>>, SpikingNetwork) {
+        let mut network = rng_test_network();
+        let mut rng = StdRng::seed_from_u64(seed);
+        let modulators = NeuroModulators {
+            dopamine: 0.6,
+            ..Default::default()
+        };
+        let stimuli = [0.5_f32; 8];
+        let mut spikes = Vec::with_capacity(steps);
+        for _ in 0..steps {
+            spikes.push(
+                network
+                    .step_with_rng(&stimuli, &modulators, &mut rng)
+                    .expect("length matches"),
+            );
+        }
+        let hash = network_trace_hash(&network, &spikes);
+        (hash, spikes, network)
+    }
+
+    #[test]
+    fn seeded_step_with_rng_is_reproducible() {
+        const SEED: u64 = 0xC0FF_EE01;
+        const STEPS: usize = 64;
+
+        let (hash_a, spikes_a, net_a) = run_seeded_trace(SEED, STEPS);
+        let (hash_b, spikes_b, net_b) = run_seeded_trace(SEED, STEPS);
+
+        println!("seeded engine trace hash run A: {hash_a:#018x}");
+        println!("seeded engine trace hash run B: {hash_b:#018x}");
+
+        assert_eq!(hash_a, hash_b, "same seed must replay the same trace hash");
+        assert_eq!(spikes_a, spikes_b);
+        assert_eq!(net_a.input_spike_times, net_b.input_spike_times);
+        assert_eq!(
+            net_a.get_membrane_potentials(),
+            net_b.get_membrane_potentials()
+        );
+        for (left, right) in net_a.neurons.iter().zip(net_b.neurons.iter()) {
+            assert_eq!(left.weights, right.weights);
+        }
+    }
+
+    #[test]
+    fn different_rng_seeds_diverge_statistically() {
+        const STEPS: usize = 128;
+        let (_, spikes_a, net_a) = run_seeded_trace(1, STEPS);
+        let (_, spikes_b, net_b) = run_seeded_trace(2, STEPS);
+
+        let input_mismatches = net_a
+            .input_spike_times
+            .iter()
+            .zip(net_b.input_spike_times.iter())
+            .filter(|(a, b)| a != b)
+            .count();
+        let spike_mismatches = spikes_a
+            .iter()
+            .zip(spikes_b.iter())
+            .filter(|(a, b)| a != b)
+            .count();
+        let weight_mismatch = net_a
+            .neurons
+            .iter()
+            .zip(net_b.neurons.iter())
+            .any(|(a, b)| a.weights != b.weights);
+
+        assert!(
+            input_mismatches + spike_mismatches > 0 || weight_mismatch,
+            "independent seeds must diverge in spike times, LIF spikes, or weights"
+        );
+        assert_ne!(
+            network_trace_hash(&net_a, &spikes_a),
+            network_trace_hash(&net_b, &spikes_b)
+        );
+    }
+
+    #[test]
+    fn injected_rng_stream_spans_multiple_steps_without_reseed() {
+        let modulators = NeuroModulators {
+            dopamine: 0.6,
+            ..Default::default()
+        };
+        let stimuli = [0.5_f32; 8];
+
+        let mut continuing = rng_test_network();
+        let mut rng = StdRng::seed_from_u64(99);
+        continuing
+            .step_with_rng(&stimuli, &modulators, &mut rng)
+            .expect("length matches");
+        continuing
+            .step_with_rng(&stimuli, &modulators, &mut rng)
+            .expect("length matches");
+
+        let mut reseeded = rng_test_network();
+        reseeded
+            .step_with_rng(&stimuli, &modulators, &mut StdRng::seed_from_u64(99))
+            .expect("length matches");
+        reseeded
+            .step_with_rng(&stimuli, &modulators, &mut StdRng::seed_from_u64(99))
+            .expect("length matches");
+
+        assert_ne!(
+            continuing.input_spike_times, reseeded.input_spike_times,
+            "one caller stream must keep advancing instead of reseeding per step"
+        );
+    }
+
+    #[test]
+    fn step_with_rng_accepts_dyn_rng() {
+        let mut network = rng_test_network();
+        let modulators = NeuroModulators::default();
+        let mut rng = StdRng::seed_from_u64(3);
+        let rng: &mut dyn Rng = &mut rng;
+        network
+            .step_with_rng(&[0.5; 8], &modulators, rng)
+            .expect("length matches");
+    }
+
+    #[test]
+    fn step_with_rng_mismatch_does_not_consume_rng() {
+        let mut network = rng_test_network();
+        let modulators = NeuroModulators::default();
+        let mut rng = StdRng::seed_from_u64(7);
+        let mut fresh = StdRng::seed_from_u64(7);
+
+        let err = network
+            .step_with_rng(&[0.5], &modulators, &mut rng)
+            .expect_err("length mismatch");
+        assert_eq!(
+            err,
+            StepError::InputLenMismatch {
+                expected: 8,
+                got: 1
+            }
+        );
+        assert_eq!(
+            rng.next_u64(),
+            fresh.next_u64(),
+            "a rejected step must not draw from the caller stream"
+        );
+    }
+
+    #[test]
+    fn rng_is_not_serialized_on_the_checkpoint() {
+        let network = rng_test_network();
+        let json = serde_json::to_string(&network).expect("network serializes");
+        let lower = json.to_ascii_lowercase();
+        assert!(
+            !lower.contains("rng") && !lower.contains("rand"),
+            "checkpoint must not grow an implicit RNG field: {json}"
         );
     }
 }

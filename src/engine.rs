@@ -619,9 +619,9 @@ impl Default for SpikingNetwork {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::collections::BTreeSet;
     use rand::SeedableRng;
     use rand::rngs::StdRng;
+    use std::collections::BTreeSet;
 
     #[test]
     fn test_network_creation_defaults() {

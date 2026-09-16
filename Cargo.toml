@@ -24,6 +24,7 @@ exclude = [
     "CLAUDE.md",
     "REVIEW.md",
     "benches/README.md",
+    "examples/crates-io-standalone/",
 ]
 repository = "https://github.com/Limen-Neural/neuromod"
 readme = "README.md"
@@ -33,14 +34,23 @@ homepage = "https://github.com/Limen-Neural/neuromod"
 documentation = "https://docs.rs/neuromod"
 
 [workspace]
+# Nested outsider demo resolves `neuromod` from crates.io, not this path crate.
+exclude = ["examples/crates-io-standalone"]
 
 [lib]
 name = "neuromod"
 path = "src/lib.rs"
 
+[features]
+default = []
+wasm-js = ["dep:getrandom", "getrandom/wasm_js"]
+
 [dependencies]
 serde = { version = "1.0", features = ["derive"] }
 rand = "0.10.1"
+
+[target.'cfg(all(target_arch = "wasm32", target_os = "unknown"))'.dependencies]
+getrandom = { version = "0.4.3", optional = true }
 
 [dev-dependencies]
 criterion = "0.8.2"

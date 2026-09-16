@@ -59,11 +59,17 @@ cargo run --example basic_lif
 cargo run --example hebbian_learning
 cargo run --example rstdp_demo
 
+# Outsider crates.io-only demo (detached workspace; GH#82)
+# Must resolve neuromod from the registry, not this path crate.
+( cd examples/crates-io-standalone && cargo run )
+
+
 # Release-mode smoke
 cargo run --example basic --release
 cargo run --example basic_lif --release
 cargo run --example hebbian_learning --release
 cargo run --example rstdp_demo --release
+( cd examples/crates-io-standalone && cargo run --release )
 ```
 
 ## Benchmarks smoke
@@ -104,6 +110,8 @@ Verify the core public API surface has not been silently removed:
 
 ```bash
 grep -R 'pub struct SpikingNetwork\|pub enum StepError' src/
+grep -q 'pub fn step_with_rng' src/ \
+  && grep -q 'pub fn encode_with_rng' src/
 grep -R 'pub struct LifNeuron\|pub struct GifNeuron\|pub struct IzhikevichNeuron\|pub struct LapicqueNeuron\|pub struct FitzHughNagumoNeuron\|pub struct HodgkinHuxleyNeuron' src/
 grep -R 'pub struct NeuroModulators\|pub struct SignalProfile\|pub struct Observation' src/
 grep -R 'pub trait GenericReward\|pub struct UnitReward' src/

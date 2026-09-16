@@ -26,6 +26,9 @@
 //!    for research use outside the engine.
 //! 7. [`gif_layer`] — [`SparseGifHiddenLayer`], a structure-of-arrays bank of GIF
 //!    neurons with deterministic sparse fan-in and batched execution.
+//! 8. Reproducibility — [`SpikingNetwork::step_with_rng`] and
+//!    [`lif::PoissonEncoder::encode_with_rng`] inject a caller RNG into the
+//!    only live stochastic paths. See the [RNG inventory](https://github.com/Limen-Neural/neuromod/blob/main/docs/rng.md).
 //!
 //! ## Engine vs standalone models
 //!
@@ -40,11 +43,24 @@
 //!   the coincidence it pays for. Classical Hebbian STDP utilities are separate and
 //!   unmodulated.
 //!
+//! ## Reproducibility
+//!
+//! Two public paths draw random numbers: [`SpikingNetwork::step`] (Poisson-style
+//! encoding of `input_spike_times`) and [`lif::PoissonEncoder::encode`]. Each keeps
+//! a thread-local convenience wrapper and adds a `*_with_rng` variant that takes
+//! `&mut impl rand::Rng`. One caller generator can drive a full multi-step run;
+//! the engine does not store or serialize it. All other public dynamics (LIF /
+//! Izhikevich integration, R-STDP given spike times, standalone neuron models,
+//! [`SparseGifHiddenLayer`] execution) are deterministic.
+//! [`SparseGifHiddenLayer`] topology is seeded at construction via SplitMix64,
+//! not a live `rand` stream.
+//!
 //! ## Features
 //!
 //! - Topology-neutral, dynamically sized `SpikingNetwork`
 //! - Neuromodulators: dopamine, serotonin, acetylcholine, norepinephrine
 //! - Reward-modulated STDP over per-synapse eligibility traces
+//! - Caller-injected RNG on the live stochastic paths (`step_with_rng`)
 //!
 //! ```rust
 //! use neuromod::{NeuroModulators, SpikingNetwork};
@@ -84,6 +100,10 @@ pub use lif::LifNeuron;
 pub use modulators::{
     GenericReward, NeuroModulators, Observation, SignalProfile, UnitReward, apply_neuromodulation,
 };
+/// Bring this into scope to call [`StdRng::seed_from_u64`].
+#[doc(no_inline)]
+pub use rand::SeedableRng;
+pub use rand::{Rng, rngs::StdRng};
 pub use rm_stdp::{EligibilityTrace, RmStdpConfig};
 
 /// Number of input channels supported by default.

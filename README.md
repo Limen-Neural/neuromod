@@ -3,7 +3,7 @@
 [![Crates.io](https://img.shields.io/crates/v/neuromod.svg?label=crates.io)](https://crates.io/crates/neuromod)
 [![docs.rs](https://docs.rs/neuromod/badge.svg)](https://docs.rs/neuromod)
 [![License](https://img.shields.io/crates/l/neuromod.svg)](https://github.com/Limen-Neural/neuromod#license)
-[![codecov](https://codecov.io/gh/Limen-Neural/neuromod/graph/badge.svg?token=V0U0K5P6PW)](https://codecov.io/gh/Limen-Neural/neuromod)
+[![codecov](https://codecov.io/gh/Limen-Neural/neuromod/graph/badge.svg)](https://codecov.io/gh/Limen-Neural/neuromod)
 
 Biologically grounded spiking neural network (SNN) primitives in Rust: a topology-neutral `SpikingNetwork` engine, generic neuromodulators, STDP building blocks, and standalone neuron models.
 
@@ -19,6 +19,7 @@ Biologically grounded spiking neural network (SNN) primitives in Rust: a topolog
 - `GenericReward` trait for domain-specific reward shaping in downstream crates
 - Reward-modulated STDP wired into the engine: per-synapse `EligibilityTrace` accumulation with a dopamine-gated payout, tuned by `RmStdpConfig`
 - Classical (unmodulated) Hebbian STDP utilities for the biological root case
+- Caller-injected RNG on the live stochastic paths (`SpikingNetwork::step_with_rng`, `PoissonEncoder::encode_with_rng`) so a seeded stream can replay a run
 
 ### Engine (`SpikingNetwork`)
 
@@ -88,6 +89,12 @@ CI installs the same toolchain on each OS. Keep `Cargo.toml` `rust-version`, `ru
 neuromod = "0.6.0"
 ```
 
+Browser, Web Worker, and other supported JavaScript-hosted
+`wasm32-unknown-unknown` consumers opt into the upstream getrandom backend with
+`neuromod = { version = "0.6.0", features = ["wasm-js"] }`. Non-Web WASM
+consumers should leave this feature disabled and choose the entropy backend for
+their final application. See [the RNG guide](docs/rng.md#webassembly-entropy-backends).
+
 > `0.6.0` reaches crates.io when its tag lands. Until then the newest published release is
 > `0.5.2`, which predates the wired R-STDP API below — depend on the git repository if you
 > need it before the release.
@@ -109,6 +116,36 @@ fn main() {
 }
 ```
 
+### Reproducible steps
+
+The only live stochastic work inside `step` is Bernoulli encoding of
+`input_spike_times`. Keep using `step` when you do not care about the stream.
+For replay, inject one caller RNG and reuse it for the whole run:
+
+```rust
+use neuromod::{NeuroModulators, SeedableRng, SpikingNetwork, StdRng};
+
+fn main() {
+    let mut network = SpikingNetwork::new();
+    let stimuli = [0.5_f32; 16];
+    let modulators = NeuroModulators::default();
+    let mut rng = StdRng::seed_from_u64(0xC0FF_EE01);
+
+    let spikes = network
+        .step_with_rng(&stimuli, &modulators, &mut rng)
+        .unwrap();
+    println!("Spiking neuron indices: {spikes:?}");
+}
+```
+
+The generator is re-exported from this crate (`StdRng`, `SeedableRng`), so the
+example above does not need a direct `rand` dependency. It is not stored on
+`SpikingNetwork` and is not part of a serde checkpoint. With the same `StdRng`
+implementation (this crate's `rand` version and target), the same seed + same
+inputs/state replays a run **from the start**. Resuming a mid-run checkpoint
+needs the generator's advanced state, not only the original seed; see
+[docs/rng.md](docs/rng.md).
+
 ## Dynamic Dimensions
 
 ```rust
@@ -124,13 +161,11 @@ fn main() {
 }
 ```
 
-## Step Errors (Shape and Finiteness)
+## Step Errors
 
-`step` is failure-atomic: it checks `stimuli.len() == num_channels` and that every
-stimulus and modulator field is finite **before** incrementing `global_step`,
-storing modulators, updating predictive state, or drawing from the
-random-number generator (RNG). A rejected step is a no-op. Finite signed values
-still go through the existing `abs().clamp` magnitude path.
+`step` validates the call **before** mutating the network or drawing from the random-number generator (RNG). A length mismatch, a non-finite input, or an exhausted tick counter returns a structured [`StepError`](https://docs.rs/neuromod/latest/neuromod/enum.StepError.html) and leaves every field unchanged (failure-atomic no-op). Finite signed values still go through the existing `abs().clamp` magnitude path.
+
+`global_step` is a discrete tick counter in **steps** (not wall-clock time), range `0..=i64::MAX`. Spike timestamps (`LifNeuron::last_spike_time`, `input_spike_times`) use the same unit; `-1` is the sentinel for no recorded spike. A restored checkpoint sitting at `i64::MAX` (or with a negative counter) still deserializes — `step` then returns `StepCounterExhausted` instead of panicking in debug, wrapping in release, or stamping the `-1` sentinel. Call `reset()` to start a new epoch; the engine will not renumber a live network for you.
 
 ```rust
 use neuromod::{NeuroModulators, NonFiniteClass, SpikingNetwork, StepError};
@@ -151,6 +186,9 @@ fn main() {
         Err(StepError::NonFiniteModulator { field, class }) => {
             println!("NonFiniteModulator {field:?}: {class:?}");
         }
+        Err(StepError::StepCounterExhausted { global_step }) => {
+            println!("step counter cannot advance from {global_step}");
+        }
     }
 
     let mut nonfinite = vec![0.1_f32; 32];
@@ -162,6 +200,15 @@ fn main() {
             class: NonFiniteClass::Nan
         })
     ));
+
+    network.global_step = i64::MAX;
+    assert!(matches!(
+        network.step(&[0.0; 32], &modulators),
+        Err(StepError::StepCounterExhausted {
+            global_step: i64::MAX
+        })
+    ));
+    assert_eq!(network.global_step, i64::MAX);
 }
 ```
 
@@ -345,11 +392,35 @@ whichever direction it binds — a lowered `w_max` caps weights and leaves the s
 a raised `w_min` lifts weights after scaling and can push the sum past it. The defaults cannot
 bind, so the budget holds exactly under them.
 
+### Unreleased — `StepError::StepCounterExhausted`
+
+**Exhaustive matches on `StepError` need a new arm.** `SpikingNetwork::step` now returns
+`StepError::StepCounterExhausted { global_step }` when incrementing `global_step` would
+overflow `i64::MAX`. Debug and release share this behavior. A rejected tick is atomic (no
+RNG draw, no neuromodulator snapshot, no membrane or trace updates).
+
+**Checkpoints at `i64::MAX` still load.** Serde does not reject an exhausted or negative
+counter; validation is on `step`, so a saturated network can be inspected. Call `reset()` to continue
+from tick 0 — the engine will not renumber timestamps for you. Normal (non-exhausted)
+checkpoints are unchanged.
+
+```rust
+use neuromod::{NeuroModulators, SpikingNetwork, StepError};
+
+let mut net = SpikingNetwork::new();
+net.global_step = i64::MAX;
+assert!(matches!(
+    net.step(&[0.0; 16], &NeuroModulators::default()),
+    Err(StepError::StepCounterExhausted { global_step: i64::MAX })
+));
+```
+
 ## Included Components
 
 - Engine: `SpikingNetwork`, `StepError`, `NonFiniteClass`, `ModulatorField` (LIF + Izhikevich banks)
 - Neuromodulation: `NeuroModulators`, `SignalProfile`, `Observation`, `GenericReward`, `UnitReward`, `apply_neuromodulation`
 - Engine neuron types: `LifNeuron`, `IzhikevichNeuron`
+- Stochastic helpers: `lif::PoissonEncoder` (`encode` / `encode_with_rng`); re-exported `Rng`, `SeedableRng`, `StdRng` for caller-injected streams
 - Standalone neuron types: `GifNeuron`, `GifParams`, `LapicqueNeuron`, `FitzHughNagumoNeuron`, `HodgkinHuxleyNeuron`
 - Standalone layer: `SparseGifHiddenLayer`, `SparseGifLayerConfig`, `SpikeRaster`, `GifLayerError`
 - Learning/plasticity:
@@ -367,16 +438,40 @@ See the full planning documents:
 - [neuromod Boundary Matrix](https://github.com/Limen-Neural/neuromod/blob/main/docs/neuromod-boundary-matrix.md) — runtime/deployment role, owns/does-not-own, allowed/forbidden dependencies vs. limbic-critic, brainstem-daemon, axon-encoder, synaptic-mesh, silicon-bridge, Spikenaut-Hardware, plasticity-lab, etc. (LIM-9).
 - [ADR 001: Shared traits live in neuromod](https://github.com/Limen-Neural/neuromod/blob/main/docs/adr/001-traits-in-neuromod.md) — why traits are hosted here.
 - [ADR 002: Wire eligibility traces into the engine](https://github.com/Limen-Neural/neuromod/blob/main/docs/adr/002-wire-eligibility-traces.md) — why R-STDP is wired rather than demoted, and what changed in the learning path.
+- [RNG inventory](https://github.com/Limen-Neural/neuromod/blob/main/docs/rng.md) — live stochastic paths, caller-injected RNG variants, and deterministic surfaces.
 
 ## Examples
 
-Run included examples:
+In-repo examples use the **local** crate (clone this repository):
 
 ```bash
 cargo run --example basic
 cargo run --example rstdp_demo
 cargo run --example sparse_gif_layer
 ```
+
+### Standalone crates.io demo
+
+Outsiders who are not on the Limen git graph can depend only on crates.io. The runnable package is [`examples/crates-io-standalone`](examples/crates-io-standalone) — a detached Cargo workspace so it cannot pick up this path crate.
+
+```bash
+cd examples/crates-io-standalone
+cargo run
+```
+
+Or start a binary anywhere with this `Cargo.toml` (no `git =`, no `path =`):
+
+```toml
+[package]
+name = "neuromod-crates-io-demo"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+neuromod = "0.5"
+```
+
+`neuromod = "0.5"` stays on the published 0.5.x line. This repository's 0.6.0 APIs (wired R-STDP, `SparseGifHiddenLayer`) are not on crates.io until that tag is published — use the in-repo examples above for those.
 
 ## Development
 
@@ -406,13 +501,13 @@ cargo hack check --feature-powerset --exclude-no-default-features --keep-going
 
 ### Codecov
 
-[![codecov](https://codecov.io/gh/Limen-Neural/neuromod/graph/badge.svg?token=V0U0K5P6PW)](https://codecov.io/gh/Limen-Neural/neuromod)
+[![codecov](https://codecov.io/gh/Limen-Neural/neuromod/graph/badge.svg)](https://codecov.io/gh/Limen-Neural/neuromod)
 
 - Configuration: [`codecov.yml`](codecov.yml)
 - Workflow: [`.github/workflows/coverage.yml`](.github/workflows/coverage.yml)
 - Dashboard: [codecov.io/gh/Limen-Neural/neuromod](https://codecov.io/gh/Limen-Neural/neuromod)
 
-The badge uses Codecov’s graph token (from **Configuration → Badges & Graphs**).
+The badge links to Codecov's test coverage report.
 **Uploads** need the repository secret **`CODECOV_TOKEN`** (tokenless uploads return
 HTTP 400 for this org). The coverage workflow passes that token and sets
 `fail_ci_if_error: false`, so a missing/stale token does **not** fail CI—only the

@@ -67,16 +67,25 @@ It also holds a `NeuroModulators` snapshot, a `global_step` counter, and per-cha
 
 Construction is topology-neutral. `new()` is the legacy default (16 LIF, 5 Izhikevich, 16 channels). `with_dimensions(num_lif, num_izh, num_channels)` builds arbitrary sizes with blank synaptic weights. No domain topology is hardcoded.
 
-`SpikingNetwork::step(stimuli, modulators)` is the normal per-tick entry point for the default engine. Prefer it for full-network simulation; call lower-level neuron APIs only when testing or embedding a single model. Order of work inside `step`:
+`SpikingNetwork::step(stimuli, modulators)` is the normal per-tick entry point for the default engine. Prefer it for full-network simulation. Call lower-level neuron APIs only when testing or embedding a single model.
+
+`SpikingNetwork::step_with_rng` is the same pipeline with a caller-owned `&mut impl rand::Rng`. That injected random-number generator (RNG) is used only for Bernoulli encoding of `input_spike_times`. The convenience `step` draws from the thread-local RNG.
+
+`step_with_rng` is an orchestrator. The length guard stays inline. Each numbered phase below is a private helper on `SpikingNetwork`:
 
 1. Validate `stimuli.len() == num_channels` and that every stimulus and modulator field is finite, else `Err(StepError::InputLenMismatch | NonFiniteStimulus | NonFiniteModulator)`. Rejection is a no-op: no `global_step` increment, no modulator store, no predictive-state update, no random-number generator (RNG) draw.
-2. Recompute per-neuron `decay_rate`/`threshold` targets from the current `NeuroModulators` (dopamine/serotonin/acetylcholine/norepinephrine each pull thresholds/decay in different directions — see formulas in `engine.rs`).
-3. Update `predictive_state` (exponential moving average (EMA) per channel) and derive `pred_errors` ("surprise") that boost synaptic drive.
-4. Stochastically encode `stimuli` into `input_spike_times` (Poisson-style, probability proportional to stimulus magnitude).
-5. Integrate LIF membrane potentials, fire (`check_fire`), apply lateral inhibition to non-firing LIF neurons.
-6. Apply reward-modulated STDP (`apply_stdp`). Runs every step: per-synapse eligibility traces decay and accumulate regardless of dopamine; the `dopamine`-derived `learning_rate` gates only the trace → weight conversion.
-7. Re-normalize each neuron's weights to `WEIGHT_BUDGET` (L1 budget) and clamp to the `stdp_config` bounds (`RmStdpConfig::w_min`/`w_max`).
-8. Drive the Izhikevich bank from the mean LIF membrane potential + dopamine (`iz_drive`), independent of the LIF spike/STDP pipeline.
+2. If `global_step` is negative or already `i64::MAX`, return
+   `Err(StepError::StepCounterExhausted)` before any mutation or random-number
+   generator (RNG) draw. The counter is in discrete **steps** (not wall-clock),
+   range `0..=i64::MAX`; `-1` on spike timestamps is the sentinel for no recorded
+   spike.
+3. `retune_lif_from_modulators` — recompute per-neuron `decay_rate`/`threshold` targets from the current `NeuroModulators` (dopamine/serotonin/acetylcholine/norepinephrine each pull thresholds/decay in different directions — see formulas in `engine.rs`).
+4. `update_predictive_errors` — update `predictive_state` (exponential moving average (EMA) per channel) and derive `pred_errors` ("surprise") that boost synaptic drive.
+5. `encode_input_spikes` — stochastically encode `stimuli` into `input_spike_times` (Poisson-style, probability proportional to stimulus magnitude). `step` draws from the thread-local RNG; `step_with_rng` draws from the caller generator and does not construct or reseed a generator per neuron or per step.
+6. `integrate_lif_bank` then `fire_lif_and_inhibit` — integrate LIF membrane potentials, fire (`check_fire`), apply lateral inhibition to non-firing LIF neurons (O(1) fired-mask membership, not `Vec::contains`).
+7. `apply_stdp` — reward-modulated STDP. Runs every step: per-synapse eligibility traces decay and accumulate regardless of dopamine; the `dopamine`-derived `learning_rate` gates only the trace → weight conversion.
+8. `renormalize_lif_weights` — re-normalize each neuron's weights to `WEIGHT_BUDGET` (L1 budget) and clamp to the `stdp_config` bounds (`RmStdpConfig::w_min`/`w_max`).
+9. `drive_izhikevich_bank` — drive the Izhikevich bank from the mean LIF membrane potential + dopamine (`iz_drive`), independent of the LIF spike/STDP pipeline.
 
 Returns the indices of LIF neurons that fired this step.
 

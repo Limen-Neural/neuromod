@@ -15,15 +15,46 @@ All notable changes to this project are documented in this file.
   slice plus the four modulator fields, and any `Err` is returned before the first
   mutation or RNG draw. Finite signed values, including `0.0` / `-0.0` and
   `f32::MAX` / `f32::MIN`, still take the existing clamp/range path.
+- **`SpikingNetwork::step` no longer panics or wraps at `i64::MAX`.** A restored or
+  caller-written checkpoint whose `global_step` is already `i64::MAX` now returns
+  `StepError::StepCounterExhausted` before any mutation or random-number generator
+  draw (LIM-1227). Debug and release share this checked behavior. Engine-stamped spike
+  times are `1..=i64::MAX` or the `-1` no-spike sentinel; wrapping `global_step` to
+  `i64::MIN` is refused, and a negative counter is refused on `step` so incrementing it
+  cannot stamp that sentinel. Δt is computed in `i128` so the last legal tick cannot
+  overflow independently. Exhausted or negative checkpoints still deserialize so they
+  can be inspected; call `reset()` to start a new epoch. The engine does not renumber
+  a live network.
+- **`GifNeuron::threshold` now affects firing** (#119, LIM-1168). The field was documented as the
+  runtime-mutable neuromodulation knob but `check_for_spike` read `base_threshold` instead, so
+  callers who tuned `threshold` saw no change. `GifNeuron::params` now snapshots the live
+  `threshold` into `GifParams::base_threshold`, matching `LifNeuron` (`threshold` is live;
+  `base_threshold` is the restore point). Defaults still seed both from the same value, so
+  `SparseGifHiddenLayer` bit-parity is unchanged unless a caller writes to `threshold`.
+
+### Changed
+
+- **`StepError` gained `StepCounterExhausted`, `NonFiniteStimulus`, and `NonFiniteModulator`.**
+  Exhaustive matches that only named `InputLenMismatch` need new arms. `StepError` now also
+  implements `Display` and `std::error::Error`. Normal non-exhausted checkpoints are unchanged.
 
 ### Added
 
-- `StepError::NonFiniteStimulus { index, class }` and
-  `StepError::NonFiniteModulator { field, class }`, plus the `NonFiniteClass` and
-  `ModulatorField` enums so the error names the offending index or field and
-  whether the value was `NaN`, `+∞`, or `−∞`. `StepError` now implements
-  `Display` + `Error` (length-mismatch messages included). Exhaustive matches on
-  `StepError` need the new arms; see the README migration notes.
+- **Caller-injected RNG on live stochastic paths** ([LIM-1221](https://linear.app/rpd-34/issue/LIM-1221/featrng-inject-caller-rng-into-stochastic-neuromod-dynamics)).
+  `SpikingNetwork::step_with_rng` and `PoissonEncoder::encode_with_rng` take
+  `&mut impl rand::Rng` so one caller stream can drive a multi-step run without
+  reseeding inside the loop. `step` and `encode` keep using the thread-local
+  generator and remain source-compatible. `Rng`, `SeedableRng`, and `StdRng` are
+  re-exported so downstream crates do not need a matching direct `rand`
+  dependency to copy the seeded example. The generator is not stored on the
+  network and is not part of a serde checkpoint. Inventory of stochastic vs
+  deterministic public paths: [docs/rng.md](docs/rng.md).
+- **crates.io standalone demo** (`examples/crates-io-standalone`, #82). A detached
+  Cargo package that depends on published `neuromod = "0.5"` only — no git path,
+  no sibling Limen crates — so an outsider can onboard without the monorepo
+  graph. Linked from the README; CI on Linux asserts the resolved `neuromod`
+  source is the crates.io registry and `cargo run`s the binary.
+>>>>>>> main
 - **`SparseGifHiddenLayer` — sparse GIF hidden layer** (`src/gif_layer.rs`, #101). An upstream
   port of the reusable GIF layer from the author's `rmems/corinth-canal` repository
   (`src/funnel.rs`), promoted here so the canonical dynamics live in the dynamics crate. It is a

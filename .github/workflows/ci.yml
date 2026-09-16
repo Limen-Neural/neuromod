@@ -90,11 +90,52 @@ jobs:
           cargo install cargo-nextest --locked
           cargo nextest run --all-features --no-fail-fast
 
+      # Debug already ran the same tests with overflow checks on. This rebuilds
+      # just the lib tests with wrapping arithmetic so a regression to `+= 1`
+      # cannot hide behind a debug panic. LTO is left off (dev profile).
+      - name: Step-counter overflow semantics (overflow-checks off)
+        if: runner.os == 'Linux' && steps.changes.outputs.rust == 'true'
+        env:
+          RUSTFLAGS: "-C overflow-checks=off"
+        shell: bash
+        run: |
+          set -euo pipefail
+          out="$(cargo test --all-features --lib step_counter_ 2>&1)"
+          printf '%s\n' "$out"
+          grep -Eq '^test result: ok\. [1-9][0-9]* passed' <<<"$out" || {
+            echo 'error: no step_counter tests matched; overflow-checks-off guard would silently pass' >&2
+            exit 1
+          }
+
       - name: Feature matrix (cargo-hack)
         if: runner.os == 'Linux' && steps.changes.outputs.rust == 'true'
         run: |
           cargo install cargo-hack --locked
           cargo hack check --feature-powerset --exclude-no-default-features --keep-going
+
+      - name: Check browser WASM entropy feature
+        if: runner.os == 'Linux' && steps.changes.outputs.rust == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          rustup target add wasm32-unknown-unknown --toolchain 1.98.1
+          cargo +1.98.1 check --locked \
+            --target wasm32-unknown-unknown \
+            --no-default-features \
+            --features wasm-js
+          enabled_feature_tree=$(cargo +1.98.1 tree --locked \
+            --target wasm32-unknown-unknown \
+            --no-default-features \
+            --features wasm-js \
+            --edges features \
+            --invert getrandom@0.4.3)
+          grep -F 'getrandom feature "wasm_js"' <<<"$enabled_feature_tree"
+          no_feature_tree=$(cargo +1.98.1 tree --locked \
+            --target wasm32-unknown-unknown \
+            --no-default-features \
+            --edges features \
+            --invert getrandom@0.4.3)
+          ! grep -F 'getrandom feature "wasm_js"' <<<"$no_feature_tree"
 
       - name: Verify docs are domain-agnostic
         if: runner.os == 'Linux'
@@ -103,3 +144,21 @@ jobs:
           set -euo pipefail
           cargo doc --all-features --no-deps
           ! grep -riE 'spikenaut|\bhft\b|\bmining\b|\bcrypto\b|eagle-lander' target/doc/neuromod/
+
+      # GH#82 / LIM-953: outsider demo must build with crates.io neuromod only.
+      - name: Standalone crates.io demo
+        if: runner.os == 'Linux'
+        shell: bash
+        working-directory: examples/crates-io-standalone
+        run: |
+          set -euo pipefail
+          # No git / path deps in the demo manifest.
+          ! grep -E '^\s*(git|path)\s*=' Cargo.toml
+          cargo fmt --check
+          cargo fetch
+          source=$(cargo metadata --format-version 1 --offline \
+            | python3 -c "import json,sys; d=json.load(sys.stdin); print(next(p['source'] for p in d['packages'] if p['name']=='neuromod'))")
+          echo "neuromod source=$source"
+          test "$source" = "registry+https://github.com/rust-lang/crates.io-index"
+          cargo clippy --all-targets -- -D warnings
+          cargo run

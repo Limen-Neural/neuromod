@@ -15,6 +15,12 @@ All notable changes to this project are documented in this file.
 
 ### Added
 
+- **crates.io standalone demo** (`examples/crates-io-standalone`, #82). A detached
+  Cargo package that depends on published `neuromod = "0.5"` only — no git path,
+  no sibling Limen crates — so an outsider can onboard without the monorepo
+  graph. Linked from the README; CI on Linux asserts the resolved `neuromod`
+  source is the crates.io registry and `cargo run`s the binary.
+
 - **`SparseGifHiddenLayer` — sparse GIF hidden layer** (`src/gif_layer.rs`, #101). An upstream
   port of the reusable GIF layer from the author's `rmems/corinth-canal` repository
   (`src/funnel.rs`), promoted here so the canonical dynamics live in the dynamics crate. It is a

@@ -1,0 +1,16 @@
+# Detached from the neuromod workspace on purpose: this package must resolve
+# `neuromod` from crates.io, not the parent path crate (GH#82 / LIM-953).
+[workspace]
+
+[package]
+name = "neuromod-crates-io-demo"
+version = "0.1.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+publish = false
+description = "Minimal outsider demo that depends on neuromod from crates.io only."
+
+[dependencies]
+# Caret on 0.5 stays on the published 0.5.x line. In-tree 0.6 APIs (R-STDP
+# eligibility traces, SparseGifHiddenLayer) are not on crates.io yet.
+neuromod = "0.5"

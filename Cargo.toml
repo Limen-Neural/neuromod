@@ -24,6 +24,7 @@ exclude = [
     "CLAUDE.md",
     "REVIEW.md",
     "benches/README.md",
+    "examples/crates-io-standalone/",
 ]
 repository = "https://github.com/Limen-Neural/neuromod"
 readme = "README.md"
@@ -33,6 +34,8 @@ homepage = "https://github.com/Limen-Neural/neuromod"
 documentation = "https://docs.rs/neuromod"
 
 [workspace]
+# Nested outsider demo resolves `neuromod` from crates.io, not this path crate.
+exclude = ["examples/crates-io-standalone"]
 
 [lib]
 name = "neuromod"

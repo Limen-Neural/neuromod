@@ -89,6 +89,12 @@ CI installs the same toolchain on each OS. Keep `Cargo.toml` `rust-version`, `ru
 neuromod = "0.6.0"
 ```
 
+Browser, Web Worker, and other supported JavaScript-hosted
+`wasm32-unknown-unknown` consumers opt into the upstream getrandom backend with
+`neuromod = { version = "0.6.0", features = ["wasm-js"] }`. Non-Web WASM
+consumers should leave this feature disabled and choose the entropy backend for
+their final application. See [the RNG guide](docs/rng.md#webassembly-entropy-backends).
+
 > `0.6.0` reaches crates.io when its tag lands. Until then the newest published release is
 > `0.5.2`, which predates the wired R-STDP API below — depend on the git repository if you
 > need it before the release.

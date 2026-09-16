@@ -96,6 +96,30 @@ jobs:
           cargo install cargo-hack --locked
           cargo hack check --feature-powerset --exclude-no-default-features --keep-going
 
+      - name: Check browser WASM entropy feature
+        if: runner.os == 'Linux' && steps.changes.outputs.rust == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          rustup target add wasm32-unknown-unknown --toolchain 1.98.1
+          cargo +1.98.1 check --locked \
+            --target wasm32-unknown-unknown \
+            --no-default-features \
+            --features wasm-js
+          enabled_feature_tree=$(cargo +1.98.1 tree --locked \
+            --target wasm32-unknown-unknown \
+            --no-default-features \
+            --features wasm-js \
+            --edges features \
+            --invert getrandom@0.4.3)
+          grep -F 'getrandom feature "wasm_js"' <<<"$enabled_feature_tree"
+          no_feature_tree=$(cargo +1.98.1 tree --locked \
+            --target wasm32-unknown-unknown \
+            --no-default-features \
+            --edges features \
+            --invert getrandom@0.4.3)
+          ! grep -F 'getrandom feature "wasm_js"' <<<"$no_feature_tree"
+
       - name: Verify docs are domain-agnostic
         if: runner.os == 'Linux'
         shell: bash
@@ -121,4 +145,3 @@ jobs:
           test "$source" = "registry+https://github.com/rust-lang/crates.io-index"
           cargo clippy --all-targets -- -D warnings
           cargo run
-

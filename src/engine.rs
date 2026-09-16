@@ -273,6 +273,7 @@ impl SpikingNetwork {
         Ok(spike_ids)
     }
 
+    /// Recompute LIF `decay_rate` and `threshold` from the current modulators.
     fn retune_lif_from_modulators(&mut self, learning_rate: f32) {
         for neuron in &mut self.neurons {
             let target_decay = 0.15 - (0.05 * self.modulators.acetylcholine);
@@ -288,6 +289,7 @@ impl SpikingNetwork {
         }
     }
 
+    /// Per-channel EMA of `|stimuli|` and the surprise (`pred_errors`) it implies.
     fn update_predictive_errors(&mut self, stimuli: &[f32]) -> Vec<f32> {
         let mut pred_errors = vec![0.0_f32; self.num_channels];
         for ch in 0..self.num_channels {
@@ -312,6 +314,7 @@ impl SpikingNetwork {
         }
     }
 
+    /// Integrate each LIF neuron from weighted stimuli plus surprise.
     fn integrate_lif_bank(&mut self, stimuli: &[f32], pred_errors: &[f32], stress_multiplier: f32) {
         for neuron in &mut self.neurons {
             let mut total_current = 0.0;
@@ -328,13 +331,19 @@ impl SpikingNetwork {
         }
     }
 
+    /// Fire LIF neurons, then laterally inhibit the ones that did not spike.
+    ///
+    /// Membership is an O(1) `fired` mask so this stays linear in neuron count
+    /// even when `with_dimensions` builds a large bank.
     fn fire_lif_and_inhibit(&mut self) -> Vec<usize> {
         let mut spike_ids = Vec::new();
+        let mut fired = vec![false; self.neurons.len()];
         for (i, neuron) in self.neurons.iter_mut().enumerate() {
             if let Some(_peak_v) = neuron.check_fire() {
                 neuron.last_spike = true;
                 neuron.last_spike_time = self.global_step;
                 spike_ids.push(i);
+                fired[i] = true;
             } else {
                 neuron.last_spike = false;
             }
@@ -342,7 +351,7 @@ impl SpikingNetwork {
 
         if !spike_ids.is_empty() {
             for (i, neuron) in self.neurons.iter_mut().enumerate() {
-                if !spike_ids.contains(&i) {
+                if !fired[i] {
                     neuron.membrane_potential =
                         (neuron.membrane_potential - INHIBITION_STRENGTH).max(0.0);
                 }
@@ -351,24 +360,23 @@ impl SpikingNetwork {
         spike_ids
     }
 
+    #[inline]
+    #[cfg(test)]
+    fn fire_and_inhibit(&mut self) -> Vec<usize> {
+        self.fire_lif_and_inhibit()
+    }
+
+    /// Scale toward the L1 budget, then enforce the configured bounds. The
+    /// bounds win where the two disagree: under the defaults they cannot
+    /// bind here, so the budget holds exactly; a narrowed range is honored
+    /// and leaves the sum off budget. See the `step` contract, item 8.
     fn renormalize_lif_weights(&mut self) {
-        // Scale toward the L1 budget, then enforce the configured bounds. The
-        // bounds win where the two disagree: under the defaults they cannot
-        // bind here, so the budget holds exactly; a narrowed range is honored
-        // and leaves the sum off budget. See the `step` contract, item 8.
         let (w_min, w_max) = self.stdp_config.weight_bounds();
         for neuron in &mut self.neurons {
             let total: f32 = neuron.weights.iter().sum();
             if total > 1e-6 {
                 let scale = WEIGHT_BUDGET / total;
                 for w in &mut neuron.weights {
-                    // A synapse at exactly zero is unconnected. Rescaling and
-                    // capping the connected ones is this pass's job, but a
-                    // positive `w_min` must not conjure a connection here: this
-                    // loop runs every step, dopamine or not, and an unrewarded
-                    // step must leave weights alone. Learning raises a synapse
-                    // to the floor in `apply_stdp`, and only on a step where it
-                    // actually applies an update.
                     if *w == 0.0 {
                         continue;
                     }
@@ -379,6 +387,7 @@ impl SpikingNetwork {
         }
     }
 
+    /// Drive the Izhikevich bank from mean LIF membrane potential + dopamine.
     fn drive_izhikevich_bank(&mut self) {
         let lif_mean = if !self.neurons.is_empty() {
             let sum: f32 = self.neurons.iter().map(|n| n.membrane_potential).sum();
@@ -574,6 +583,46 @@ mod tests {
             .expect("valid input length should pass");
         assert_eq!(network.global_step, 1);
         assert!(spikes.len() <= network.neurons.len());
+    }
+
+    #[test]
+    fn test_fire_and_inhibit_spares_firers_and_pulls_down_the_rest() {
+        let mut network = SpikingNetwork::with_dimensions(4, 0, 1);
+        network.global_step = 7;
+
+        network.neurons[0].membrane_potential = 1.0;
+        network.neurons[1].membrane_potential = 1.0;
+        network.neurons[2].threshold = 0.5;
+        network.neurons[3].threshold = 0.5;
+        network.neurons[2].membrane_potential = 0.20;
+        network.neurons[3].membrane_potential = 0.20;
+
+        let spikes = network.fire_and_inhibit();
+
+        assert_eq!(spikes, vec![0, 1]);
+        assert!(network.neurons[0].last_spike && network.neurons[1].last_spike);
+        assert!(!network.neurons[2].last_spike && !network.neurons[3].last_spike);
+        assert_eq!(network.neurons[0].last_spike_time, 7);
+        assert_eq!(network.neurons[0].membrane_potential, 0.0);
+        assert!((network.neurons[2].membrane_potential - 0.15).abs() < 1e-6);
+        assert!((network.neurons[3].membrane_potential - 0.15).abs() < 1e-6);
+    }
+
+    #[test]
+    fn test_fire_and_inhibit_skips_when_nobody_spikes() {
+        let mut network = SpikingNetwork::with_dimensions(3, 0, 1);
+        for neuron in &mut network.neurons {
+            neuron.threshold = 0.5;
+            neuron.membrane_potential = 0.20;
+        }
+
+        let spikes = network.fire_and_inhibit();
+
+        assert!(spikes.is_empty());
+        for neuron in &network.neurons {
+            assert!(!neuron.last_spike);
+            assert!((neuron.membrane_potential - 0.20).abs() < 1e-6);
+        }
     }
 
     #[test]

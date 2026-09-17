@@ -1,0 +1,21 @@
+src/engine.rs
+  s_dcae77b6a63edc::t_9050a140fe0efe 723-733,748-750
+  s_dcae77b6a63edc::t_39edcb92908803 1595-1614,1618-1635,1639-1645
+  s_dcae77b6a63edc::t_4a926d68d72cf4 1615-1617,1636-1638
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "e3ed07ce33fe70ff3bbb2929006f58ea7bac159a",
+  "prompts": {},
+  "sessions": {
+    "s_dcae77b6a63edc": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a0acac-072c-7712-98cb-9203144ca6e1",
+        "model": "gpt-5.6-terra"
+      },
+      "human_author": "Raul Cardenas Montoya <montoyaraul34@gmail.com>"
+    }
+  }
+}

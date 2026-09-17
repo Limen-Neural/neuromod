@@ -151,7 +151,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          for example in basic basic_lif hebbian_learning rstdp_demo; do
+          for example in basic basic_lif hebbian_learning rstdp_demo sparse_gif_layer; do
             cargo run --locked --example "$example"
             cargo run --locked --release --example "$example"
           done

@@ -570,9 +570,11 @@ examples above, which resolve the local source.
    for name, text in (("README.md", readme), ("CHANGELOG.md", changelog)):
        assert not re.search(r"^(<<<<<<<|=======|>>>>>>>)", text, re.M), name
 
-   headings = re.findall(r"^## \[0\.6\.0\] - (.+)$", changelog, re.M)
+   headings = re.findall(r"^## \[0\.6\.0\].*$", changelog, re.M)
    assert len(headings) == 1, headings
-   release_date = date.fromisoformat(headings[0])
+   dated_heading = re.fullmatch(r"## \[0\.6\.0\] - (\d{4}-\d{2}-\d{2})", headings[0])
+   assert dated_heading, headings[0]
+   release_date = date.fromisoformat(dated_heading.group(1))
    print(f"ok: release documents have no conflict markers and one dated 0.6.0 heading ({release_date})")
    PY
    ```

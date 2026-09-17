@@ -132,7 +132,7 @@ impl IzhikevichNeuron {
     /// Simulates one timestep (1 ms) with explicit time tracking for STDP.
     pub fn step_with_time(&mut self, i: f32, current_time: i64) -> bool {
         for _ in 0..2 {
-            self.v += 0.04 * self.v * self.v + 5.0 * self.v + 140.0 - self.u + i;
+            self.v += 0.5 * (0.04 * self.v * self.v + 5.0 * self.v + 140.0 - self.u + i);
         }
         self.u += self.a * (self.b * self.v - self.u);
 
@@ -195,5 +195,54 @@ mod tests {
         let mut n = IzhikevichNeuron::new_regular_spiking();
         let spikes: usize = (0..10).filter(|_| n.step(0.0)).count();
         assert_eq!(spikes, 0, "No spike without input");
+    }
+
+    #[test]
+    fn half_ms_voltage_substeps_match_the_one_ms_reference_update() {
+        let mut n = IzhikevichNeuron::new_regular_spiking();
+
+        assert!(!n.step(10.0));
+
+        assert!((n.v - -58.104_996).abs() < 1e-4, "v was {}", n.v);
+        assert!((n.u - -12.972_42).abs() < 1e-4, "u was {}", n.u);
+    }
+
+    #[test]
+    fn half_ms_voltage_substeps_follow_the_reference_trajectory() {
+        let mut n = IzhikevichNeuron::new_regular_spiking();
+        let expected = [
+            (-58.104_996, -12.972_42),
+            (-49.670_24, -12.911_653),
+            (-32.148_43, -12.782_013),
+            (-65.0, -4.338_472_4),
+        ];
+
+        for (step, (expected_v, expected_u)) in expected.into_iter().enumerate() {
+            n.step(10.0);
+            assert!(
+                (n.v - expected_v).abs() < 1e-4,
+                "step {step}: v was {}, expected {expected_v}",
+                n.v
+            );
+            assert!(
+                (n.u - expected_u).abs() < 1e-4,
+                "step {step}: u was {}, expected {expected_u}",
+                n.u
+            );
+        }
+    }
+
+    #[test]
+    fn half_ms_voltage_substeps_preserve_reference_spike_timestamps() {
+        let mut n = IzhikevichNeuron::new_regular_spiking();
+        let mut spike_times = Vec::new();
+
+        for time in 0..100 {
+            if n.step_with_time(10.0, time) {
+                spike_times.push(n.last_spike_time);
+            }
+        }
+
+        assert_eq!(spike_times, [3, 30, 78]);
     }
 }

@@ -110,6 +110,42 @@ impl FitzHughNagumoNeuron {
     }
 
     fn resting_candidate(a: f64, b: f64, i_app: f64, v: f64) -> Option<(f32, f32)> {
+        if let Some(pair) = Self::rounded_resting_candidate(a, b, i_app, v) {
+            return Some(pair);
+        }
+        if b == 0.0 || !(v as f32).is_finite() {
+            return None;
+        }
+        // Rounding v+a and b*w can leave no acceptable w at the closest
+        // voltage. Search a small neighborhood, in distance order, only after
+        // exhausting that voltage's candidates. At most 65 voltages are tried;
+        // 32 ULPs move a normal v by at most 32*f32::EPSILON relatively.
+        // This bounded roundoff repair is not an exhaustive representability
+        // search; every neighbor must still pass both equation/RHS checks.
+        let (mut lower, mut upper) = ((v as f32).next_down(), (v as f32).next_up());
+        let (mut lower_left, mut upper_left) = (32, 32);
+        for _ in 0..64 {
+            let neighbor = if lower_left > 0
+                && (upper_left == 0 || (v - f64::from(lower)).abs() <= (f64::from(upper) - v).abs())
+            {
+                let next = lower;
+                lower = lower.next_down();
+                lower_left -= 1;
+                next
+            } else {
+                let next = upper;
+                upper = upper.next_up();
+                upper_left -= 1;
+                next
+            };
+            if let Some(pair) = Self::rounded_resting_candidate(a, b, i_app, f64::from(neighbor)) {
+                return Some(pair);
+            }
+        }
+        None
+    }
+
+    fn rounded_resting_candidate(a: f64, b: f64, i_app: f64, v: f64) -> Option<(f32, f32)> {
         let rounded_v = v as f32;
         // Match the integrator's arithmetic first to avoid artificial
         // zero-input drift when rounding an otherwise valid intersection.
@@ -127,6 +163,10 @@ impl FitzHughNagumoNeuron {
             let recovery_w = ((v + a) / b) as f32;
             if Self::valid_resting_pair(a, b, i_app, rounded_v, recovery_w) {
                 return Some((rounded_v, recovery_w));
+            }
+            let implemented_recovery_w = (rounded_v + a as f32) / b as f32;
+            if Self::valid_resting_pair(a, b, i_app, rounded_v, implemented_recovery_w) {
+                return Some((rounded_v, implemented_recovery_w));
             }
         }
         None
@@ -153,9 +193,10 @@ impl FitzHughNagumoNeuron {
         let voltage_rounding = 6.0 * half_quantum;
         let recovery_rounding = 3.0 * half_quantum;
         let state_scale = v.abs() + w.abs();
-        // Cancellation of huge coefficients must not conceal a large actual
-        // derivative of a small state. Keep epsilon out of this check too.
-        if f64::from(voltage_rhs).abs() > tolerance * (state_scale + i_app.abs()) + voltage_rounding
+        // A huge recovery value must not conceal drift of the fast voltage.
+        // Recovery keeps the full state scale to allow rounding near w=0.
+        // Keep epsilon out of these unscaled RHS checks too.
+        if f64::from(voltage_rhs).abs() > tolerance * (v.abs() + i_app.abs()) + voltage_rounding
             || f64::from(recovery_rhs).abs() > tolerance * state_scale + recovery_rounding
         {
             return false;
@@ -318,9 +359,12 @@ impl FitzHughNagumoNeuron {
     /// Uses Newton iteration starting at zero with a bracketed fallback. With
     /// multiple roots, the selected intersection is not necessarily stable.
     /// Prefers recovery from the implemented `f32` voltage nullcline when it
-    /// also validates both equations.
-    /// Both implemented unscaled right-hand sides must be finite and have
-    /// magnitude at most `16 * f32::EPSILON * (|v| + |w|)`, plus an underflow
+    /// also validates both equations. If no recovery candidate passes at the
+    /// nearest `f32` voltage, tries up to 32 adjacent voltages on each side,
+    /// nearest first. This is a bounded search, not an exhaustive one.
+    /// Both implemented unscaled right-hand sides must be finite. Their
+    /// magnitudes must be at most `16 * f32::EPSILON * |v|` for voltage and
+    /// `16 * f32::EPSILON * (|v| + |w|)` for recovery, plus an underflow
     /// rounding allowance (three smallest subnormal quanta for voltage and
     /// one and a half for recovery). Both real-equation residuals must also
     /// pass relative checks with those underflow allowances.
@@ -561,6 +605,122 @@ mod tests {
             let initial = (neuron.v, neuron.w);
             assert!(!neuron.step(0.0, 0.01));
             assert_eq!((neuron.v, neuron.w), initial, "a={a}");
+        }
+    }
+
+    #[test]
+    fn resting_implemented_recovery_rounding_retains_intersection() {
+        let (a, b) = (302.230_62f32, 55.496_21f32);
+        for (a, b) in [
+            (a, b),
+            (a.next_down(), b),
+            (a.next_up(), b),
+            (a, b.next_down()),
+            (a, b.next_up()),
+        ] {
+            for sign in [-1.0, 1.0] {
+                let mut neuron = FitzHughNagumoNeuron {
+                    a: sign * a,
+                    b,
+                    ..Default::default()
+                };
+                neuron.reset();
+                assert_equilibrium(neuron.a, b, 0.0, neuron.v, neuron.w);
+                // The central real root is -2.9218971376493752; these
+                // adjacent parameters' roots all round to the same voltage.
+                // Only the implemented recovery sum permits w=5.3933182
+                // centrally: the f64 candidates leave a residual of 2^-15.
+                assert!(
+                    (f64::from(neuron.v) + f64::from(sign) * 2.921_897_137_649_375).abs() < 2e-7
+                );
+                assert_eq!(neuron.v + neuron.a - b * neuron.w, 0.0);
+                let voltage_rhs = neuron.v - neuron.v * neuron.v * neuron.v / 3.0 - neuron.w;
+                assert!(voltage_rhs.abs() < 1.5e-6);
+            }
+        }
+    }
+
+    #[test]
+    fn resting_refines_voltage_when_nearest_rounding_has_no_valid_recovery() {
+        let (a, b) = (-87.316_35f32, 78.645_63f32);
+        for (a, b) in [
+            (a, b),
+            (a.next_down(), b),
+            (a.next_up(), b),
+            (a, b.next_down()),
+            (a, b.next_up()),
+        ] {
+            for sign in [-1.0, 1.0] {
+                let mut neuron = FitzHughNagumoNeuron {
+                    a: sign * a,
+                    b,
+                    ..Default::default()
+                };
+                neuron.reset();
+                assert_equilibrium(neuron.a, b, 0.0, neuron.v, neuron.w);
+                // The central real root is 2.127734146526926. Its closest
+                // f32 has recovery residual ±2^-17 for the adjacent w values.
+                // Four voltage ULPs away, both implemented RHS bounds pass.
+                // Adjacent parameters move the real root by less than 3e-8.
+                assert!(
+                    (f64::from(neuron.v) - f64::from(sign) * 2.127_734_146_526_926).abs() < 1.1e-6
+                );
+                assert_eq!(neuron.v + neuron.a - b * neuron.w, 0.0);
+                let voltage_rhs = neuron.v - neuron.v * neuron.v * neuron.v / 3.0 - neuron.w;
+                assert!(voltage_rhs.abs() < 4.1e-6);
+            }
+        }
+    }
+
+    #[test]
+    fn resting_large_recovery_cannot_hide_voltage_drift() {
+        for sign in [-1.0, 1.0] {
+            let mut neuron = FitzHughNagumoNeuron {
+                a: sign * f32::from_bits(0xd580_268a),
+                b: f32::from_bits(0x434f_1bbf),
+                ..Default::default()
+            };
+            neuron.reset();
+            if neuron.v.is_nan() {
+                assert!(neuron.w.is_nan());
+                continue;
+            }
+            assert_equilibrium(neuron.a, neuron.b, 0.0, neuron.v, neuron.w);
+            // The real root is about 6342.36599368, with |w| about 8.5e10.
+            // Its fast-voltage roundoff budget is about 0.0121, regardless
+            // of w. The previously accepted pair has voltage RHS -8192.
+            let voltage_rhs = neuron.v - neuron.v * neuron.v * neuron.v / 3.0 - neuron.w;
+            let bound = 16.0 * f64::from(f32::EPSILON) * f64::from(neuron.v).abs()
+                + 3.0 * f64::from(f32::from_bits(1));
+            assert!(f64::from(voltage_rhs).abs() <= bound);
+        }
+    }
+
+    #[test]
+    fn resting_large_recovery_retains_adjacent_stationary_controls() {
+        let (a, b) = (f32::from_bits(0xd580_268a), f32::from_bits(0x434f_1bbf));
+        for (a, b) in [
+            (a.next_down(), b),
+            (a.next_up(), b),
+            (a, b.next_down()),
+            (a, b.next_up()),
+        ] {
+            for sign in [-1.0, 1.0] {
+                let mut neuron = FitzHughNagumoNeuron {
+                    a: sign * a,
+                    b,
+                    ..Default::default()
+                };
+                neuron.reset();
+                // Unlike the central rejection fixture, these nearby
+                // intersections have representable zero f32 RHS values.
+                assert_equilibrium(neuron.a, b, 0.0, neuron.v, neuron.w);
+                assert_eq!(
+                    neuron.v - neuron.v * neuron.v * neuron.v / 3.0 - neuron.w,
+                    0.0
+                );
+                assert_eq!(neuron.v + neuron.a - b * neuron.w, 0.0);
+            }
         }
     }
 

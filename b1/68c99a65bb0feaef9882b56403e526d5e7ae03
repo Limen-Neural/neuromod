@@ -1,0 +1,19 @@
+.github/workflows/ci.yml
+  s_dcae77b6a63edc::t_668499e21799fa 9,73-80,86,100,106,127-130,137-165,175-178,187
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "b168c99a65bb0feaef9882b56403e526d5e7ae03",
+  "prompts": {},
+  "sessions": {
+    "s_dcae77b6a63edc": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a0acac-072c-7712-98cb-9203144ca6e1",
+        "model": "gpt-5.6-terra"
+      },
+      "human_author": "Raul Cardenas Montoya <montoyaraul34@gmail.com>"
+    }
+  }
+}

@@ -93,7 +93,7 @@ pub use fitzhugh_nagumo::FitzHughNagumoNeuron;
 pub use gif::{GifNeuron, GifParams};
 pub use gif_layer::{GifLayerError, SparseGifHiddenLayer, SparseGifLayerConfig, SpikeRaster};
 pub use hebbian::{HebbianIzhikevichNetwork, StdpParams, apply_classical_stdp};
-pub use hodgkin_huxley::HodgkinHuxleyNeuron;
+pub use hodgkin_huxley::{HodgkinHuxleyNeuron, VoltageConvention};
 pub use izhikevich::IzhikevichNeuron;
 pub use lapicque::LapicqueNeuron;
 pub use lif::LifNeuron;

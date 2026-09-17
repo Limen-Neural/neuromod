@@ -219,18 +219,27 @@ impl HodgkinHuxleyNeuron {
     /// Advance by `dt_ms` with RK4 sub-steps (default 0.01 ms).
     ///
     /// Returns `true` if V crossed above 0 mV (HH relative convention) from below.
-    /// Prefer `dt_ms` such that the internal sub-step remains ≤ 0.01 ms for stiffness.
+    /// Covers the full finite positive `dt_ms` with sub-steps no larger than 0.01 ms.
+    /// Zero, negative, and non-finite durations return `false` without mutation.
+    /// Runtime scales with duration; extremely large durations are impractical.
+    /// A crossing in any sub-step is retained in the returned result.
     pub fn step(&mut self, i_app: f32, dt_ms: f32) -> bool {
-        let sub_dt = 0.01f32;
-        let n_steps = (dt_ms / sub_dt).round() as usize;
-        if n_steps == 0 {
+        if !dt_ms.is_finite() || dt_ms <= 0.0 {
             return false;
         }
+        if let Some(half) = Self::split_duration(dt_ms) {
+            let first = self.step(i_app, half);
+            let second = self.step(i_app, half);
+            return first || second;
+        }
+        let mut remaining = f64::from(dt_ms);
 
         let mut fired = false;
         let v_threshold: f32 = 0.0;
 
-        for _ in 0..n_steps {
+        while remaining > 0.0 {
+            let sub_dt = remaining.min(f64::from(0.01f32)) as f32;
+            remaining -= f64::from(sub_dt);
             let v_before = self.v;
 
             let (k1_v, k1_m, k1_h, k1_n) = self.rk4_stage1(i_app);
@@ -304,6 +313,14 @@ impl HodgkinHuxleyNeuron {
         self.derivatives(v, m, h, n, i_app)
     }
 
+    // Keep subtraction within f64's exact range for f32 durations. Large
+    // intervals are halved exactly, with at most 135 recursive stack frames;
+    // unlike a cast step count or repeated subtraction from a huge float,
+    // this cannot overflow or stop making progress.
+    fn split_duration(duration: f32) -> Option<f32> {
+        (duration > 0.01f32 * 65_536.0).then_some(duration * 0.5)
+    }
+
     /// Reset to resting potential and steady-state gates for the current temperature.
     pub fn reset(&mut self) {
         let v_rest = if self.is_cortical() {
@@ -350,6 +367,74 @@ impl Default for HodgkinHuxleyNeuron {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn duration_large_schedule_halves_exactly_and_terminates() {
+        let mut duration = f32::MAX;
+        let mut depth = 0;
+        while let Some(half) = HodgkinHuxleyNeuron::split_duration(duration) {
+            assert!(half > 0.0 && half < duration);
+            assert_eq!(2.0 * f64::from(half), f64::from(duration));
+            duration = half;
+            depth += 1;
+            assert!(depth <= 135);
+        }
+        assert!(duration > 0.0);
+        assert!(HodgkinHuxleyNeuron::split_duration(0.1).is_none());
+    }
+
+    #[test]
+    fn duration_retains_early_spike_and_integrates_after_it() {
+        let mut neuron = HodgkinHuxleyNeuron::new();
+        neuron.v = -0.001;
+        let mut reference = neuron.clone();
+        assert!(neuron.step(10.0, 0.02));
+        assert!(reference.step(10.0, 0.01));
+        assert!(!reference.step(10.0, 0.01));
+        assert!((neuron.v - reference.v).abs() < 1e-6);
+    }
+
+    #[test]
+    fn duration_small_positive_advances_state() {
+        let mut neuron = HodgkinHuxleyNeuron::new();
+        let before = neuron.v;
+        neuron.step(10.0, 0.001);
+        assert!(neuron.v > before);
+    }
+
+    #[test]
+    fn duration_nonmultiple_matches_fine_subdivision() {
+        for duration in [0.006, 0.06, 0.137] {
+            let mut coarse = HodgkinHuxleyNeuron::new();
+            let mut fine = coarse.clone();
+            coarse.step(10.0, duration);
+            for _ in 0..128 {
+                fine.step(10.0, duration / 128.0);
+            }
+            assert!(
+                (coarse.v - fine.v).abs() < 2e-5,
+                "duration={duration}, coarse={}, fine={}",
+                coarse.v,
+                fine.v
+            );
+            assert!((coarse.m - fine.m).abs() < 2e-5);
+            assert!((coarse.h - fine.h).abs() < 2e-5);
+            assert!((coarse.n - fine.n).abs() < 2e-5);
+        }
+    }
+
+    #[test]
+    fn duration_nonpositive_and_nonfinite_leave_state_unchanged() {
+        for duration in [0.0, -0.0, -1.0, f32::NAN, f32::INFINITY, f32::NEG_INFINITY] {
+            let original = HodgkinHuxleyNeuron::new();
+            let mut neuron = original.clone();
+            assert!(!neuron.step(10.0, duration));
+            assert_eq!(neuron.v.to_bits(), original.v.to_bits());
+            assert_eq!(neuron.m.to_bits(), original.m.to_bits());
+            assert_eq!(neuron.h.to_bits(), original.h.to_bits());
+            assert_eq!(neuron.n.to_bits(), original.n.to_bits());
+        }
+    }
 
     #[test]
     fn test_resting_state_is_stable() {

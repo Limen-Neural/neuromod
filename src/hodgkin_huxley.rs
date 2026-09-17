@@ -443,7 +443,7 @@ mod tests {
     fn convention_legacy_json_infers_only_reversals_and_preserves_state() {
         for (preset, convention, name, rest, reversals) in [
             (
-                HodgkinHuxleyNeuron::new(),
+                HodgkinHuxleyNeuron::default(),
                 VoltageConvention::RelativeToRest,
                 "relative_to_rest",
                 0.0,
@@ -484,7 +484,7 @@ mod tests {
             VoltageConvention::RelativeToRest,
         ] {
             for mut hh in [
-                HodgkinHuxleyNeuron::new(),
+                HodgkinHuxleyNeuron::default(),
                 HodgkinHuxleyNeuron::new_cortical(),
             ] {
                 hh.voltage_convention = convention;
@@ -505,7 +505,7 @@ mod tests {
 
     #[test]
     fn convention_json_retains_required_and_duplicate_field_validation() {
-        let hh = HodgkinHuxleyNeuron::new();
+        let hh = HodgkinHuxleyNeuron::default();
         let serialized = serde_json::to_string(&hh).unwrap();
         let duplicate = serialized.replacen('{', "{\"voltage_convention\":\"absolute\",", 1);
         assert!(serde_json::from_str::<HodgkinHuxleyNeuron>(&duplicate).is_err());
@@ -551,7 +551,7 @@ mod tests {
                 e_k: -15.0,
                 e_l: 8.0,
                 temperature,
-                ..HodgkinHuxleyNeuron::new()
+                ..HodgkinHuxleyNeuron::default()
             };
             let mut absolute = relative.clone();
             absolute.voltage_convention = VoltageConvention::Absolute;
@@ -585,14 +585,14 @@ mod tests {
     fn convention_temperature_only_scales_kinetics() {
         // Independently evaluate the published rates at relative V=7 mV.
         let v = 7.0_f64;
-        let rates = [
-            0.1 * (25.0 - v) / ((25.0 - v) / 10.0).exp_m1() * 0.8 - 4.0 * (-v / 18.0).exp() * 0.2,
-            0.07 * (-v / 20.0).exp() * 0.6 - 0.4 / (((30.0 - v) / 10.0).exp() + 1.0),
-            0.01 * (10.0 - v) / ((10.0 - v) / 10.0).exp_m1() * 0.7
-                - 0.125 * (-v / 80.0).exp() * 0.3,
-        ];
+        let m_rate =
+            0.1 * (25.0 - v) / ((25.0 - v) / 10.0).exp_m1() * 0.8 - 4.0 * (-v / 18.0).exp() * 0.2;
+        let h_rate = 0.07 * (-v / 20.0).exp() * 0.6 - 0.4 / (((30.0 - v) / 10.0).exp() + 1.0);
+        let n_rate = 0.01 * (10.0 - v) / ((10.0 - v) / 10.0).exp_m1() * 0.7
+            - 0.125 * (-v / 80.0).exp() * 0.3;
+        let rates = [m_rate, h_rate, n_rate];
         for mut hh in [
-            HodgkinHuxleyNeuron::new(),
+            HodgkinHuxleyNeuron::default(),
             HodgkinHuxleyNeuron::new_cortical(),
         ] {
             hh.v += 7.0;
@@ -618,7 +618,7 @@ mod tests {
     #[test]
     fn convention_reset_preserves_coordinates_across_temperature_boundary() {
         for preset in [
-            HodgkinHuxleyNeuron::new(),
+            HodgkinHuxleyNeuron::default(),
             HodgkinHuxleyNeuron::new_cortical(),
         ] {
             for temperature in [6.3, 19.999, 20.0, 20.001, 21.0, 37.0] {
@@ -651,7 +651,7 @@ mod tests {
             serde_json::json!(3),
             serde_json::json!({}),
         ] {
-            let mut wire = serde_json::to_value(HodgkinHuxleyNeuron::new()).unwrap();
+            let mut wire = serde_json::to_value(HodgkinHuxleyNeuron::default()).unwrap();
             wire["voltage_convention"] = bad;
             assert!(serde_json::from_value::<HodgkinHuxleyNeuron>(wire).is_err());
         }
@@ -660,7 +660,7 @@ mod tests {
     #[test]
     fn convention_rejects_ambiguous_legacy_json() {
         for preset in [
-            HodgkinHuxleyNeuron::new(),
+            HodgkinHuxleyNeuron::default(),
             HodgkinHuxleyNeuron::new_cortical(),
         ] {
             for field in ["e_na", "e_k", "e_l"] {

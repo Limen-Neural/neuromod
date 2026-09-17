@@ -159,10 +159,14 @@ impl FitzHughNagumoNeuron {
         // opposite endpoint signs even when Newton starts at a zero derivative.
         let radius = 1.0 + (6.0 * p.abs()).sqrt().max((6.0 * q.abs()).cbrt());
         let (mut low, mut high) = (-radius, radius);
-        for endpoint in [low, high] {
-            if residual(endpoint) == 0.0 {
+        let (f_low, f_high) = (residual(low), residual(high));
+        for (endpoint, f) in [(low, f_low), (high, f_high)] {
+            if f == 0.0 {
                 return validate(endpoint);
             }
+        }
+        if !f_low.is_finite() || !f_high.is_finite() || f_low > 0.0 || f_high < 0.0 {
+            return invalid;
         }
         for _ in 0..512 {
             let middle = low + (high - low) / 2.0;
@@ -392,7 +396,7 @@ mod tests {
     fn resting_constructor_references_and_oscillatory_perturbation() {
         for (mut neuron, v, w, perturbation) in [
             (
-                FitzHughNagumoNeuron::new(),
+                FitzHughNagumoNeuron::default(),
                 -1.199408031928253,
                 -0.6242600455092783,
                 0.0,

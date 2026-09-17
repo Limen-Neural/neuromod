@@ -98,82 +98,110 @@ impl FitzHughNagumoNeuron {
             return invalid;
         }
         let (a, b, i_app) = (f64::from(a), f64::from(b), f64::from(i_app));
-        let validate = |v: f64| {
-            let w = (v - v * v * v / 3.0 + i_app) as f32;
-            let v = v as f32;
-            if !v.is_finite() || !w.is_finite() {
-                return invalid;
-            }
-            let (vf, wf) = (f64::from(v), f64::from(w));
-            let cubic = vf * vf * vf / 3.0;
-            let rv = vf - cubic - wf + i_app;
-            let rw = vf + a - b * wf;
-            let tolerance = 16.0 * f64::from(f32::EPSILON);
-            // Validate both original equations after rounding, without epsilon
-            // scaling: epsilon=0 must not hide a missed nullcline intersection.
-            if rv.abs() <= tolerance * (vf.abs() + cubic.abs() + wf.abs() + i_app.abs())
-                && rw.abs() <= tolerance * (vf.abs() + a.abs() + (b * wf).abs())
-            {
-                (v, w)
-            } else {
-                invalid
-            }
-        };
         if b == 0.0 {
-            return validate(-a);
+            return Self::resting_candidate(a, b, i_app, -a).unwrap_or(invalid);
         }
         let p = 1.0 / b - 1.0;
         let q = a / b - i_app;
-        let residual = |v: f64| v * v * v / 3.0 + p * v + q;
-        let converged = |v: f64, f: f64| {
-            f.is_finite()
-                && (f == 0.0
-                    || f.abs()
-                        <= 32.0
-                            * f64::EPSILON
-                            * ((v * v * v / 3.0).abs() + (p * v).abs() + q.abs()))
-        };
+        Self::newton_resting_voltage(p, q)
+            .and_then(|v| Self::resting_candidate(a, b, i_app, v))
+            .or_else(|| Self::bracketed_resting_state(a, b, i_app, p, q))
+            .unwrap_or(invalid)
+    }
+
+    fn resting_candidate(a: f64, b: f64, i_app: f64, v: f64) -> Option<(f32, f32)> {
+        let cubic_w = v - v * v * v / 3.0 + i_app;
+        let rounded_v = v as f32;
+        if Self::valid_resting_pair(a, b, i_app, rounded_v, cubic_w as f32) {
+            return Some((rounded_v, cubic_w as f32));
+        }
+        // Near an outer cubic root, cancellation can erase a representable
+        // recovery value. Try the recovery nullcline, still checking both ODEs.
+        if b != 0.0 {
+            let recovery_w = ((v + a) / b) as f32;
+            if Self::valid_resting_pair(a, b, i_app, rounded_v, recovery_w) {
+                return Some((rounded_v, recovery_w));
+            }
+        }
+        None
+    }
+
+    fn valid_resting_pair(a: f64, b: f64, i_app: f64, v: f32, w: f32) -> bool {
+        if !v.is_finite() || !w.is_finite() {
+            return false;
+        }
+        let (v, w) = (f64::from(v), f64::from(w));
+        let cubic = v * v * v / 3.0;
+        let rv = v - cubic - w + i_app;
+        let rw = v + a - b * w;
+        let tolerance = 16.0 * f64::from(f32::EPSILON);
+        // Validate both original equations after rounding, without epsilon
+        // scaling: epsilon=0 must not hide a missed nullcline intersection.
+        rv.abs() <= tolerance * (v.abs() + cubic.abs() + w.abs() + i_app.abs())
+            && rw.abs() <= tolerance * (v.abs() + a.abs() + (b * w).abs())
+    }
+
+    fn resting_residual(v: f64, p: f64, q: f64) -> f64 {
+        v * v * v / 3.0 + p * v + q
+    }
+
+    fn resting_converged(v: f64, p: f64, q: f64, f: f64) -> bool {
+        f.is_finite()
+            && (f == 0.0
+                || f.abs()
+                    <= 32.0 * f64::EPSILON * ((v * v * v / 3.0).abs() + (p * v).abs() + q.abs()))
+    }
+
+    fn newton_resting_voltage(p: f64, q: f64) -> Option<f64> {
         let mut v = 0.0;
         for _ in 0..50 {
-            let f = residual(v);
+            let f = Self::resting_residual(v, p, q);
             // In particular, keep the exact middle root when q=0.
-            if converged(v, f) {
-                let result = validate(v);
-                if result.0.is_finite() {
-                    return result;
-                }
-                break;
+            if Self::resting_converged(v, p, q, f) {
+                return Some(v);
             }
             let derivative = v * v + p;
             if derivative == 0.0 || !derivative.is_finite() {
-                break;
+                return None;
             }
             let next = v - f / derivative;
             if !next.is_finite() || next == v {
-                break;
+                return None;
             }
             v = next;
         }
+        None
+    }
 
+    fn bracketed_resting_state(a: f64, b: f64, i_app: f64, p: f64, q: f64) -> Option<(f32, f32)> {
         // At this radius the cubic dominates both remaining terms, giving
         // opposite endpoint signs even when Newton starts at a zero derivative.
         let radius = 1.0 + (6.0 * p.abs()).sqrt().max((6.0 * q.abs()).cbrt());
         let (mut low, mut high) = (-radius, radius);
-        let (f_low, f_high) = (residual(low), residual(high));
-        for (endpoint, f) in [(low, f_low), (high, f_high)] {
-            if f == 0.0 {
-                return validate(endpoint);
-            }
-        }
+        let (f_low, f_high) = (
+            Self::resting_residual(low, p, q),
+            Self::resting_residual(high, p, q),
+        );
         if !f_low.is_finite() || !f_high.is_finite() || f_low > 0.0 || f_high < 0.0 {
-            return invalid;
+            return None;
+        }
+        for (endpoint, f) in [(low, f_low), (high, f_high)] {
+            if f == 0.0
+                && let Some(result) = Self::resting_candidate(a, b, i_app, endpoint)
+            {
+                return Some(result);
+            }
         }
         for _ in 0..512 {
             let middle = low + (high - low) / 2.0;
-            let f = residual(middle);
-            if converged(middle, f) {
-                return validate(middle);
+            let f = Self::resting_residual(middle, p, q);
+            if Self::resting_converged(middle, p, q, f)
+                && let Some(result) = Self::resting_candidate(a, b, i_app, middle)
+            {
+                return Some(result);
             }
+            // A small cubic residual alone is insufficient: keep refining
+            // after a rounded candidate misses either original nullcline.
             if middle == low || middle == high {
                 break;
             }
@@ -183,7 +211,7 @@ impl FitzHughNagumoNeuron {
                 high = middle;
             }
         }
-        invalid
+        None
     }
 
     fn dv_dt(&self, v: f32, w: f32, i_app: f32) -> f32 {
@@ -444,6 +472,48 @@ mod tests {
             assert!(neuron.v.is_nan() && neuron.w.is_nan());
             assert!(!neuron.is_excitable());
         }
+    }
+
+    #[test]
+    fn resting_finite_coefficients_with_unrepresentable_recovery_fail_closed() {
+        // Recovery requires w=(v+MAX)/MIN_POSITIVE. Any representable w
+        // forces v near -MAX, whose voltage-nullcline value is unrepresentable.
+        let mut neuron = FitzHughNagumoNeuron {
+            a: f32::MAX,
+            b: f32::MIN_POSITIVE,
+            ..Default::default()
+        };
+        neuron.reset();
+        assert!(neuron.v.is_nan() && neuron.w.is_nan());
+        assert!(!neuron.is_excitable());
+    }
+
+    #[test]
+    fn resting_large_negative_b_retains_a_representable_intersection() {
+        let mut neuron = FitzHughNagumoNeuron {
+            a: -3.009_265_5e-36,
+            b: -34_359_738_368.0,
+            ..Default::default()
+        };
+        neuron.reset();
+        assert_equilibrium(neuron.a, neuron.b, 0.0, neuron.v, neuron.w);
+        // For negligible a, the outer roots approach ±sqrt(3*(1-1/b)).
+        assert!((f64::from(neuron.v) - (-1.732_050_807_594_082_3)).abs() < 2e-6);
+        assert!((f64::from(neuron.w) - 5.040_931_304_666_685e-11).abs() < 2e-16);
+    }
+
+    #[test]
+    fn resting_large_positive_b_avoids_cubic_recovery_cancellation() {
+        let mut neuron = FitzHughNagumoNeuron {
+            a: -1.036_468e-32,
+            b: 1.652_763_9e38,
+            ..Default::default()
+        };
+        neuron.reset();
+        assert_equilibrium(neuron.a, neuron.b, 0.0, neuron.v, neuron.w);
+        assert!((f64::from(neuron.v).abs() - 3.0f64.sqrt()).abs() < 2e-6);
+        // Either outer root gives a representable subnormal near ±sqrt(3)/b.
+        assert!((f64::from(neuron.w).abs() - 1.047_972_34e-38).abs() < 2e-44);
     }
 
     #[test]

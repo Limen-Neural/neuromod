@@ -268,7 +268,7 @@ impl FitzHughNagumoNeuron {
         i_app: f64,
         p: f64,
         q: f64,
-        (mut low, mut high): (f64, f64),
+        (low, high): (f64, f64),
     ) -> Option<(f32, f32)> {
         if !low.is_finite() || !high.is_finite() || low > high {
             return None;
@@ -292,6 +292,17 @@ impl FitzHughNagumoNeuron {
         if f_low == 0.0 || f_high == 0.0 || f_low.is_sign_negative() == f_high.is_sign_negative() {
             return None;
         }
+        Self::bisect_resting_state(a, b, i_app, p, q, (low, high, f_low))
+    }
+
+    fn bisect_resting_state(
+        a: f64,
+        b: f64,
+        i_app: f64,
+        p: f64,
+        q: f64,
+        (mut low, mut high, f_low): (f64, f64, f64),
+    ) -> Option<(f32, f32)> {
         for _ in 0..512 {
             let middle = low + (high - low) / 2.0;
             let f = Self::resting_residual(middle, p, q);

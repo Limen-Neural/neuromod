@@ -720,7 +720,17 @@ impl SpikingNetwork {
         self.neurons.iter().map(|n| n.threshold).collect()
     }
 
-    /// Reset network to initial state.
+    /// Start a new episode by clearing dynamic state and spike history.
+    ///
+    /// Resets the engine clock, input timestamps, predictive state, LIF membrane
+    /// state, LIF spike history, eligibility values, and the Izhikevich bank's
+    /// voltage, recovery, and spike history. The neuromodulator snapshot returns
+    /// to [`NeuroModulators::default`].
+    ///
+    /// Learned LIF weights and configured neuron parameters are preserved. In
+    /// particular, a LIF neuron's current `threshold` and `decay_rate` survive
+    /// reset, while an Izhikevich neuron returns to the resting equilibrium
+    /// determined by its current `b` and `c` parameters.
     pub fn reset(&mut self) {
         self.global_step = 0;
         self.input_spike_times = vec![-1; self.num_channels];
@@ -733,6 +743,11 @@ impl SpikingNetwork {
             for trace in &mut neuron.eligibility {
                 trace.reset();
             }
+        }
+
+        for neuron in &mut self.iz_neurons {
+            neuron.reset();
+            neuron.last_spike_time = -1;
         }
 
         self.modulators = NeuroModulators::default();
@@ -1574,6 +1589,58 @@ mod tests {
                     .all(|t| t.tau == network.stdp_config.tau_eligibility)
             );
         }
+    }
+
+    #[test]
+    fn test_reset_starts_a_clean_episode_without_reconfiguring_neurons_or_weights() {
+        // A reset discards only episode-scoped dynamics. It must not turn a
+        // trained, retuned network back into its constructor configuration.
+        let mut network = SpikingNetwork::with_dimensions(1, 1, 1);
+        network.neurons[0].weights = vec![0.75];
+        network.neurons[0].threshold = 0.31;
+        network.neurons[0].decay_rate = 0.07;
+        let modulators = NeuroModulators {
+            dopamine: 1.0,
+            ..Default::default()
+        };
+
+        network
+            .step(&[1.0], &modulators)
+            .expect("real activity advances both banks");
+        assert_ne!(network.iz_neurons[0].v, network.iz_neurons[0].c);
+        assert_ne!(
+            network.iz_neurons[0].u,
+            network.iz_neurons[0].b * network.iz_neurons[0].c
+        );
+        let learned_weights = network.neurons[0].weights.clone();
+        let current_threshold = network.neurons[0].threshold;
+        let current_decay = network.neurons[0].decay_rate;
+
+        network.neurons[0].membrane_potential = 0.4;
+        network.neurons[0].last_spike = true;
+        network.neurons[0].last_spike_time = 1;
+        network.iz_neurons[0].last_spike_time = 1;
+        network.global_step = i64::MAX;
+
+        network.reset();
+
+        assert_eq!(network.global_step, 0);
+        assert_eq!(network.input_spike_times, vec![-1]);
+        assert_eq!(network.predictive_state, vec![0.0]);
+        assert_eq!(network.modulators, NeuroModulators::default());
+
+        let lif = &network.neurons[0];
+        assert_eq!(lif.membrane_potential, 0.0);
+        assert!(!lif.last_spike);
+        assert_eq!(lif.last_spike_time, -1);
+        assert_eq!(lif.threshold, current_threshold);
+        assert_eq!(lif.decay_rate, current_decay);
+        assert_eq!(lif.weights, learned_weights);
+
+        let iz = &network.iz_neurons[0];
+        assert_eq!(iz.v, iz.c);
+        assert_eq!(iz.u, iz.b * iz.c);
+        assert_eq!(iz.last_spike_time, -1);
     }
 
     #[test]

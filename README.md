@@ -567,14 +567,25 @@ examples above, which resolve the local source.
 
    readme = Path("README.md").read_text()
    changelog = Path("CHANGELOG.md").read_text()
+
+   def require(condition, message):
+       if not condition:
+           raise SystemExit(message)
+
    for name, text in (("README.md", readme), ("CHANGELOG.md", changelog)):
-       assert not re.search(r"^(<<<<<<<|=======|>>>>>>>)", text, re.M), name
+       require(
+           not re.search(r"^(<<<<<<<|=======|\|\|\|\|\|\|\||>>>>>>>)", text, re.M),
+           f"conflict marker in {name}",
+       )
 
    headings = re.findall(r"^## \[0\.6\.0\].*$", changelog, re.M)
-   assert len(headings) == 1, headings
+   require(len(headings) == 1, f"expected one 0.6.0 heading: {headings}")
    dated_heading = re.fullmatch(r"## \[0\.6\.0\] - (\d{4}-\d{2}-\d{2})", headings[0])
-   assert dated_heading, headings[0]
-   release_date = date.fromisoformat(dated_heading.group(1))
+   require(dated_heading is not None, f"invalid 0.6.0 heading: {headings[0]}")
+   try:
+       release_date = date.fromisoformat(dated_heading.group(1))
+   except ValueError as error:
+       raise SystemExit(f"invalid 0.6.0 date: {error}") from error
    print(f"ok: release documents have no conflict markers and one dated 0.6.0 heading ({release_date})")
    PY
    ```

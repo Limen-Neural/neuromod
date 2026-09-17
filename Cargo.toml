@@ -15,6 +15,7 @@ exclude = [
     ".devin/",
     ".config/",
     "azure-templates/",
+    ".deepsource.toml",
     ".codacy.yml",
     ".dockerignore",
     ".markdownlint.json",

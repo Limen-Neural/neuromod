@@ -2,41 +2,7 @@
 
 All notable changes to this project are documented in this file.
 
-## [Unreleased]
-
-### Fixed
-
-- **`SpikingNetwork::step` rejects non-finite stimuli and modulators before mutation**
-  (`src/engine.rs`, LIM-1226). The previous entry guard checked only `stimuli.len()`,
-  then incremented `global_step`, stored the modulator snapshot, and ran
-  `abs().clamp(...)` on each channel. Rust's `f32::clamp` does not sanitize `NaN`,
-  so a non-finite sample could poison predictive state, membranes, thresholds, and
-  later STDP. Preflight is now a linear, allocation-free scan of the whole stimulus
-  slice plus the four modulator fields, and any `Err` is returned before the first
-  mutation or RNG draw. Finite signed values, including `0.0` / `-0.0` and
-  `f32::MAX` / `f32::MIN`, still take the existing clamp/range path.
-- **`SpikingNetwork::step` no longer panics or wraps at `i64::MAX`.** A restored or
-  caller-written checkpoint whose `global_step` is already `i64::MAX` now returns
-  `StepError::StepCounterExhausted` before any mutation or random-number generator
-  draw (LIM-1227). Debug and release share this checked behavior. Engine-stamped spike
-  times are `1..=i64::MAX` or the `-1` no-spike sentinel; wrapping `global_step` to
-  `i64::MIN` is refused, and a negative counter is refused on `step` so incrementing it
-  cannot stamp that sentinel. Δt is computed in `i128` so the last legal tick cannot
-  overflow independently. Exhausted or negative checkpoints still deserialize so they
-  can be inspected; call `reset()` to start a new epoch. The engine does not renumber
-  a live network.
-- **`GifNeuron::threshold` now affects firing** (#119, LIM-1168). The field was documented as the
-  runtime-mutable neuromodulation knob but `check_for_spike` read `base_threshold` instead, so
-  callers who tuned `threshold` saw no change. `GifNeuron::params` now snapshots the live
-  `threshold` into `GifParams::base_threshold`, matching `LifNeuron` (`threshold` is live;
-  `base_threshold` is the restore point). Defaults still seed both from the same value, so
-  `SparseGifHiddenLayer` bit-parity is unchanged unless a caller writes to `threshold`.
-
-### Changed
-
-- **`StepError` gained `StepCounterExhausted`, `NonFiniteStimulus`, and `NonFiniteModulator`.**
-  Exhaustive matches that only named `InputLenMismatch` need new arms. `StepError` now also
-  implements `Display` and `std::error::Error`. Normal non-exhausted checkpoints are unchanged.
+## [0.6.0] - Unreleased
 
 ### Added
 
@@ -48,13 +14,12 @@ All notable changes to this project are documented in this file.
   re-exported so downstream crates do not need a matching direct `rand`
   dependency to copy the seeded example. The generator is not stored on the
   network and is not part of a serde checkpoint. Inventory of stochastic vs
-  deterministic public paths: [docs/rng.md](docs/rng.md).
+  deterministic public paths: [docs/rng.md](https://github.com/Limen-Neural/neuromod/blob/main/docs/rng.md).
 - **crates.io standalone demo** (`examples/crates-io-standalone`, #82). A detached
   Cargo package that depends on published `neuromod = "0.5"` only — no git path,
   no sibling Limen crates — so an outsider can onboard without the monorepo
   graph. Linked from the README; CI on Linux asserts the resolved `neuromod`
   source is the crates.io registry and `cargo run`s the binary.
->>>>>>> main
 - **`SparseGifHiddenLayer` — sparse GIF hidden layer** (`src/gif_layer.rs`, #101). An upstream
   port of the reusable GIF layer from the author's `rmems/corinth-canal` repository
   (`src/funnel.rs`), promoted here so the canonical dynamics live in the dynamics crate. It is a
@@ -79,9 +44,9 @@ All notable changes to this project are documented in this file.
     modulation or plasticity.
   - Regression fixtures are **internal goldens** produced by this implementation (topology,
     weights, spike raster, and final SoA state all pinned), plus edge cases: zero fan-in, zero
-    input, fully dense fan-in, single neuron, zero-neuron layer, and empty spike train. True
-    cross-repo bit-parity vectors against `corinth-canal` are blocked on access to that repository
-    and must land in a follow-up.
+    input, fully dense fan-in, single neuron, zero-neuron layer, and empty spike train. They are
+    not independent cross-repository vectors; committed parity fixtures remain a follow-up in the
+    existing v0.7 issue #144.
   - Out of scope and deliberately not ported: `SignedSplitBankBridge`, telemetry-funnel
     orchestration, checkpoint parsing, and encoding schemas — all downstream concerns.
 - `GifParams` — the shared GIF parameter block and dynamics (`integrate`, `check_for_spike`,
@@ -92,18 +57,12 @@ All notable changes to this project are documented in this file.
   its fields and methods are unchanged.
 - `examples/sparse_gif_layer.rs` — runnable demo of the layer's topology, batched run, and
   reproducibility.
-
-### Removed
-
-- **Qodana** — dropped `.github/workflows/qodana_code_quality.yml` and `qodana.yaml` after the Qodana Cloud membership expired. README CI bullet and `REVIEW.md` local scan instructions removed with it.
-
-## [0.6.0] - 2026-08-29
-
-Reward-modulated STDP wired into the engine learning path. Breaking for downstream struct
-literals and for weight trajectories; see the README migration notes. Publish with
-`cargo publish` after this tag lands.
-
-### Added
+- **HH voltage conventions** — `VoltageConvention::{RelativeToRest, Absolute}` and the public
+  `HodgkinHuxleyNeuron::voltage_convention` field make the coordinates of membrane and reversal
+  voltages explicit. Constructors retain their existing numeric presets; temperature changes Q10
+  kinetics only. JSON now emits the snake-case convention field. Missing-field legacy JSON is
+  inferred only for exactly `(115, -12, 10.6)` or `(50, -77, -54.387)` reversal tuples; custom
+  legacy data must add the field, and null or malformed explicit values are rejected.
 
 - **R-STDP is wired into the engine.** `LifNeuron` gains `eligibility: Vec<EligibilityTrace>`
   (one trace per input channel, indexed like `weights`) and `SpikingNetwork` gains
@@ -156,19 +115,25 @@ literals and for weight trajectories; see the README migration notes. Publish wi
   transient instead of the per-step cost of a running one. The conversion bench is batched
   rather than carrying its weight across iterations, which would pin it at `w_max` within a
   couple of hundred samples and time a saturated synapse.
-- [ADR 002](docs/adr/002-wire-eligibility-traces.md) recording the wire-vs-demote decision.
+- [ADR 002](https://github.com/Limen-Neural/neuromod/blob/main/docs/adr/002-wire-eligibility-traces.md) recording the wire-vs-demote decision.
+
+- **Signal unit conventions** — [docs/signal-units.md](https://github.com/Limen-Neural/neuromod/blob/main/docs/signal-units.md) documents the contract: `NeuroModulators` levels are dimensionless `0.0..=1.0`, `from_signals` input channels carry no unit, and each `SignalProfile` field is expressed in the same unit as the channel it scales. Includes the exact mapping formulas and the caveats the range guarantee actually has: `add_*` / `boost_*` clamp only the upper bound (a negative amount goes below `0.0`), `NaN` signals propagate through `f32::clamp` into every level except `norepinephrine` (which never propagates `NaN` but resolves to the surviving stress term rather than always `0.0`), a `NaN` profile field behaves four different ways depending on where it is used, and serotonin's deviation from `stability_target` is measured in raw throughput units rather than scale-normalized. Behavior unchanged throughout; documented, not fixed (#75).
+- Unit tests covering `from_signals` output clamping, near-zero-divisor safety, `NaN` propagation, `add_*` lower-bound behavior, thermal-threshold onset/saturation, the legacy profile's disjoint dopamine/serotonin bands, and legacy-literal equivalence.
 
 ### Deprecated
 
-- **`SignalProfile::hardware_calibrated()`** — deprecated since **0.6.0** (`#[deprecated]`; still compiles and returns the same values). Deployment calibration describes a device, not neuron dynamics, so it belongs to the consuming crate per the boundary matrix. Migrate by copying the legacy literal documented on the method and in [docs/signal-units.md](docs/signal-units.md); a unit test asserts the literal stays equal to the constructor. No rename, no removal, and no behavior change in this release (#75).
+- **`SignalProfile::hardware_calibrated()`** — deprecated since **0.6.0** (`#[deprecated]`; still compiles and returns the same values). Deployment calibration describes a device, not neuron dynamics, so it belongs to the consuming crate per the boundary matrix. Migrate by copying the legacy literal documented on the method and in [docs/signal-units.md](https://github.com/Limen-Neural/neuromod/blob/main/docs/signal-units.md); a unit test asserts the literal stays equal to the constructor. No rename, no removal, and no behavior change in this release (#75).
 
-### Added
+### Removed
 
-- **Signal unit conventions** — [docs/signal-units.md](docs/signal-units.md) documents the contract: `NeuroModulators` levels are dimensionless `0.0..=1.0`, `from_signals` input channels carry no unit, and each `SignalProfile` field is expressed in the same unit as the channel it scales. Includes the exact mapping formulas and the caveats the range guarantee actually has: `add_*` / `boost_*` clamp only the upper bound (a negative amount goes below `0.0`), `NaN` signals propagate through `f32::clamp` into every level except `norepinephrine` (which never propagates `NaN` but resolves to the surviving stress term rather than always `0.0`), a `NaN` profile field behaves four different ways depending on where it is used, and serotonin's deviation from `stability_target` is measured in raw throughput units rather than scale-normalized. Behavior unchanged throughout; documented, not fixed (#75).
-- Unit tests covering `from_signals` output clamping, near-zero-divisor safety, `NaN` propagation, `add_*` lower-bound behavior, thermal-threshold onset/saturation, the legacy profile's disjoint dopamine/serotonin bands, and legacy-literal equivalence.
+- **Qodana** — dropped `.github/workflows/qodana_code_quality.yml` and `qodana.yaml` after the Qodana Cloud membership expired. README CI bullet and `REVIEW.md` local scan instructions removed with it.
 
 ### Changed
 
+- **`StepError` gained `StepCounterExhausted`, `NonFiniteStimulus`, and
+  `NonFiniteModulator`.** Exhaustive matches that only named
+  `InputLenMismatch` need new arms. `StepError` now also implements `Display`
+  and `std::error::Error`. Normal non-exhausted checkpoints are unchanged.
 - **Rustdoc for `SignalProfile` / `NeuroModulators::from_signals`** — per-field units, channel-to-modulator table, mapping formulas, and runnable examples for both the neutral and physical-unit profiles; `modulators` module docs gained a unit-conventions section. README, `CLAUDE.md`, and the boundary matrix point at the new units page (#75).
 
 - **Breaking:** weight updates flow through a decaying eligibility trace
@@ -214,6 +179,63 @@ literals and for weight trajectories; see the README migration notes. Publish wi
 - **Docker:** CI pushes example runtime images to Docker Hub and **GHCR** (`ghcr.io/limen-neural/neuromod` with SHA, version, and `latest` tags) so the image appears under GitHub org packages; README documents pull URLs.
 - **Docker verify:** PR job asserts example binaries exist in the runtime image; publish job requires full `X.Y.Z` crate version for tags.
 - README crates.io / docs.rs badges stay version-agnostic (latest); install pin documents **0.6.0**.
+- **Breaking (source and serialization):** exhaustive `HodgkinHuxleyNeuron` struct literals must
+  specify `voltage_convention` or use a constructor. Positional checkpoints need migration or
+  re-encoding. Setting the field alone never transforms `v` or reversal potentials; callers who
+  change coordinates must transform all four values together.
+
+### Fixed
+
+- **`SpikingNetwork::step` rejects non-finite stimuli and modulators before mutation**
+  (`src/engine.rs`, LIM-1226). The previous entry guard checked only `stimuli.len()`,
+  then incremented `global_step`, stored the modulator snapshot, and ran
+  `abs().clamp(...)` on each channel. Rust's `f32::clamp` does not sanitize `NaN`,
+  so a non-finite sample could poison predictive state, membranes, thresholds, and
+  later STDP. Preflight is now a linear, allocation-free scan of the whole stimulus
+  slice plus the four modulator fields, and any `Err` is returned before the first
+  mutation or RNG draw. Finite signed values, including `0.0` / `-0.0` and
+  `f32::MAX` / `f32::MIN`, still take the existing clamp/range path.
+- **`SpikingNetwork::step` no longer panics or wraps at `i64::MAX`.** A restored or
+  caller-written checkpoint whose `global_step` is already `i64::MAX` now returns
+  `StepError::StepCounterExhausted` before any mutation or random-number generator
+  draw (LIM-1227). Debug and release share this checked behavior. Engine-stamped spike
+  times are `1..=i64::MAX` or the `-1` no-spike sentinel; wrapping `global_step` to
+  `i64::MIN` is refused, and a negative counter is refused on `step` so incrementing it
+  cannot stamp that sentinel. Δt is computed in `i128` so the last legal tick cannot
+  overflow independently. Exhausted or negative checkpoints still deserialize so they
+  can be inspected; call `reset()` to start a new epoch. The engine does not renumber
+  a live network.
+- **`GifNeuron::threshold` now affects firing** (#119, LIM-1168). The field was documented as the
+  runtime-mutable neuromodulation knob but `check_for_spike` read `base_threshold` instead, so
+  callers who tuned `threshold` saw no change. `GifNeuron::params` now snapshots the live
+  `threshold` into `GifParams::base_threshold`, matching `LifNeuron` (`threshold` is live;
+  `base_threshold` is the restore point). Defaults still seed both from the same value, so
+  `SparseGifHiddenLayer` bit-parity is unchanged unless a caller writes to `threshold`.
+- **Izhikevich integration** now performs each documented 0.5-ms Euler voltage increment before updating recovery, restoring the intended numerical trajectory and `step_with_time` spike schedule (#146).
+- **FitzHugh–Nagumo and Hodgkin–Huxley durations** now integrate every finite positive duration with bounded substeps, including a final remainder. Zero, negative, and non-finite durations return `false` without mutating state; a spike crossing in any substep is retained (#147).
+- **FitzHugh–Nagumo reset** now performs a bounded search for an approximate zero-input
+  intersection of the original nullclines, `v - v^3 / 3 - w = 0` and `v + a - b * w = 0`, and
+  accepts only a rounded `f32` state that passes residual checks in both implemented arithmetic
+  and the original equations. `b = 0` remains directly supported. Finite coefficients do not
+  guarantee that this bounded search finds a representable, validated pair: failure leaves both
+  state fields as `NaN`, without proving that no pair exists. `epsilon` is deliberately outside
+  the unscaled equilibrium checks. A different selected root can change reset values and later
+  trajectories; selection is not guaranteed unique, a selected root is not necessarily stable,
+  and this does not guarantee RK4 stability for arbitrary parameters, inputs, or timesteps
+  (#151, LIM-1356).
+- **`FitzHughNagumoNeuron::is_excitable` now requires strict local linear stability** at its
+  selected finite zero-input root (LIM-1357). It evaluates the Jacobian in `f64` and returns
+  `true` only when finite `trace < 0` and `determinant > 0`. Saddles, neutral boundaries,
+  non-finite roots or Jacobian coefficients, and other non-strict cases return `false`; that
+  result does not establish global oscillation or nonlinear instability. The public signature,
+  serialization, parameters, and root-selection behavior are unchanged, but a selected saddle
+  or zero-determinant boundary now classifies correctly as `false`.
+- **Hodgkin–Huxley spike detection** now reports only strict upward crossings at the
+  above-rest action-potential threshold: relative `65 mV` or absolute `0 mV`, according to
+  `VoltageConvention`. First squid action potentials are now reported; near-rest oscillations
+  are not. The detector correction leaves integration dynamics unchanged (#153).
+- **`SpikingNetwork::reset`** now starts a clean episode for both LIF and Izhikevich banks: it clears dynamic state and spike history while preserving configured parameters and learned LIF weights (#150).
+- **`HebbianIzhikevichNetwork::update_weights`** now leaves a weight unchanged until both endpoints have genuine nonnegative spike timestamps. The public `apply_classical_stdp` timing kernel is unchanged (#149).
 
 ## [0.5.2] - 2026-08-12
 

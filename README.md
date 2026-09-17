@@ -69,7 +69,7 @@ println!("{:?}", raster.per_neuron_counts());
 
 The layer takes no `NeuroModulators`: a GIF hidden layer is a pure integrate-and-fire structure with no reward signal. Callers that want modulation apply it themselves between steps — `weights_mut()` for synaptic strength, `params_mut()` for the shared dynamics (`base_threshold` and friends). `apply_neuromodulation` is **not** usable here: it expects a per-neuron `&mut [f32]` threshold slice, whereas this layer holds one shared `GifParams` for the whole bank rather than a threshold per neuron.
 
-This module is an upstream port of the equivalent layer from the author's `corinth-canal` repository (issue #101). Its regression fixtures are internal goldens produced by this implementation, not cross-repo bit-parity vectors; true parity vectors are a follow-up blocked on access to that repository. See `cargo run --example sparse_gif_layer`.
+This module is an upstream port of the equivalent layer from the author's `corinth-canal` repository (issue #101). Its regression fixtures are internal goldens produced by this implementation, not independent cross-repository bit-parity vectors. Committed cross-repository parity fixtures remain a follow-up in the existing v0.7 issue #144. See `cargo run --example sparse_gif_layer`.
 
 ## Requirements
 
@@ -93,11 +93,11 @@ Browser, Web Worker, and other supported JavaScript-hosted
 `wasm32-unknown-unknown` consumers opt into the upstream getrandom backend with
 `neuromod = { version = "0.6.0", features = ["wasm-js"] }`. Non-Web WASM
 consumers should leave this feature disabled and choose the entropy backend for
-their final application. See [the RNG guide](docs/rng.md#webassembly-entropy-backends).
+their final application. See [the RNG guide](https://github.com/Limen-Neural/neuromod/blob/main/docs/rng.md#webassembly-entropy-backends).
 
-> `0.6.0` reaches crates.io when its tag lands. Until then the newest published release is
-> `0.5.2`, which predates the wired R-STDP API below — depend on the git repository if you
-> need it before the release.
+> This README describes the in-repository `0.6.0` candidate. Check
+> [crates.io](https://crates.io/crates/neuromod) for registry availability; before maintainer
+> publication, the in-repository examples use the local source.
 
 Links: [crates.io](https://crates.io/crates/neuromod) · [docs.rs](https://docs.rs/neuromod) · [repository](https://github.com/Limen-Neural/neuromod)
 
@@ -144,7 +144,7 @@ example above does not need a direct `rand` dependency. It is not stored on
 implementation (this crate's `rand` version and target), the same seed + same
 inputs/state replays a run **from the start**. Resuming a mid-run checkpoint
 needs the generator's advanced state, not only the original seed; see
-[docs/rng.md](docs/rng.md).
+[docs/rng.md](https://github.com/Limen-Neural/neuromod/blob/main/docs/rng.md).
 
 ## Dynamic Dimensions
 
@@ -329,7 +329,7 @@ them: [ADR 002](https://github.com/Limen-Neural/neuromod/blob/main/docs/adr/002-
 
 ## Migration Notes
 
-### Unreleased — `StepError` names non-finite ingress
+### 0.6.0 — `StepError` names non-finite ingress
 
 `SpikingNetwork::step` now rejects `NaN` / `±∞` stimuli and modulator fields
 before mutating anything. Exhaustive `match`es on `StepError` must handle the
@@ -392,7 +392,7 @@ whichever direction it binds — a lowered `w_max` caps weights and leaves the s
 a raised `w_min` lifts weights after scaling and can push the sum past it. The defaults cannot
 bind, so the budget holds exactly under them.
 
-### Unreleased — `StepError::StepCounterExhausted`
+### 0.6.0 — `StepError::StepCounterExhausted`
 
 **Exhaustive matches on `StepError` need a new arm.** `SpikingNetwork::step` now returns
 `StepError::StepCounterExhausted { global_step }` when incrementing `global_step` would
@@ -414,6 +414,77 @@ assert!(matches!(
     Err(StepError::StepCounterExhausted { global_step: i64::MAX })
 ));
 ```
+
+### 0.6.0 — numerical integration and reset corrections
+
+**Izhikevich trajectories change from 0.5.x and earlier 0.6.0 candidates.** Each documented
+voltage substep is again a 0.5-ms Euler increment, so exact voltages and `step_with_time` spike
+schedules can differ. The public API and serialized shape are unchanged.
+
+**FitzHugh–Nagumo and Hodgkin–Huxley now consume the requested duration.** Finite positive
+durations are integrated completely in bounded substeps, including short durations and a final
+remainder. Zero, negative, `NaN`, and either infinity return `false` without mutating state.
+Scientific trajectories can therefore differ where a previous call was rounded, truncated, or
+ignored; no signature or serialized shape changed.
+
+**FitzHugh–Nagumo reset selects a bounded, validated nullcline intersection.**
+`FitzHughNagumoNeuron::reset` selects a zero-input solution of the original equations
+`v - v^3 / 3 - w = 0` and `v + a - b * w = 0` through a root search that is bounded. An
+approximate root is accepted only when its rounded `f32` state passes residual checks in both the
+implemented arithmetic and the original equations; `b = 0` remains supported directly. Finite
+coefficients therefore do not guarantee that the bounded search finds a representable, validated
+state: when it finds no such pair, reset writes `NaN` to both `v` and `w`, which is not proof that
+none exists. `epsilon` is intentionally outside this unscaled equilibrium geometry, so it cannot
+hide a missed nullcline intersection. Different selected roots can change reset values and later
+trajectories. Selection is not guaranteed unique, and the selected root is not necessarily stable;
+this correction does not guarantee RK4 stability for arbitrary parameters, inputs, or timesteps.
+
+**`FitzHughNagumoNeuron::is_excitable` now requires strict local linear stability.** The method
+evaluates the Jacobian at its selected finite zero-input root in `f64` arithmetic and returns
+`true` only when both coefficients are finite, `trace < 0`, and `determinant > 0`. A selected
+saddle or neutral boundary, a failed/non-finite root search, or a non-finite Jacobian coefficient
+therefore returns `false`. This is a local linear classification of the selected root: `false`
+does not establish global oscillation, nonlinear instability, or any other global behavior. The
+public signature, serialization, parameters, and root-selection behavior are unchanged, though
+callers whose selected equilibrium is a saddle or zero-determinant boundary now receive the
+corrected `false` result.
+
+**Hodgkin–Huxley spike booleans now use an above-rest action-potential threshold.** `step`
+reports a strict upward crossing from below to at or above relative `65 mV` for
+`RelativeToRest`, or absolute `0 mV` for `Absolute`. A genuine first squid action potential now
+reports `true`; small near-rest oscillations no longer do. This detector-only correction does
+not alter continuous integration state or recalibrate model dynamics.
+
+**`SpikingNetwork::reset` clears episode state without discarding configuration.** It resets
+both neuron banks' dynamic state and spike history, including every LIF eligibility-trace value,
+the engine clock, inputs, predictive state, and the neuromodulator snapshot. Current LIF
+thresholds and decay rates, configured neuron
+parameters, and learned LIF weights are preserved.
+
+**Classical Hebbian updates require real spike history at both endpoints.**
+`HebbianIzhikevichNetwork::update_weights` now leaves a weight unchanged until both timestamps
+are nonnegative. `apply_classical_stdp` keeps its existing public timing kernel.
+
+### 0.6.0 — Hodgkin–Huxley voltage conventions and checkpoints
+
+`VoltageConvention::{RelativeToRest, Absolute}` is public and
+`HodgkinHuxleyNeuron::voltage_convention` identifies the coordinate system shared by `v`,
+`e_na`, `e_k`, and `e_l`. The constructors retain their numeric presets: the squid preset uses
+rest `0`, reversals `(115, -12, 10.6)`, and `6.3 °C`; the cortical preset uses rest `-65`,
+reversals `(50, -77, -54.387)`, and `37 °C`. Temperature now affects Q10 kinetics only; it does
+not select a voltage coordinate.
+
+**Struct literals and JSON change.** Add `voltage_convention` to exhaustive
+`HodgkinHuxleyNeuron` literals, or build from a constructor. JSON serializes the field as
+`"relative_to_rest"` or `"absolute"`. Legacy JSON that omits it is accepted only when the parsed
+reversal tuple is exactly `(115, -12, 10.6)` or `(50, -77, -54.387)`; custom legacy records must
+add the field. Explicit `null` or malformed conventions are rejected. Positional checkpoints
+such as bincode/postcard need migration or re-encoding because they do not name fields.
+
+**Changing the field does not convert values.** To move between conventions, transform `v` and
+all three reversal potentials together: subtract 65 mV to move relative values to absolute
+coordinates, or add 65 mV for the reverse. Deserialization preserves stored numeric values and
+does not silently repair mixed-coordinate state.
 
 ## Included Components
 
@@ -452,7 +523,7 @@ cargo run --example sparse_gif_layer
 
 ### Standalone crates.io demo
 
-Outsiders who are not on the Limen git graph can depend only on crates.io. The runnable package is [`examples/crates-io-standalone`](examples/crates-io-standalone) — a detached Cargo workspace so it cannot pick up this path crate.
+Outsiders who are not on the Limen git graph can depend only on crates.io. The runnable package is [`examples/crates-io-standalone`](https://github.com/Limen-Neural/neuromod/tree/main/examples/crates-io-standalone) — a detached Cargo workspace so it cannot pick up this path crate.
 
 ```bash
 cd examples/crates-io-standalone
@@ -471,7 +542,21 @@ edition = "2024"
 neuromod = "0.5"
 ```
 
-`neuromod = "0.5"` stays on the published 0.5.x line. This repository's 0.6.0 APIs (wired R-STDP, `SparseGifHiddenLayer`) are not on crates.io until that tag is published — use the in-repo examples above for those.
+`neuromod = "0.5"` intentionally resolves the published 0.5.x line. This registry-only demo
+does not validate this repository's 0.6.0 APIs (wired R-STDP and `SparseGifHiddenLayer`); check
+crates.io for later registry availability. Before maintainer publication, use the in-repository
+examples above, which resolve the local source.
+
+## Maintainer release sequence
+
+1. Start from a clean, exact final SHA after every correctness fix and documentation change is
+   merged. Run the final-gate checklist, including `cargo package --locked`,
+   `cargo publish --locked --dry-run`, the independent unpacked archive-consumer checks, archive
+   checksum capture, and exact-SHA CI evidence.
+2. Obtain separate explicit authorization before creating a release tag or running
+   `cargo publish --locked`. A tag alone does not publish the crate.
+3. After the authorized tag and publication, verify the registry version and archive metadata
+   directly before describing 0.6.0 as published.
 
 ## Development
 
@@ -503,8 +588,8 @@ cargo hack check --feature-powerset --exclude-no-default-features --keep-going
 
 [![codecov](https://codecov.io/gh/Limen-Neural/neuromod/graph/badge.svg)](https://codecov.io/gh/Limen-Neural/neuromod)
 
-- Configuration: [`codecov.yml`](codecov.yml)
-- Workflow: [`.github/workflows/coverage.yml`](.github/workflows/coverage.yml)
+- Configuration: [`codecov.yml`](https://github.com/Limen-Neural/neuromod/blob/main/codecov.yml)
+- Workflow: [`.github/workflows/coverage.yml`](https://github.com/Limen-Neural/neuromod/blob/main/.github/workflows/coverage.yml)
 - Dashboard: [codecov.io/gh/Limen-Neural/neuromod](https://codecov.io/gh/Limen-Neural/neuromod)
 
 The badge links to Codecov's test coverage report.
@@ -539,7 +624,7 @@ at your option.
 
 This repository uses a comprehensive CI setup for speed, quality, security, and observability:
 
-- **Core CI** (`.github/workflows/ci.yml`): runs on every pull request and push to `main`, and can be started with `workflow_dispatch`. The **Linux / macOS / Windows** matrix (`ubuntu-latest`, `macos-latest`, `windows-latest`) runs the pinned MSRV toolchain, `clippy`, build, and `cargo test --locked --all-features` (unit tests and doctests) unconditionally. Linux additionally runs the release test suite; overflow-checks-off, feature-powerset, and browser-WASM regressions; formatting; strict domain-agnostic rustdoc; dependency audit; debug and release example smokes; benchmark compilation; package validation; and debug/release registry-only outsider-demo smokes. The same release-candidate path applies to source, workflow, toolchain, and documentation changes. Uses `Swatinem/rust-cache` for faster feedback.
+- **Core CI** (`.github/workflows/ci.yml`): runs on every pull request and push to `main`, and can be started with `workflow_dispatch`. The **Linux / macOS / Windows** matrix (`ubuntu-latest`, `macos-latest`, `windows-latest`) runs the pinned MSRV toolchain, `clippy`, build, and `cargo test --locked --all-features` (unit tests and doctests) unconditionally. Linux additionally runs the release test suite; overflow-checks-off, feature-powerset, and browser-WASM regressions; formatting; strict domain-agnostic rustdoc; dependency audit; debug and release example smokes; benchmark compilation and Criterion runtime smoke execution; package validation; and debug/release registry-only outsider-demo smokes. The same release-candidate path applies to source, workflow, toolchain, and documentation changes. Uses `Swatinem/rust-cache` for faster feedback.
 - **Codecov** (`.github/workflows/coverage.yml`): `cargo-llvm-cov` + Test Analytics (stable JUnit via pinned nextest). See [Observability](#observability) for local usage and report links.
 - **reviewdog** (`.github/workflows/reviewdog.yml`): Inline PR comments for clippy and rustfmt.
 - **Security scanning**:

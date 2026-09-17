@@ -1,0 +1,21 @@
+src/fitzhugh_nagumo.rs
+  s_dcae77b6a63edc::t_c64a9988a670e9 448,450-456,458-470
+  s_dcae77b6a63edc::t_60e4eaf0433910 1285-1302,1304-1342
+  s_dcae77b6a63edc::t_9c9dce0c17a4d7 1303
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "b27cc1166a7e15a045b0af91a50cdcf9bd44cc2c",
+  "prompts": {},
+  "sessions": {
+    "s_dcae77b6a63edc": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a0acac-072c-7712-98cb-9203144ca6e1",
+        "model": "gpt-5.6-terra"
+      },
+      "human_author": "Raul Cardenas Montoya <montoyaraul34@gmail.com>"
+    }
+  }
+}

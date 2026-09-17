@@ -110,8 +110,14 @@ impl FitzHughNagumoNeuron {
     }
 
     fn resting_candidate(a: f64, b: f64, i_app: f64, v: f64) -> Option<(f32, f32)> {
-        let cubic_w = v - v * v * v / 3.0 + i_app;
         let rounded_v = v as f32;
+        // Match the integrator's arithmetic first to avoid artificial
+        // zero-input drift when rounding an otherwise valid intersection.
+        let implemented_w = rounded_v - rounded_v * rounded_v * rounded_v / 3.0 + i_app as f32;
+        if Self::valid_resting_pair(a, b, i_app, rounded_v, implemented_w) {
+            return Some((rounded_v, implemented_w));
+        }
+        let cubic_w = v - v * v * v / 3.0 + i_app;
         if Self::valid_resting_pair(a, b, i_app, rounded_v, cubic_w as f32) {
             return Some((rounded_v, cubic_w as f32));
         }
@@ -296,6 +302,8 @@ impl FitzHughNagumoNeuron {
     ///
     /// Uses Newton iteration starting at zero with a bracketed fallback. With
     /// multiple roots, the selected intersection is not necessarily stable.
+    /// Prefers recovery from the implemented `f32` voltage nullcline when it
+    /// also validates both equations.
     /// Supports `b = 0` directly. Nonfinite `a`/`b`, unrepresentable results,
     /// failure to validate both nullclines, or nonfinite evaluation of the
     /// implemented `f32` voltage/unscaled recovery right-hand sides set both
@@ -508,6 +516,33 @@ mod tests {
         assert!(!neuron.step(0.0, 0.01));
         assert!(neuron.v.is_finite() && neuron.w.is_finite());
         assert_equilibrium(neuron.a, neuron.b, 0.0, neuron.v, neuron.w);
+    }
+
+    #[test]
+    fn resting_zero_b_avoids_rounding_drift_in_implemented_voltage_derivative() {
+        for a in [
+            -2955.0f32,
+            (-2955.0f32).next_down(),
+            (-2955.0f32).next_up(),
+            -2954.0,
+            -2956.0,
+            2955.0,
+        ] {
+            let mut neuron = FitzHughNagumoNeuron {
+                a,
+                b: 0.0,
+                ..Default::default()
+            };
+            neuron.reset();
+            assert_equilibrium(a, 0.0, 0.0, neuron.v, neuron.w);
+            // With b=0, the recovery equation fixes v=-a exactly.
+            assert_eq!(neuron.v, -a);
+            let voltage_rhs = neuron.v - neuron.v * neuron.v * neuron.v / 3.0 - neuron.w;
+            assert_eq!(voltage_rhs, 0.0, "a={a}");
+            let initial = (neuron.v, neuron.w);
+            assert!(!neuron.step(0.0, 0.01));
+            assert_eq!((neuron.v, neuron.w), initial, "a={a}");
+        }
     }
 
     #[test]

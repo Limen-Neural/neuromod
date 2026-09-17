@@ -130,6 +130,13 @@ impl FitzHughNagumoNeuron {
         if !v.is_finite() || !w.is_finite() {
             return false;
         }
+        // A valid f64 intersection can still overflow the implemented f32
+        // right-hand sides. Preserve their evaluation order when checking it.
+        let voltage_rhs = v - v * v * v / 3.0 - w + i_app as f32;
+        let recovery_rhs = v + a as f32 - b as f32 * w;
+        if !voltage_rhs.is_finite() || !recovery_rhs.is_finite() {
+            return false;
+        }
         let (v, w) = (f64::from(v), f64::from(w));
         let cubic = v * v * v / 3.0;
         let rv = v - cubic - w + i_app;
@@ -290,8 +297,11 @@ impl FitzHughNagumoNeuron {
     /// Uses Newton iteration starting at zero with a bracketed fallback. With
     /// multiple roots, the selected intersection is not necessarily stable.
     /// Supports `b = 0` directly. Nonfinite `a`/`b`, unrepresentable results,
-    /// or failure to validate both nullclines set both `v` and `w` to NaN.
-    /// The intersection does not depend on `epsilon`.
+    /// failure to validate both nullclines, or nonfinite evaluation of the
+    /// implemented `f32` voltage/unscaled recovery right-hand sides set both
+    /// `v` and `w` to NaN. The intersection does not depend on `epsilon`.
+    /// This does not guarantee numerical stability for arbitrary parameters,
+    /// inputs, or timesteps.
     pub fn reset(&mut self) {
         let (v0, w0) = Self::resting_state(self.a, self.b, 0.0);
         self.v = v0;
@@ -472,6 +482,32 @@ mod tests {
             assert!(neuron.v.is_nan() && neuron.w.is_nan());
             assert!(!neuron.is_excitable());
         }
+    }
+
+    #[test]
+    fn resting_rejects_equilibrium_that_overflows_implemented_voltage_derivative() {
+        let mut neuron = FitzHughNagumoNeuron {
+            a: -8.0e12,
+            b: 0.0,
+            ..Default::default()
+        };
+        neuron.reset();
+        assert!(neuron.v.is_nan() && neuron.w.is_nan());
+    }
+
+    #[test]
+    fn resting_large_representable_equilibrium_survives_positive_step() {
+        let mut neuron = FitzHughNagumoNeuron {
+            a: -1_099_511_627_776.0, // -2^40: its cube remains representable in f32.
+            b: 0.0,
+            ..Default::default()
+        };
+        neuron.reset();
+        assert_equilibrium(neuron.a, neuron.b, 0.0, neuron.v, neuron.w);
+        assert_eq!(neuron.v, -neuron.a);
+        assert!(!neuron.step(0.0, 0.01));
+        assert!(neuron.v.is_finite() && neuron.w.is_finite());
+        assert_equilibrium(neuron.a, neuron.b, 0.0, neuron.v, neuron.w);
     }
 
     #[test]

@@ -295,7 +295,10 @@ impl HodgkinHuxleyNeuron {
 
     /// Advance by `dt_ms` with RK4 sub-steps (default 0.01 ms).
     ///
-    /// Returns `true` if V crossed above 0 mV (HH relative convention) from below.
+    /// Returns `true` on an upward crossing of 0 mV absolute: 65 mV in
+    /// [`VoltageConvention::RelativeToRest`] or 0 mV in [`VoltageConvention::Absolute`].
+    /// This above-rest event criterion distinguishes action potentials from small
+    /// resting-voltage oscillations; it does not recalibrate the model dynamics.
     /// Covers the full finite positive `dt_ms` with sub-steps no larger than 0.01 ms.
     /// Zero, negative, and non-finite durations return `false` without mutation.
     /// Runtime scales with duration; extremely large durations are impractical.
@@ -312,7 +315,10 @@ impl HodgkinHuxleyNeuron {
         let mut remaining = f64::from(dt_ms);
 
         let mut fired = false;
-        let v_threshold: f32 = 0.0;
+        let v_threshold = match self.voltage_convention {
+            VoltageConvention::RelativeToRest => 65.0,
+            VoltageConvention::Absolute => 0.0,
+        };
 
         while remaining > 0.0 {
             let sub_dt = remaining.min(f64::from(0.01f32)) as f32;
@@ -712,15 +718,96 @@ mod tests {
 
     #[test]
     fn duration_retains_early_spike_and_integrates_after_it() {
-        let mut neuron = HodgkinHuxleyNeuron {
-            v: -0.001,
-            ..HodgkinHuxleyNeuron::default()
+        for (voltage_convention, threshold) in [
+            (VoltageConvention::RelativeToRest, 65.0),
+            (VoltageConvention::Absolute, 0.0),
+        ] {
+            let mut neuron = HodgkinHuxleyNeuron {
+                voltage_convention,
+                v: threshold - 0.01,
+                g_na: 0.0,
+                g_k: 0.0,
+                g_l: 0.0,
+                c_m: 1.0,
+                ..HodgkinHuxleyNeuron::default()
+            };
+            let mut reference = neuron.clone();
+            assert!(reference.step(2.0, 0.01));
+            let midpoint = reference.v;
+            assert!(!reference.step(2.0, 0.01));
+            assert!(reference.v > midpoint);
+            assert!(neuron.step(2.0, 0.02));
+            assert_eq!(neuron.v, reference.v);
+            assert_eq!(neuron.m, reference.m);
+            assert_eq!(neuron.h, reference.h);
+            assert_eq!(neuron.n, reference.n);
+        }
+    }
+
+    // Independent f64 RK4 equations and their half-step convergence run live in
+    // tests/reference/hh_reference.py. These are numerical, not biological,
+    // calibration checks. Tolerances include f32 accumulation and sampled peaks.
+    fn assert_reference_waveform(case: &str, expected_events: usize) {
+        let fixtures: serde_json::Value =
+            serde_json::from_str(include_str!("../tests/reference/hh_reference.json")).unwrap();
+        let reference = &fixtures[case][1];
+        let mut neuron = if reference["convention"] == "absolute" {
+            HodgkinHuxleyNeuron::new_cortical()
+        } else {
+            HodgkinHuxleyNeuron::default()
         };
-        let mut reference = neuron.clone();
-        assert!(neuron.step(10.0, 0.02));
-        assert!(reference.step(10.0, 0.01));
-        assert!(!reference.step(10.0, 0.01));
-        assert!((neuron.v - reference.v).abs() < 1e-6);
+        let dt = 0.001f32;
+        let duration = reference["duration"].as_f64().unwrap();
+        let current = reference["current"].as_f64().unwrap() as f32;
+        let mut peak = neuron.v;
+        let mut times = Vec::new();
+        for step in 1..=(duration / f64::from(dt)).round() as usize {
+            if neuron.step(current, dt) {
+                times.push(step as f64 * f64::from(dt));
+            }
+            peak = peak.max(neuron.v);
+        }
+        assert_eq!(times.len(), expected_events, "{case}");
+        let expected_times = reference["crossing_times"].as_array().unwrap();
+        assert_eq!(expected_times.len(), expected_events);
+        for (actual, expected) in times.iter().zip(expected_times) {
+            assert!((actual - expected.as_f64().unwrap()).abs() <= f64::from(dt) + 0.0005 + 1e-6);
+        }
+        assert!((f64::from(peak) - reference["peak_voltage"].as_f64().unwrap()).abs() < 0.005);
+        for (index, value) in [neuron.v, neuron.m, neuron.h, neuron.n].iter().enumerate() {
+            let tolerance = if index == 0 { 0.001 } else { 1e-5 };
+            assert!(
+                (f64::from(*value) - reference["endpoint"][index].as_f64().unwrap()).abs()
+                    < tolerance
+            );
+        }
+    }
+
+    #[test]
+    fn spike_detector_catches_initial_squid_action_potential() {
+        assert_reference_waveform("squid_spike", 1);
+    }
+
+    #[test]
+    fn spike_detector_rejects_squid_subthreshold_oscillation() {
+        assert_reference_waveform("squid_subthreshold", 0);
+    }
+
+    #[test]
+    fn spike_detector_preserves_cortical_subthreshold_and_spike_cases() {
+        assert_reference_waveform("cortical_subthreshold", 0);
+        assert_reference_waveform("cortical_spike", 1);
+    }
+
+    #[test]
+    fn spike_detector_retains_event_after_repolarization() {
+        for (mut neuron, current, duration, threshold) in [
+            (HodgkinHuxleyNeuron::default(), 10.0, 5.0, 65.0),
+            (HodgkinHuxleyNeuron::new_cortical(), 500.0, 25.0, 0.0),
+        ] {
+            assert!(neuron.step(current, duration));
+            assert!(neuron.v < threshold);
+        }
     }
 
     #[test]

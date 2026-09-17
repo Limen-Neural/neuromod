@@ -1,0 +1,130 @@
+{
+  "squid_spike": [
+    {
+      "dt": 0.001,
+      "duration": 5,
+      "current": 10,
+      "convention": "relative_to_rest",
+      "peak_voltage": 105.26824181838316,
+      "crossing_times": [
+        1.9020000000000001
+      ],
+      "endpoint": [
+        -10.058825881681663,
+        0.021598929314091936,
+        0.14418360442991013,
+        0.6891699088295083
+      ]
+    },
+    {
+      "dt": 0.0005,
+      "duration": 5,
+      "current": 10,
+      "convention": "relative_to_rest",
+      "peak_voltage": 105.26824182407762,
+      "crossing_times": [
+        1.9015
+      ],
+      "endpoint": [
+        -10.058825881692558,
+        0.02159892931352538,
+        0.1441836044303653,
+        0.6891699088291674
+      ]
+    }
+  ],
+  "squid_subthreshold": [
+    {
+      "dt": 0.001,
+      "duration": 25,
+      "current": 2,
+      "convention": "relative_to_rest",
+      "peak_voltage": 4.942485547959487,
+      "crossing_times": [],
+      "endpoint": [
+        1.3722347873851255,
+        0.06215621654269996,
+        0.5419491274697931,
+        0.34139917654718055
+      ]
+    },
+    {
+      "dt": 0.0005,
+      "duration": 25,
+      "current": 2,
+      "convention": "relative_to_rest",
+      "peak_voltage": 4.942485603968652,
+      "crossing_times": [],
+      "endpoint": [
+        1.3722347873852305,
+        0.062156216542700655,
+        0.5419491274697974,
+        0.3413991765471803
+      ]
+    }
+  ],
+  "cortical_subthreshold": [
+    {
+      "dt": 0.001,
+      "duration": 25,
+      "current": 20,
+      "convention": "absolute",
+      "peak_voltage": -54.744444962675736,
+      "crossing_times": [],
+      "endpoint": [
+        -56.592674292570926,
+        0.13458103363557902,
+        0.3076482247798224,
+        0.4504773008070258
+      ]
+    },
+    {
+      "dt": 0.0005,
+      "duration": 25,
+      "current": 20,
+      "convention": "absolute",
+      "peak_voltage": -54.744444962682195,
+      "crossing_times": [],
+      "endpoint": [
+        -56.59267429257146,
+        0.13458103363557147,
+        0.3076482247798446,
+        0.4504773008070127
+      ]
+    }
+  ],
+  "cortical_spike": [
+    {
+      "dt": 0.001,
+      "duration": 25,
+      "current": 500,
+      "convention": "absolute",
+      "peak_voltage": 16.107232386650853,
+      "crossing_times": [
+        0.08700000000000001
+      ],
+      "endpoint": [
+        -30.885729222785038,
+        0.7171321823449455,
+        0.020703565132512862,
+        0.764492700797447
+      ]
+    },
+    {
+      "dt": 0.0005,
+      "duration": 25,
+      "current": 500,
+      "convention": "absolute",
+      "peak_voltage": 16.1083850264204,
+      "crossing_times": [
+        0.08700000000000001
+      ],
+      "endpoint": [
+        -30.885729222784867,
+        0.717132182344948,
+        0.020703565132512643,
+        0.7644927007974456
+      ]
+    }
+  ]
+}

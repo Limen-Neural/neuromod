@@ -160,6 +160,15 @@ jobs:
         if: runner.os == 'Linux'
         run: cargo bench --locked --no-run --all-features
 
+      - name: Benchmarks smoke
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          for bench in neuron_bench stdp_bench memory_bench modulation_bench; do
+            cargo bench --locked --all-features --bench "$bench" -- --test
+          done
+
       - name: Package dry run
         if: runner.os == 'Linux'
         run: cargo package --locked

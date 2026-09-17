@@ -144,14 +144,29 @@ impl FitzHughNagumoNeuron {
             return false;
         }
         let (v, w) = (f64::from(v), f64::from(w));
+        let tolerance = 16.0 * f64::from(f32::EPSILON);
+        // Each underflowed operation contributes at most half a subnormal
+        // quantum. The voltage expression has six operations, recovery three.
+        // Underflow in v*v implies |v|<1, so the next multiply and division
+        // cannot amplify that absolute error.
+        let half_quantum = 0.5 * f64::from(f32::from_bits(1));
+        let voltage_rounding = 6.0 * half_quantum;
+        let recovery_rounding = 3.0 * half_quantum;
+        let state_scale = v.abs() + w.abs();
+        // Cancellation of huge coefficients must not conceal a large actual
+        // derivative of a small state. Keep epsilon out of this check too.
+        if f64::from(voltage_rhs).abs() > tolerance * (state_scale + i_app.abs()) + voltage_rounding
+            || f64::from(recovery_rhs).abs() > tolerance * state_scale + recovery_rounding
+        {
+            return false;
+        }
         let cubic = v * v * v / 3.0;
         let rv = v - cubic - w + i_app;
         let rw = v + a - b * w;
-        let tolerance = 16.0 * f64::from(f32::EPSILON);
         // Validate both original equations after rounding, without epsilon
         // scaling: epsilon=0 must not hide a missed nullcline intersection.
-        rv.abs() <= tolerance * (v.abs() + cubic.abs() + w.abs() + i_app.abs())
-            && rw.abs() <= tolerance * (v.abs() + a.abs() + (b * w).abs())
+        rv.abs() <= tolerance * (v.abs() + cubic.abs() + w.abs() + i_app.abs()) + voltage_rounding
+            && rw.abs() <= tolerance * (v.abs() + a.abs() + (b * w).abs()) + recovery_rounding
     }
 
     fn resting_residual(v: f64, p: f64, q: f64) -> f64 {
@@ -304,10 +319,14 @@ impl FitzHughNagumoNeuron {
     /// multiple roots, the selected intersection is not necessarily stable.
     /// Prefers recovery from the implemented `f32` voltage nullcline when it
     /// also validates both equations.
+    /// Both implemented unscaled right-hand sides must be finite and have
+    /// magnitude at most `16 * f32::EPSILON * (|v| + |w|)`, plus an underflow
+    /// rounding allowance (three smallest subnormal quanta for voltage and
+    /// one and a half for recovery). Both real-equation residuals must also
+    /// pass relative checks with those underflow allowances.
     /// Supports `b = 0` directly. Nonfinite `a`/`b`, unrepresentable results,
-    /// failure to validate both nullclines, or nonfinite evaluation of the
-    /// implemented `f32` voltage/unscaled recovery right-hand sides set both
-    /// `v` and `w` to NaN. The intersection does not depend on `epsilon`.
+    /// or failure to find a pair passing these checks set both `v` and `w`
+    /// to NaN. The intersection does not depend on `epsilon`.
     /// This does not guarantee numerical stability for arbitrary parameters,
     /// inputs, or timesteps.
     pub fn reset(&mut self) {
@@ -542,6 +561,82 @@ mod tests {
             let initial = (neuron.v, neuron.w);
             assert!(!neuron.step(0.0, 0.01));
             assert_eq!((neuron.v, neuron.w), initial, "a={a}");
+        }
+    }
+
+    #[test]
+    fn resting_large_coefficients_bound_implemented_recovery_residual() {
+        let a = 3.178_598_7e22f32;
+        let b = 3.673_936e22f32;
+        for (a, b) in [
+            (a, b),
+            (a.next_down(), b),
+            (a.next_up(), b),
+            (a, b.next_down()),
+            (a, b.next_up()),
+            (b.next_down(), a),
+            (b.next_up(), a),
+        ] {
+            let mut neuron = FitzHughNagumoNeuron {
+                a,
+                b,
+                ..Default::default()
+            };
+            neuron.reset();
+            assert_equilibrium(a, b, 0.0, neuron.v, neuron.w);
+            // These intersections have O(1) state, while recovery products
+            // have jumps of at least 2^51. A nonzero recovery RHS is not roundoff
+            // at the scale of that state, even though a and b*w are enormous.
+            assert_eq!(neuron.v + a - b * neuron.w, 0.0, "a={a}, b={b}");
+            let voltage_rhs = neuron.v - neuron.v * neuron.v * neuron.v / 3.0 - neuron.w;
+            assert!(voltage_rhs.abs() < 1e-6, "a={a}, b={b}");
+            let initial = (neuron.v, neuron.w);
+            assert!(!neuron.step(0.0, 0.01));
+            assert_eq!((neuron.v, neuron.w), initial, "a={a}, b={b}");
+        }
+    }
+
+    #[test]
+    fn resting_rejects_large_coefficients_without_stationary_recovery_value() {
+        for epsilon in [0.0, 0.08] {
+            let mut neuron = FitzHughNagumoNeuron {
+                a: 3.673_936e22,
+                b: 3.178_598_7e22,
+                epsilon,
+                ..Default::default()
+            };
+            // The two recovery values surrounding the real intersection
+            // produce products on opposite sides of a, each 2^51 away.
+            // The neighboring a values in the preceding test do have a
+            // representable stationary recovery value.
+            neuron.reset();
+            assert!(neuron.v.is_nan() && neuron.w.is_nan());
+        }
+    }
+
+    #[test]
+    fn resting_subnormal_intersections_allow_underflow_rounding() {
+        for a_bits in [0x5073, 0x5074, 0x5075] {
+            for sign in [-1.0, 1.0] {
+                let a = sign * f32::from_bits(a_bits);
+                let b = f32::from_bits(0x36b2_cdd4);
+                let mut neuron = FitzHughNagumoNeuron {
+                    a,
+                    b,
+                    ..Default::default()
+                };
+                neuron.reset();
+                // Here v^3 and b*w both round to zero. The exact recovery
+                // residual is about 1.538e-46, less than half of 2^-149.
+                assert_eq!((neuron.v, neuron.w), (-a, -a));
+                let real_recovery_residual =
+                    f64::from(neuron.v) + f64::from(a) - f64::from(b) * f64::from(neuron.w);
+                assert!(real_recovery_residual.abs() < 1.6e-46);
+                assert_eq!(neuron.v + a - b * neuron.w, 0.0);
+                let initial = (neuron.v, neuron.w);
+                assert!(!neuron.step(0.0, 0.01));
+                assert_eq!((neuron.v, neuron.w), initial);
+            }
         }
     }
 

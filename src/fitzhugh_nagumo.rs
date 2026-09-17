@@ -116,6 +116,11 @@ impl FitzHughNagumoNeuron {
         if b == 0.0 || !(v as f32).is_finite() {
             return None;
         }
+        // Recompute the f64 nullclines at the rounded center before moving
+        // away from it; its valid recovery may differ from the root's.
+        if let Some(pair) = Self::rounded_resting_candidate(a, b, i_app, f64::from(v as f32)) {
+            return Some(pair);
+        }
         // Rounding v+a and b*w can leave no acceptable w at the closest
         // voltage. Search a small neighborhood, in distance order, only after
         // exhausting that voltage's candidates. At most 65 voltages are tried;
@@ -685,6 +690,48 @@ mod tests {
                 assert_eq!(neuron.v + neuron.a - b * neuron.w, 0.0);
                 let voltage_rhs = neuron.v - neuron.v * neuron.v * neuron.v / 3.0 - neuron.w;
                 assert!(voltage_rhs.abs() < 1.5e-6);
+            }
+        }
+    }
+
+    #[test]
+    fn resting_recomputes_recovery_at_the_rounded_voltage() {
+        let (a, b) = (-5.067_318_3e22f32, -2.183_632_9e20f32);
+        for (a, b) in [(a, b), (a.next_up(), b), (a, b.next_down())] {
+            for sign in [-1.0, 1.0] {
+                let mut neuron = FitzHughNagumoNeuron {
+                    a: sign * a,
+                    b,
+                    ..Default::default()
+                };
+                neuron.reset();
+                assert_equilibrium(neuron.a, b, 0.0, neuron.v, neuron.w);
+                // The central real root is -8.975671924470076. Only the
+                // f64 cubic evaluated at its rounded voltage provides the
+                // valid nearby recovery 232.05906677246094. Evaluating at
+                // the unrounded root or adjacent voltages misses this pair.
+                assert!((f64::from(sign * neuron.v) + 8.975_671_924_470_076).abs() < 4e-7);
+                assert_eq!(neuron.v + neuron.a - b * neuron.w, 0.0);
+                let voltage_rhs = neuron.v - neuron.v * neuron.v * neuron.v / 3.0 - neuron.w;
+                assert!(voltage_rhs.abs() <= 1.526e-5);
+            }
+        }
+    }
+
+    #[test]
+    fn resting_rounded_voltage_retry_preserves_invalid_pair_rejection() {
+        let (a, b) = (-5.067_318_3e22f32, -2.183_632_9e20f32);
+        for (a, b) in [(a.next_down(), b), (a, b.next_up())] {
+            for sign in [-1.0, 1.0] {
+                let mut neuron = FitzHughNagumoNeuron {
+                    a: sign * a,
+                    b,
+                    ..Default::default()
+                };
+                neuron.reset();
+                // Adjacent parameters have no passing pair in the bounded
+                // voltage neighborhood; the center retry must still validate.
+                assert!(neuron.v.is_nan() && neuron.w.is_nan());
             }
         }
     }

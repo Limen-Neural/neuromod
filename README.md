@@ -552,14 +552,16 @@ examples above, which resolve the local source.
 
 ## Maintainer release sequence
 
-1. Start from a clean, exact final SHA after every correctness fix and documentation change is
-   merged. Run the final-gate checklist, including `cargo package --locked`,
-   `cargo publish --locked --dry-run`, the independent unpacked archive-consumer checks, archive
-   checksum capture, and exact-SHA CI evidence.
-   Before packaging, run this release-content guard for the 0.6.0 candidate:
+1. After every correctness fix and documentation change is merged, set the intended release date
+   in the 0.6.0 changelog heading and commit it. The date records release intent; it does not
+   claim registry publication. Then start from that clean, exact final SHA and run the final-gate
+   checklist, including `cargo package --locked`, `cargo publish --locked --dry-run`, the
+   independent unpacked archive-consumer checks, archive checksum capture, and exact-SHA CI
+   evidence. Before packaging, run this release-content guard:
 
    ```bash
    python3 - <<'PY'
+   from datetime import date
    from pathlib import Path
    import re
 
@@ -568,10 +570,10 @@ examples above, which resolve the local source.
    for name, text in (("README.md", readme), ("CHANGELOG.md", changelog)):
        assert not re.search(r"^(<<<<<<<|=======|>>>>>>>)", text, re.M), name
 
-   candidate = "## [0.6.0] - Unreleased"
-   headings = re.findall(r"^## \[0\.6\.0\].*$", changelog, re.M)
-   assert headings == [candidate], headings
-   print("ok: release documents have no conflict markers and one 0.6.0 candidate heading")
+   headings = re.findall(r"^## \[0\.6\.0\] - (.+)$", changelog, re.M)
+   assert len(headings) == 1, headings
+   release_date = date.fromisoformat(headings[0])
+   print(f"ok: release documents have no conflict markers and one dated 0.6.0 heading ({release_date})")
    PY
    ```
 

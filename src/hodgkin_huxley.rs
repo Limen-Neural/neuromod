@@ -369,6 +369,28 @@ mod tests {
     use super::*;
 
     #[test]
+    fn duration_recursive_step_integrates_both_halves_after_early_spike() {
+        let duration = 0.01f32 * 131_072.0;
+        let mut whole = HodgkinHuxleyNeuron::default();
+        let mut halves = whole.clone();
+
+        let first_fired = halves.step(10.0, duration / 2.0);
+        assert!(
+            first_fired,
+            "the first half must exercise early spike retention"
+        );
+        let midpoint_voltage = halves.v;
+        let second_fired = halves.step(10.0, duration / 2.0);
+        assert!((halves.v - midpoint_voltage).abs() > 1e-6);
+
+        assert_eq!(whole.step(10.0, duration), first_fired || second_fired);
+        assert_eq!(whole.v, halves.v);
+        assert_eq!(whole.m, halves.m);
+        assert_eq!(whole.h, halves.h);
+        assert_eq!(whole.n, halves.n);
+    }
+
+    #[test]
     fn duration_large_schedule_halves_exactly_and_terminates() {
         let mut duration = f32::MAX;
         let mut depth = 0;
@@ -385,8 +407,10 @@ mod tests {
 
     #[test]
     fn duration_retains_early_spike_and_integrates_after_it() {
-        let mut neuron = HodgkinHuxleyNeuron::new();
-        neuron.v = -0.001;
+        let mut neuron = HodgkinHuxleyNeuron {
+            v: -0.001,
+            ..HodgkinHuxleyNeuron::default()
+        };
         let mut reference = neuron.clone();
         assert!(neuron.step(10.0, 0.02));
         assert!(reference.step(10.0, 0.01));
@@ -396,7 +420,7 @@ mod tests {
 
     #[test]
     fn duration_small_positive_advances_state() {
-        let mut neuron = HodgkinHuxleyNeuron::new();
+        let mut neuron = HodgkinHuxleyNeuron::default();
         let before = neuron.v;
         neuron.step(10.0, 0.001);
         assert!(neuron.v > before);
@@ -405,7 +429,7 @@ mod tests {
     #[test]
     fn duration_nonmultiple_matches_fine_subdivision() {
         for duration in [0.006, 0.06, 0.137] {
-            let mut coarse = HodgkinHuxleyNeuron::new();
+            let mut coarse = HodgkinHuxleyNeuron::default();
             let mut fine = coarse.clone();
             coarse.step(10.0, duration);
             for _ in 0..128 {
@@ -426,7 +450,7 @@ mod tests {
     #[test]
     fn duration_nonpositive_and_nonfinite_leave_state_unchanged() {
         for duration in [0.0, -0.0, -1.0, f32::NAN, f32::INFINITY, f32::NEG_INFINITY] {
-            let original = HodgkinHuxleyNeuron::new();
+            let original = HodgkinHuxleyNeuron::default();
             let mut neuron = original.clone();
             assert!(!neuron.step(10.0, duration));
             assert_eq!(neuron.v.to_bits(), original.v.to_bits());

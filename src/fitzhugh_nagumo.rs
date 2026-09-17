@@ -233,6 +233,26 @@ mod tests {
     use super::*;
 
     #[test]
+    fn duration_recursive_step_integrates_both_halves_after_early_spike() {
+        let duration = 0.05f32 * 131_072.0;
+        let mut whole = FitzHughNagumoNeuron::default();
+        let mut halves = whole.clone();
+
+        let first_fired = halves.step(0.7, duration / 2.0);
+        assert!(
+            first_fired,
+            "the first half must exercise early spike retention"
+        );
+        let midpoint_voltage = halves.v;
+        let second_fired = halves.step(0.7, duration / 2.0);
+        assert!((halves.v - midpoint_voltage).abs() > 1e-6);
+
+        assert_eq!(whole.step(0.7, duration), first_fired || second_fired);
+        assert_eq!(whole.v, halves.v);
+        assert_eq!(whole.w, halves.w);
+    }
+
+    #[test]
     fn duration_large_schedule_halves_exactly_and_terminates() {
         let mut duration = f32::MAX;
         let mut depth = 0;
@@ -249,9 +269,11 @@ mod tests {
 
     #[test]
     fn duration_retains_early_spike_and_integrates_after_it() {
-        let mut neuron = FitzHughNagumoNeuron::new();
-        neuron.v = 0.99;
-        neuron.w = 0.0;
+        let mut neuron = FitzHughNagumoNeuron {
+            v: 0.99,
+            w: 0.0,
+            ..FitzHughNagumoNeuron::default()
+        };
         let mut reference = neuron.clone();
         assert!(neuron.step(0.7, 0.1));
         assert!(reference.step(0.7, 0.05));
@@ -261,7 +283,7 @@ mod tests {
 
     #[test]
     fn duration_small_positive_advances_state() {
-        let mut neuron = FitzHughNagumoNeuron::new();
+        let mut neuron = FitzHughNagumoNeuron::default();
         let before = neuron.v;
         neuron.step(0.7, 0.01);
         assert!(neuron.v > before);
@@ -270,7 +292,7 @@ mod tests {
     #[test]
     fn duration_nonmultiple_matches_fine_subdivision() {
         for duration in [0.006, 0.06, 0.137] {
-            let mut coarse = FitzHughNagumoNeuron::new();
+            let mut coarse = FitzHughNagumoNeuron::default();
             let mut fine = coarse.clone();
             coarse.step(0.7, duration);
             for _ in 0..128 {
@@ -289,7 +311,7 @@ mod tests {
     #[test]
     fn duration_nonpositive_and_nonfinite_leave_state_unchanged() {
         for duration in [0.0, -0.0, -1.0, f32::NAN, f32::INFINITY, f32::NEG_INFINITY] {
-            let original = FitzHughNagumoNeuron::new();
+            let original = FitzHughNagumoNeuron::default();
             let mut neuron = original.clone();
             assert!(!neuron.step(0.7, duration));
             assert_eq!(neuron.v.to_bits(), original.v.to_bits());

@@ -301,8 +301,9 @@ impl FitzHughNagumoNeuron {
         i_app: f64,
         p: f64,
         q: f64,
-        (mut low, mut high, f_low): (f64, f64, f64),
+        bracket: (f64, f64, f64),
     ) -> Option<(f32, f32)> {
+        let (mut low, mut high, f_low) = bracket;
         for _ in 0..512 {
             let middle = low + (high - low) / 2.0;
             let f = Self::resting_residual(middle, p, q);

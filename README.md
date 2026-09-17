@@ -574,6 +574,7 @@ examples above, which resolve the local source.
    print("ok: release documents have no conflict markers and one 0.6.0 candidate heading")
    PY
    ```
+
 2. Obtain separate explicit authorization before creating a release tag or running
    `cargo publish --locked`. A tag alone does not publish the crate.
 3. After the authorized tag and publication, verify the registry version and archive metadata

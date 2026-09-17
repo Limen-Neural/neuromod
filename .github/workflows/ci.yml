@@ -6,6 +6,7 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  workflow_dispatch:
 
 jobs:
   validate:
@@ -59,19 +60,6 @@ jobs:
       - name: Rust Cache
         uses: Swatinem/rust-cache@f0d9c3887740aee45f6153b24b3a6b815192ec16 # v2
 
-      - name: Check for relevant changes
-        uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
-        id: changes
-        with:
-          filters: |
-            rust:
-              - '**/Cargo.toml'
-              - '**/Cargo.lock'
-              - 'src/**'
-              - 'examples/**'
-              - 'benches/**'
-              - 'tests/**'
-
       - name: Check formatting
         if: runner.os == 'Linux'
         run: cargo fmt --check
@@ -82,19 +70,20 @@ jobs:
       - name: Build
         run: cargo build --all-features
 
-      - name: Test (nextest for speed)
-        if: steps.changes.outputs.rust == 'true'
-        shell: bash
-        run: |
-          set -euo pipefail
-          cargo install cargo-nextest --locked
-          cargo nextest run --all-features --no-fail-fast
+      # `cargo test` runs both unit tests and doctests. Keep it unconditional:
+      # workflow, toolchain, and documentation-only changes are release inputs.
+      - name: Test (unit tests and doctests)
+        run: cargo test --locked --all-features
+
+      - name: Release test regression suite
+        if: runner.os == 'Linux'
+        run: cargo test --locked --release --all-features
 
       # Debug already ran the same tests with overflow checks on. This rebuilds
       # just the lib tests with wrapping arithmetic so a regression to `+= 1`
       # cannot hide behind a debug panic. LTO is left off (dev profile).
       - name: Step-counter overflow semantics (overflow-checks off)
-        if: runner.os == 'Linux' && steps.changes.outputs.rust == 'true'
+        if: runner.os == 'Linux'
         env:
           RUSTFLAGS: "-C overflow-checks=off"
         shell: bash
@@ -108,13 +97,13 @@ jobs:
           }
 
       - name: Feature matrix (cargo-hack)
-        if: runner.os == 'Linux' && steps.changes.outputs.rust == 'true'
+        if: runner.os == 'Linux'
         run: |
           cargo install cargo-hack --locked
           cargo hack check --feature-powerset --exclude-no-default-features --keep-going
 
       - name: Check browser WASM entropy feature
-        if: runner.os == 'Linux' && steps.changes.outputs.rust == 'true'
+        if: runner.os == 'Linux'
         shell: bash
         run: |
           set -euo pipefail
@@ -135,15 +124,45 @@ jobs:
             --no-default-features \
             --edges features \
             --invert getrandom@0.4.3)
-          ! grep -F 'getrandom feature "wasm_js"' <<<"$no_feature_tree"
+          if grep -F 'getrandom feature "wasm_js"' <<<"$no_feature_tree"; then
+            echo 'error: getrandom wasm_js feature is enabled without wasm-js' >&2
+            exit 1
+          fi
 
       - name: Verify docs are domain-agnostic
         if: runner.os == 'Linux'
         shell: bash
         run: |
           set -euo pipefail
-          cargo doc --all-features --no-deps
-          ! grep -riE 'spikenaut|\bhft\b|\bmining\b|\bcrypto\b|eagle-lander' target/doc/neuromod/
+          RUSTDOCFLAGS="-D warnings" cargo doc --all-features --no-deps
+          if grep -riE 'spikenaut|\bhft\b|\bmining\b|\bcrypto\b|eagle-lander' target/doc/neuromod/; then
+            echo 'error: generated docs contain a forbidden domain term' >&2
+            exit 1
+          fi
+
+      - name: Dependency audit
+        if: runner.os == 'Linux'
+        run: |
+          cargo install cargo-audit --locked
+          cargo audit
+
+      - name: Examples smoke (debug and release)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          for example in basic basic_lif hebbian_learning rstdp_demo sparse_gif_layer; do
+            cargo run --locked --example "$example"
+            cargo run --locked --release --example "$example"
+          done
+
+      - name: Benchmarks compile
+        if: runner.os == 'Linux'
+        run: cargo bench --locked --no-run --all-features
+
+      - name: Package dry run
+        if: runner.os == 'Linux'
+        run: cargo package --locked
 
       # GH#82 / LIM-953: outsider demo must build with crates.io neuromod only.
       - name: Standalone crates.io demo
@@ -153,7 +172,10 @@ jobs:
         run: |
           set -euo pipefail
           # No git / path deps in the demo manifest.
-          ! grep -E '^\s*(git|path)\s*=' Cargo.toml
+          if grep -E '^\s*(git|path)\s*=' Cargo.toml; then
+            echo 'error: standalone demo must not use git or path dependencies' >&2
+            exit 1
+          fi
           cargo fmt --check
           cargo fetch
           source=$(cargo metadata --format-version 1 --offline \
@@ -162,3 +184,4 @@ jobs:
           test "$source" = "registry+https://github.com/rust-lang/crates.io-index"
           cargo clippy --all-targets -- -D warnings
           cargo run
+          cargo run --release

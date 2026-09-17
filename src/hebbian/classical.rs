@@ -98,6 +98,9 @@ impl HebbianIzhikevichNetwork {
         let n = self.neurons.len();
         let pre_t = self.neurons[pre_index].last_spike_time;
         let post_t = self.neurons[post_index].last_spike_time;
+        if pre_t < 0 || post_t < 0 {
+            return;
+        }
         let w = self.weights[pre_index * n + post_index];
         self.weights[pre_index * n + post_index] =
             apply_classical_stdp(pre_t, post_t, w, &self.stdp_params);
@@ -169,6 +172,50 @@ mod tests {
         assert_ne!(
             w_before, w_after,
             "Weight should update after neurons have spiked"
+        );
+    }
+
+    #[test]
+    fn hebbian_network_keeps_weight_when_an_endpoint_has_never_spiked() {
+        for (pre_time, post_time) in [(-1, 5), (5, -1), (-1, -1)] {
+            let mut net = HebbianIzhikevichNetwork::new(2);
+            let weight_before = net.weights[1];
+            net.neurons[0].last_spike_time = pre_time;
+            net.neurons[1].last_spike_time = post_time;
+
+            net.update_weights(0, 1);
+
+            assert_eq!(
+                net.weights[1], weight_before,
+                "timestamps ({pre_time}, {post_time}) must not update a synapse"
+            );
+        }
+    }
+
+    #[test]
+    fn hebbian_network_applies_timing_rule_for_real_spike_pairs() {
+        let mut causal = HebbianIzhikevichNetwork::new(2);
+        causal.neurons[0].last_spike_time = 3;
+        causal.neurons[1].last_spike_time = 5;
+        causal.update_weights(0, 1);
+        assert!(causal.weights[1] > 0.5, "pre before post should potentiate");
+
+        let mut anti_causal = HebbianIzhikevichNetwork::new(2);
+        anti_causal.neurons[0].last_spike_time = 5;
+        anti_causal.neurons[1].last_spike_time = 3;
+        anti_causal.update_weights(0, 1);
+        assert!(
+            anti_causal.weights[1] < 0.5,
+            "post before pre should depress"
+        );
+
+        let mut coincident = HebbianIzhikevichNetwork::new(2);
+        coincident.neurons[0].last_spike_time = 4;
+        coincident.neurons[1].last_spike_time = 4;
+        coincident.update_weights(0, 1);
+        assert_eq!(
+            coincident.weights[1], 0.5,
+            "coincident spikes should leave the weight unchanged"
         );
     }
 }

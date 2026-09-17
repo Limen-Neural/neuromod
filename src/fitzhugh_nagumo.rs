@@ -90,7 +90,7 @@ impl FitzHughNagumoNeuron {
         }
     }
 
-    /// Select a nullcline intersection with zero-start Newton, then bisection.
+    /// Select an intersection with zero-start Newton, then bounded bisection.
     /// The selected root need not be unique, nearest zero, or stable.
     fn resting_state(a: f32, b: f32, i_app: f32) -> (f32, f32) {
         let invalid = (f32::NAN, f32::NAN);
@@ -246,24 +246,58 @@ impl FitzHughNagumoNeuron {
         // At this radius the cubic dominates both remaining terms, giving
         // opposite endpoint signs even when Newton starts at a zero derivative.
         let radius = 1.0 + (6.0 * p.abs()).sqrt().max((6.0 * q.abs()).cbrt());
-        let (mut low, mut high) = (-radius, radius);
+        if let Some(pair) = Self::resting_state_in_interval(a, b, i_app, p, q, (-radius, radius)) {
+            return Some(pair);
+        }
+        if p >= 0.0 {
+            return None;
+        }
+        // Newton and the whole bracket can select the same unusable root.
+        // F'(v)=v^2+p splits the cubic into three monotonic intervals; try
+        // each only after the preferred attempts fail rounded validation.
+        let stationary = (-p).sqrt();
+        let endpoints = [-radius, -stationary, stationary, radius];
+        endpoints.windows(2).find_map(|interval| {
+            Self::resting_state_in_interval(a, b, i_app, p, q, (interval[0], interval[1]))
+        })
+    }
+
+    fn resting_state_in_interval(
+        a: f64,
+        b: f64,
+        i_app: f64,
+        p: f64,
+        q: f64,
+        (mut low, mut high): (f64, f64),
+    ) -> Option<(f32, f32)> {
+        if !low.is_finite() || !high.is_finite() || low > high {
+            return None;
+        }
         let (f_low, f_high) = (
             Self::resting_residual(low, p, q),
             Self::resting_residual(high, p, q),
         );
-        if !f_low.is_finite() || !f_high.is_finite() || f_low > 0.0 || f_high < 0.0 {
+        if !f_low.is_finite() || !f_high.is_finite() {
             return None;
         }
+        // A double root can lie at a stationary endpoint without any sign
+        // change. Check convergence there before requiring a strict bracket.
         for (endpoint, f) in [(low, f_low), (high, f_high)] {
-            if f == 0.0
+            if Self::resting_converged(endpoint, p, q, f)
                 && let Some(result) = Self::resting_candidate(a, b, i_app, endpoint)
             {
                 return Some(result);
             }
         }
+        if f_low == 0.0 || f_high == 0.0 || f_low.is_sign_negative() == f_high.is_sign_negative() {
+            return None;
+        }
         for _ in 0..512 {
             let middle = low + (high - low) / 2.0;
             let f = Self::resting_residual(middle, p, q);
+            if !f.is_finite() {
+                return None;
+            }
             if Self::resting_converged(middle, p, q, f)
                 && let Some(result) = Self::resting_candidate(a, b, i_app, middle)
             {
@@ -274,7 +308,7 @@ impl FitzHughNagumoNeuron {
             if middle == low || middle == high {
                 break;
             }
-            if f < 0.0 {
+            if f.is_sign_negative() == f_low.is_sign_negative() {
                 low = middle;
             } else {
                 high = middle;
@@ -356,8 +390,10 @@ impl FitzHughNagumoNeuron {
 
     /// Reset to a selected zero-input nullcline intersection.
     ///
-    /// Uses Newton iteration starting at zero with a bracketed fallback. With
-    /// multiple roots, the selected intersection is not necessarily stable.
+    /// Uses Newton iteration starting at zero with a bracketed fallback. If
+    /// neither yields a validated pair, also tries the root intervals split
+    /// at the cubic's stationary points (at most three monotonic intervals).
+    /// With multiple roots, the selected intersection is not necessarily stable.
     /// Prefers recovery from the implemented `f32` voltage nullcline when it
     /// also validates both equations. If no recovery candidate passes at the
     /// nearest `f32` voltage, tries up to 32 adjacent voltages on each side,
@@ -394,8 +430,9 @@ impl FitzHughNagumoNeuron {
 
     /// Returns `true` if the neuron is in the excitable (stable fixed-point) regime.
     ///
-    /// Stability is determined by the Hopf bifurcation condition: the trace of the
-    /// Jacobian at the fixed point must be negative, i.e. `v*² > 1 − ε·b`.
+    /// Uses the Jacobian trace condition `v*² > 1 − ε·b` at the selected fixed
+    /// point. If the equilibrium search fails and returns NaN, this returns
+    /// `false`. A `false` result alone does not establish oscillation.
     pub fn is_excitable(&self) -> bool {
         let (v_fp, _) = Self::resting_state(self.a, self.b, 0.0);
         v_fp * v_fp > 1.0 - self.epsilon * self.b
@@ -669,6 +706,133 @@ mod tests {
                 let voltage_rhs = neuron.v - neuron.v * neuron.v * neuron.v / 3.0 - neuron.w;
                 assert!(voltage_rhs.abs() < 4.1e-6);
             }
+        }
+    }
+
+    #[test]
+    fn resting_searches_other_roots_when_preferred_candidates_fail() {
+        let (a, b) = (125.723_915f32, -240.532f32);
+        for (a, b) in [
+            (a, b),
+            (a.next_down(), b),
+            (a.next_up(), b),
+            (a, b.next_down()),
+            (a, b.next_up()),
+        ] {
+            for sign in [-1.0, 1.0] {
+                let mut neuron = FitzHughNagumoNeuron {
+                    a: sign * a,
+                    b,
+                    ..Default::default()
+                };
+                neuron.reset();
+                assert_equilibrium(neuron.a, b, 0.0, neuron.v, neuron.w);
+                // Independent real roots for the central positive-a case.
+                // Only the negative outer root has a passing nearby pair:
+                // (-1.3652534484863281, -0.5170150399208069).
+                assert!(
+                    [
+                        -1.365_251_946_955_982_2,
+                        -0.588_018_624_382_047_3,
+                        1.953_270_571_338_029_5
+                    ]
+                    .into_iter()
+                    .any(|root| (f64::from(sign * neuron.v) - root).abs() < 3e-6)
+                );
+                let voltage_rhs = neuron.v - neuron.v * neuron.v * neuron.v / 3.0 - neuron.w;
+                let recovery_rhs = neuron.v + neuron.a - b * neuron.w;
+                let tolerance = 16.0 * f64::from(f32::EPSILON);
+                assert!(f64::from(voltage_rhs).abs() <= tolerance * f64::from(neuron.v).abs());
+                assert!(
+                    f64::from(recovery_rhs).abs()
+                        <= tolerance * (f64::from(neuron.v).abs() + f64::from(neuron.w).abs())
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn resting_double_root_and_adjacent_parameters_retain_intersections() {
+        let (a, b) = (-2.25f32, -0.125f32);
+        for (a, b) in [
+            (a, b),
+            (a.next_down(), b),
+            (a.next_up(), b),
+            (a, b.next_down()),
+            (a, b.next_up()),
+        ] {
+            for sign in [-1.0, 1.0] {
+                let mut neuron = FitzHughNagumoNeuron {
+                    a: sign * a,
+                    b,
+                    ..Default::default()
+                };
+                neuron.reset();
+                assert_equilibrium(neuron.a, b, 0.0, neuron.v, neuron.w);
+                // Centrally, 3F(v)=(v-3)^2*(v+6). Adjacent parameters
+                // split or remove the double root without removing -6.
+                assert!(
+                    (f64::from(sign * neuron.v) - 3.0).abs() < 0.002
+                        || (f64::from(sign * neuron.v) + 6.0).abs() < 2e-6
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn resting_interval_handles_decreasing_cubic_branch() {
+        // v^3-2*v+7/8 has the exact middle root v=1/2, w=11/24.
+        // The first midpoint is 1/8, requiring downward-branch updates.
+        let pair = FitzHughNagumoNeuron::resting_state_in_interval(
+            0.875,
+            3.0,
+            0.0,
+            1.0 / 3.0 - 1.0,
+            0.875 / 3.0,
+            (-0.5, 0.75),
+        );
+        assert_eq!(pair, Some((0.5, 11.0 / 24.0)));
+    }
+
+    #[test]
+    fn resting_interval_retains_double_root_at_either_endpoint() {
+        // F(v)=(v-3)^2*(v+6)/3 has an exact double root at v=3, w=-6.
+        for (low, high) in [(0.0, 3.0), (3.0, 6.0), (3.0, 3.0)] {
+            for sign in [-1.0, 1.0] {
+                let interval = if sign > 0.0 {
+                    (low, high)
+                } else {
+                    (-high, -low)
+                };
+                let pair = FitzHughNagumoNeuron::resting_state_in_interval(
+                    sign * -2.25,
+                    -0.125,
+                    0.0,
+                    -9.0,
+                    sign * 18.0,
+                    interval,
+                );
+                assert_eq!(pair, Some((sign as f32 * 3.0, sign as f32 * -6.0)));
+            }
+        }
+    }
+
+    #[test]
+    fn resting_interval_rejects_invalid_bounds_and_nonroot_zero_width() {
+        for interval in [
+            (1.0, 0.0),
+            (0.25, 0.25),
+            (f64::NAN, 1.0),
+            (-1.0, f64::NAN),
+            (f64::NEG_INFINITY, 1.0),
+            (-1.0, f64::INFINITY),
+        ] {
+            assert!(
+                FitzHughNagumoNeuron::resting_state_in_interval(
+                    0.0, 20.0, 0.0, -0.95, 0.0, interval,
+                )
+                .is_none()
+            );
         }
     }
 

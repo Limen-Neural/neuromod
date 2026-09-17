@@ -1,19 +1,17 @@
-"""
-Independent float64 HH reference, Codex (OpenAI), 2026-09-17.
-
-Derives rates and ionic currents directly from the documented HH differential
-equations; does not import or call neuromod. Every preset input is rounded to
-f32 once, matching the public constructor parameters, then integrated in f64.
-The half-step rerun estimates reference integration error. Event criterion is
-an upward crossing of 0 mV absolute (65 mV relative to nominal -65 mV rest).
-No gate clamping is applied to these trajectories. This is a numerical
-reference, not biological calibration. Regenerate with:
-    python3 tests/reference/hh_reference.py
-The 0.001/0.0005 ms comparison converges in endpoint state to about 1e-11;
-the cortical sampled peak differs by 0.001153 mV due to grid alignment.
-Production f32 tolerances are 0.005 mV peak, 0.001 mV endpoint voltage,
-1e-5 endpoint gates, and dt + 0.0005 + 1e-6 ms for sampled event times.
-"""
+"""Independent float64 HH reference, Codex (OpenAI), 2026-09-17."""
+#
+# Derives rates and ionic currents directly from the documented HH differential
+# equations; does not import or call neuromod. Every preset input is rounded to
+# f32 once, matching the public constructor parameters, then integrated in f64.
+# The half-step rerun estimates reference integration error. Event criterion is
+# an upward crossing of 0 mV absolute (65 mV relative to nominal -65 mV rest).
+# No gate clamping is applied to these trajectories. This is a numerical
+# reference, not biological calibration. Regenerate with:
+#     python3 tests/reference/hh_reference.py
+# The 0.001/0.0005 ms comparison converges in endpoint state to about 1e-11;
+# the cortical sampled peak differs by 0.001153 mV due to grid alignment.
+# Production f32 tolerances are 0.005 mV peak, 0.001 mV endpoint voltage,
+# 1e-5 endpoint gates, and dt + 0.0005 + 1e-6 ms for sampled event times.
 
 import json
 import math

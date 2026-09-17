@@ -2,8 +2,11 @@
 
 [![Crates.io](https://img.shields.io/crates/v/neuromod.svg?label=crates.io)](https://crates.io/crates/neuromod)
 [![docs.rs](https://docs.rs/neuromod/badge.svg)](https://docs.rs/neuromod)
+[![CI](https://github.com/Limen-Neural/neuromod/actions/workflows/ci.yml/badge.svg?branch=main&event=push)](https://github.com/Limen-Neural/neuromod/actions/workflows/ci.yml?query=branch%3Amain)
 [![License](https://img.shields.io/crates/l/neuromod.svg)](https://github.com/Limen-Neural/neuromod#license)
 [![codecov](https://codecov.io/gh/Limen-Neural/neuromod/graph/badge.svg)](https://codecov.io/gh/Limen-Neural/neuromod)
+
+[Quick Start](#quick-start) · [Examples](#examples) · [Migration Notes](#migration-notes) · [Changelog](CHANGELOG.md) · [Validation](#maintainer-release-sequence)
 
 Biologically grounded spiking neural network (SNN) primitives in Rust: a topology-neutral `SpikingNetwork` engine, generic neuromodulators, STDP building blocks, and standalone neuron models.
 

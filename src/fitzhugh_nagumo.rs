@@ -445,14 +445,29 @@ impl FitzHughNagumoNeuron {
         (v + self.a) / self.b
     }
 
-    /// Returns `true` if the neuron is in the excitable (stable fixed-point) regime.
+    /// Returns whether the selected zero-input equilibrium is strictly linearly stable.
     ///
-    /// Uses the Jacobian trace condition `v*² > 1 − ε·b` at the selected fixed
-    /// point. If the equilibrium search fails and returns NaN, this returns
-    /// `false`. A `false` result alone does not establish oscillation.
+    /// Evaluates the FitzHugh-Nagumo Jacobian at the selected fixed point in
+    /// `f64`. Both its trace and determinant must be finite, with trace less
+    /// than zero and determinant greater than zero. This is a local linear
+    /// classification of that selected root; it neither establishes global
+    /// excitability nor resolves nonlinear behavior at neutral boundaries.
+    /// If the equilibrium search or Jacobian evaluation is nonfinite, this
+    /// returns `false`.
     pub fn is_excitable(&self) -> bool {
-        let (v_fp, _) = Self::resting_state(self.a, self.b, 0.0);
-        v_fp * v_fp > 1.0 - self.epsilon * self.b
+        let (v_fp, w_fp) = Self::resting_state(self.a, self.b, 0.0);
+        let (v, w, epsilon, b) = (
+            f64::from(v_fp),
+            f64::from(w_fp),
+            f64::from(self.epsilon),
+            f64::from(self.b),
+        );
+        if !v.is_finite() || !w.is_finite() || !epsilon.is_finite() || !b.is_finite() {
+            return false;
+        }
+        let trace = 1.0 - v * v - epsilon * b;
+        let determinant = epsilon * (1.0 - b + b * v * v);
+        trace.is_finite() && determinant.is_finite() && trace < 0.0 && determinant > 0.0
     }
 
     /// Approximate firing frequency under constant input (spikes per unit time).
@@ -1266,5 +1281,63 @@ mod tests {
             !oscillatory.is_excitable(),
             "Oscillatory FHN should not be excitable"
         );
+    }
+
+    #[test]
+    fn is_excitable_requires_strict_local_linear_stability() {
+        // For a=0, reset selects the exact equilibrium (v, w) = (0, 0).
+        // The independently derived characteristic polynomials are:
+        // b=.5, epsilon=4: lambda^2 + lambda + 2 (stable focus);
+        // b=.5, epsilon=16: lambda^2 + 7lambda + 8 (stable node);
+        // b=.5, epsilon=1: lambda^2 - .5lambda + .5 (unstable focus);
+        // b=20, epsilon=.08: lambda^2 + .6lambda - 1.52 (saddle);
+        // b=.5, epsilon=2: lambda^2 + 1 (trace boundary);
+        // b=1, epsilon=2: lambda^2 + lambda (determinant boundary).
+        for (b, epsilon, expected) in [
+            (0.5, 4.0, true),
+            (0.5, 16.0, true),
+            (0.5, 1.0, false),
+            (20.0, 0.08, false),
+            (0.5, 2.0, false),
+            (1.0, 2.0, false),
+            // In f64, trace is negative and determinant positive by one f32
+            // ULP-scale amount. f32 epsilon * b rounds to one, so the
+            // classifier must retain f64 Jacobian arithmetic.
+            (
+                f32::from_bits(1.0f32.to_bits() - 1),
+                f32::from_bits(1.0f32.to_bits() + 1),
+                true,
+            ),
+        ] {
+            let mut neuron = FitzHughNagumoNeuron {
+                a: 0.0,
+                b,
+                epsilon,
+                ..Default::default()
+            };
+            neuron.reset();
+            assert_eq!((neuron.v, neuron.w), (0.0, 0.0));
+            assert_eq!(neuron.is_excitable(), expected, "b={b}, epsilon={epsilon}");
+        }
+    }
+
+    #[test]
+    fn is_excitable_rejects_nonfinite_jacobian_coefficients() {
+        for (b, epsilon) in [
+            (0.5, f32::NAN),
+            (0.5, f32::INFINITY),
+            (0.5, f32::NEG_INFINITY),
+            (-0.5, f32::NEG_INFINITY),
+        ] {
+            let mut neuron = FitzHughNagumoNeuron {
+                a: 0.0,
+                b,
+                epsilon,
+                ..Default::default()
+            };
+            neuron.reset();
+            assert_eq!((neuron.v, neuron.w), (0.0, 0.0));
+            assert!(!neuron.is_excitable(), "b={b}, epsilon={epsilon}");
+        }
     }
 }

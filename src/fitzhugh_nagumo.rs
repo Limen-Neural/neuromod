@@ -90,23 +90,96 @@ impl FitzHughNagumoNeuron {
         }
     }
 
-    /// Compute the resting fixed point (nullcline intersection) via Newton's method.
+    /// Select a nullcline intersection with zero-start Newton, then bisection.
+    /// The selected root need not be unique, nearest zero, or stable.
     fn resting_state(a: f32, b: f32, i_app: f32) -> (f32, f32) {
-        let mut v = 0.0f32;
+        let invalid = (f32::NAN, f32::NAN);
+        if !a.is_finite() || !b.is_finite() || !i_app.is_finite() {
+            return invalid;
+        }
+        let (a, b, i_app) = (f64::from(a), f64::from(b), f64::from(i_app));
+        let validate = |v: f64| {
+            let w = (v - v * v * v / 3.0 + i_app) as f32;
+            let v = v as f32;
+            if !v.is_finite() || !w.is_finite() {
+                return invalid;
+            }
+            let (vf, wf) = (f64::from(v), f64::from(w));
+            let cubic = vf * vf * vf / 3.0;
+            let rv = vf - cubic - wf + i_app;
+            let rw = vf + a - b * wf;
+            let tolerance = 16.0 * f64::from(f32::EPSILON);
+            // Validate both original equations after rounding, without epsilon
+            // scaling: epsilon=0 must not hide a missed nullcline intersection.
+            if rv.abs() <= tolerance * (vf.abs() + cubic.abs() + wf.abs() + i_app.abs())
+                && rw.abs() <= tolerance * (vf.abs() + a.abs() + (b * wf).abs())
+            {
+                (v, w)
+            } else {
+                invalid
+            }
+        };
+        if b == 0.0 {
+            return validate(-a);
+        }
+        let p = 1.0 / b - 1.0;
+        let q = a / b - i_app;
+        let residual = |v: f64| v * v * v / 3.0 + p * v + q;
+        let converged = |v: f64, f: f64| {
+            f.is_finite()
+                && (f == 0.0
+                    || f.abs()
+                        <= 32.0
+                            * f64::EPSILON
+                            * ((v * v * v / 3.0).abs() + (p * v).abs() + q.abs()))
+        };
+        let mut v = 0.0;
         for _ in 0..50 {
-            let f = v * v * v / 3.0 + (1.0 / b - 1.0) * v + (a / b - i_app);
-            let df = v * v + (1.0 / b - 1.0);
-            if df.abs() < 1e-12 {
+            let f = residual(v);
+            // In particular, keep the exact middle root when q=0.
+            if converged(v, f) {
+                let result = validate(v);
+                if result.0.is_finite() {
+                    return result;
+                }
                 break;
             }
-            let dv = f / df;
-            v -= dv;
-            if dv.abs() < 1e-10 {
+            let derivative = v * v + p;
+            if derivative == 0.0 || !derivative.is_finite() {
                 break;
+            }
+            let next = v - f / derivative;
+            if !next.is_finite() || next == v {
+                break;
+            }
+            v = next;
+        }
+
+        // At this radius the cubic dominates both remaining terms, giving
+        // opposite endpoint signs even when Newton starts at a zero derivative.
+        let radius = 1.0 + (6.0 * p.abs()).sqrt().max((6.0 * q.abs()).cbrt());
+        let (mut low, mut high) = (-radius, radius);
+        for endpoint in [low, high] {
+            if residual(endpoint) == 0.0 {
+                return validate(endpoint);
             }
         }
-        let w = v - v * v * v / 3.0 + i_app;
-        (v, w)
+        for _ in 0..512 {
+            let middle = low + (high - low) / 2.0;
+            let f = residual(middle);
+            if converged(middle, f) {
+                return validate(middle);
+            }
+            if middle == low || middle == high {
+                break;
+            }
+            if f < 0.0 {
+                low = middle;
+            } else {
+                high = middle;
+            }
+        }
+        invalid
     }
 
     fn dv_dt(&self, v: f32, w: f32, i_app: f32) -> f32 {
@@ -180,7 +253,13 @@ impl FitzHughNagumoNeuron {
         (duration > 0.05f32 * 65_536.0).then_some(duration * 0.5)
     }
 
-    /// Reset the neuron to its resting state (zero input).
+    /// Reset to a selected zero-input nullcline intersection.
+    ///
+    /// Uses Newton iteration starting at zero with a bracketed fallback. With
+    /// multiple roots, the selected intersection is not necessarily stable.
+    /// Supports `b = 0` directly. Nonfinite `a`/`b`, unrepresentable results,
+    /// or failure to validate both nullclines set both `v` and `w` to NaN.
+    /// The intersection does not depend on `epsilon`.
     pub fn reset(&mut self) {
         let (v0, w0) = Self::resting_state(self.a, self.b, 0.0);
         self.v = v0;
@@ -193,6 +272,9 @@ impl FitzHughNagumoNeuron {
     }
 
     /// w-nullcline: w = (v + a) / b (useful for phase-plane analysis).
+    ///
+    /// For `b = 0`, the nullcline is the vertical line `v = -a`; this graph
+    /// representation is undefined and retains floating-point division by zero.
     pub fn w_nullcline(&self, v: f32) -> f32 {
         (v + self.a) / self.b
     }
@@ -231,6 +313,155 @@ impl Default for FitzHughNagumoNeuron {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn assert_equilibrium(a: f32, b: f32, current: f32, v: f32, w: f32) {
+        assert!(
+            v.is_finite() && w.is_finite(),
+            "nonfinite equilibrium: {v}, {w}"
+        );
+        let (a, b, current, v, w) = (
+            f64::from(a),
+            f64::from(b),
+            f64::from(current),
+            f64::from(v),
+            f64::from(w),
+        );
+        let cubic = v.powi(3) / 3.0;
+        let rv = v - cubic - w + current;
+        let rw = v + a - b * w;
+        let tolerance = 16.0 * f64::from(f32::EPSILON);
+        assert!(
+            rv.abs() <= tolerance * (v.abs() + cubic.abs() + w.abs() + current.abs()),
+            "voltage residual {rv}"
+        );
+        assert!(
+            rw.abs() <= tolerance * (v.abs() + a.abs() + (b * w).abs()),
+            "recovery residual {rw}"
+        );
+    }
+
+    #[test]
+    fn resting_degenerate_and_adjacent_derivatives_find_intersection() {
+        for b in [
+            1.0,
+            f32::from_bits(1.0f32.to_bits() - 1),
+            f32::from_bits(1.0f32.to_bits() + 1),
+        ] {
+            let mut neuron = FitzHughNagumoNeuron {
+                b,
+                epsilon: 0.0,
+                ..Default::default()
+            };
+            neuron.reset();
+            assert_equilibrium(neuron.a, b, 0.0, neuron.v, neuron.w);
+            assert!((f64::from(neuron.v) - (-3.0 * f64::from(neuron.a)).cbrt()).abs() < 2e-6);
+        }
+    }
+
+    #[test]
+    fn resting_preserves_exact_zero_branch() {
+        for b in [1.0, 20.0] {
+            let mut neuron = FitzHughNagumoNeuron {
+                a: 0.0,
+                b,
+                ..Default::default()
+            };
+            neuron.reset();
+            assert_eq!((neuron.v, neuron.w), (0.0, 0.0));
+        }
+    }
+
+    #[test]
+    fn resting_zero_b_and_nonzero_current_match_analytic_roots() {
+        for current in [0.0, 0.2] {
+            for b in [0.0, 1.0] {
+                let a = 0.7;
+                let (v, w) = FitzHughNagumoNeuron::resting_state(a, b, current);
+                assert_equilibrium(a, b, current, v, w);
+                let expected = if b == 0.0 {
+                    -f64::from(a)
+                } else {
+                    (3.0 * (f64::from(current) - f64::from(a))).cbrt()
+                };
+                assert!((f64::from(v) - expected).abs() < 2e-7);
+            }
+        }
+    }
+
+    #[test]
+    fn resting_constructor_references_and_oscillatory_perturbation() {
+        for (mut neuron, v, w, perturbation) in [
+            (
+                FitzHughNagumoNeuron::new(),
+                -1.199408031928253,
+                -0.6242600455092783,
+                0.0,
+            ),
+            (
+                FitzHughNagumoNeuron::new_adaptive(),
+                -1.0327898582069097,
+                -0.6655797402556773,
+                0.0,
+            ),
+            (
+                FitzHughNagumoNeuron::new_oscillatory(),
+                0.19743464012202916,
+                0.19486927726382605,
+                0.1,
+            ),
+        ] {
+            assert!((f64::from(neuron.v) - v - perturbation).abs() < 2e-7);
+            assert!((f64::from(neuron.w) - w).abs() < 2e-7);
+            neuron.reset();
+            assert!((f64::from(neuron.v) - v).abs() < 2e-7);
+            assert_equilibrium(neuron.a, neuron.b, 0.0, neuron.v, neuron.w);
+        }
+    }
+
+    #[test]
+    fn resting_rejects_nonfinite_and_unrepresentable_results() {
+        for invalid in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY] {
+            for (a, b, current) in [
+                (invalid, 0.8, 0.0),
+                (0.7, invalid, 0.0),
+                (0.7, 0.8, invalid),
+            ] {
+                let (v, w) = FitzHughNagumoNeuron::resting_state(a, b, current);
+                assert!(v.is_nan() && w.is_nan());
+            }
+        }
+        for (a, b) in [(f32::MAX, 0.0), (f32::INFINITY, 0.8)] {
+            let mut neuron = FitzHughNagumoNeuron {
+                a,
+                b,
+                ..Default::default()
+            };
+            neuron.reset();
+            assert!(neuron.v.is_nan() && neuron.w.is_nan());
+            assert!(!neuron.is_excitable());
+        }
+    }
+
+    #[test]
+    fn resting_newton_cycle_falls_back_to_valid_intersection() {
+        // 3*F(v)=v^3-2*v+2 makes zero-start Newton cycle between 0 and 1.
+        // Independent bisection reference for its sole real root.
+        let (v, w) = FitzHughNagumoNeuron::resting_state(2.0, 3.0, 0.0);
+        assert_equilibrium(2.0, 3.0, 0.0, v, w);
+        assert!((f64::from(v) - (-1.7692923542386314)).abs() < 2e-7);
+    }
+
+    #[test]
+    fn resting_handles_negative_b_and_small_coefficients() {
+        for (a, b) in [
+            (0.7, -0.8),
+            (f32::MIN_POSITIVE, 1.0),
+            (0.7, f32::MIN_POSITIVE),
+        ] {
+            let (v, w) = FitzHughNagumoNeuron::resting_state(a, b, 0.0);
+            assert_equilibrium(a, b, 0.0, v, w);
+        }
+    }
 
     #[test]
     fn duration_recursive_step_integrates_both_halves_after_early_spike() {

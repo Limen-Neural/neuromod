@@ -25,11 +25,34 @@
 
 use serde::{Deserialize, Serialize};
 
+/// Voltage coordinates shared by the membrane and reversal potentials.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum VoltageConvention {
+    /// Original HH coordinates: nominal rest is 0 mV.
+    RelativeToRest,
+    /// Absolute coordinates: nominal rest is −65 mV.
+    Absolute,
+}
+
 /// Squid giant axon Hodgkin-Huxley neuron model.
 ///
 /// Units: mV (voltage), ms (time), µA/cm² (current), mS/cm² (conductance).
+///
+/// JSON includes `voltage_convention` as `"relative_to_rest"` or `"absolute"`.
+/// Legacy JSON without this field is accepted only for the exact constructor
+/// reversal tuples `(115, -12, 10.6)` and `(50, -77, -54.387)`, respectively,
+/// regardless of temperature. Custom legacy tuples must supply the field.
+/// Explicit null or invalid conventions are rejected; decoding never shifts state.
+/// The added field requires updating source struct literals and may break
+/// positional binary serialization formats.
 #[derive(Clone, Serialize, Deserialize, Debug)]
+#[serde(try_from = "HodgkinHuxleyWire")]
 pub struct HodgkinHuxleyNeuron {
+    /// Coordinates of `v`, `e_na`, `e_k`, and `e_l`, independent of temperature.
+    /// Changing this field does not convert state: callers must also shift all
+    /// four voltages consistently (subtract 65 mV when changing to absolute).
+    pub voltage_convention: VoltageConvention,
     // --- State ---
     /// Membrane potential (mV)
     pub v: f32,
@@ -63,10 +86,72 @@ pub struct HodgkinHuxleyNeuron {
     pub temperature: f32,
 }
 
+// Omission permits legacy inference, while an explicit null must remain an error.
+#[derive(Deserialize)]
+struct HodgkinHuxleyWire {
+    #[serde(default, deserialize_with = "deserialize_present_convention")]
+    voltage_convention: Option<VoltageConvention>,
+    v: f32,
+    m: f32,
+    h: f32,
+    n: f32,
+    e_na: f32,
+    e_k: f32,
+    e_l: f32,
+    g_na: f32,
+    g_k: f32,
+    g_l: f32,
+    c_m: f32,
+    temperature: f32,
+}
+
+fn deserialize_present_convention<'de, D>(
+    deserializer: D,
+) -> Result<Option<VoltageConvention>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    VoltageConvention::deserialize(deserializer).map(Some)
+}
+
+impl TryFrom<HodgkinHuxleyWire> for HodgkinHuxleyNeuron {
+    type Error = &'static str;
+
+    fn try_from(wire: HodgkinHuxleyWire) -> Result<Self, Self::Error> {
+        let voltage_convention = match wire.voltage_convention {
+            Some(convention) => convention,
+            None => match (wire.e_na, wire.e_k, wire.e_l) {
+                (115.0, -12.0, 10.6) => VoltageConvention::RelativeToRest,
+                (50.0, -77.0, -54.387) => VoltageConvention::Absolute,
+                _ => {
+                    return Err(
+                        "custom reversal potentials require an explicit voltage_convention",
+                    );
+                }
+            },
+        };
+        Ok(Self {
+            voltage_convention,
+            v: wire.v,
+            m: wire.m,
+            h: wire.h,
+            n: wire.n,
+            e_na: wire.e_na,
+            e_k: wire.e_k,
+            e_l: wire.e_l,
+            g_na: wire.g_na,
+            g_k: wire.g_k,
+            g_l: wire.g_l,
+            c_m: wire.c_m,
+            temperature: wire.temperature,
+        })
+    }
+}
+
 impl HodgkinHuxleyNeuron {
     /// Shift between absolute mammalian mV and the squid HH relative convention
     /// (rest = 0 mV ↔ absolute rest = −65 mV).
-    const CORTICAL_VOLTAGE_SHIFT: f32 = 65.0;
+    const ABSOLUTE_VOLTAGE_SHIFT: f32 = 65.0;
 
     fn derivatives(&self, v: f32, m: f32, h: f32, n: f32, i_app: f32) -> (f32, f32, f32, f32) {
         let i_na = self.g_na * m.powi(3) * h * (v - self.e_na);
@@ -74,14 +159,7 @@ impl HodgkinHuxleyNeuron {
         let i_l = self.g_l * (v - self.e_l);
         let dv = (i_app - i_na - i_k - i_l) / self.c_m;
 
-        // Gating-rate functions are written in the squid HH relative convention
-        // (rest = 0 mV). Cortical parameters use absolute mV (rest = -65 mV), so
-        // shift the voltage back to the HH convention before evaluating α/β.
-        let gating_v = if self.is_cortical() {
-            v + Self::CORTICAL_VOLTAGE_SHIFT
-        } else {
-            v
-        };
+        let gating_v = self.relative_voltage(v);
         let phi = self.phi();
         let dm = phi * (Self::alpha_m(gating_v) * (1.0 - m) - Self::beta_m(gating_v) * m);
         let dh = phi * (Self::alpha_h(gating_v) * (1.0 - h) - Self::beta_h(gating_v) * h);
@@ -104,9 +182,10 @@ impl HodgkinHuxleyNeuron {
         let c_m = 1.0;
         let temperature = 6.3; // °C (original HH experiments)
 
-        let (m0, h0, n0) = Self::steady_state_gating(v_rest, temperature);
+        let (m0, h0, n0) = Self::steady_state_gating(v_rest);
 
         Self {
+            voltage_convention: VoltageConvention::RelativeToRest,
             v: v_rest,
             m: m0,
             h: h0,
@@ -132,9 +211,10 @@ impl HodgkinHuxleyNeuron {
         hh.e_k = -77.0;
         hh.e_l = -54.387;
         hh.temperature = 37.0;
-        let v_rest = -Self::CORTICAL_VOLTAGE_SHIFT;
+        hh.voltage_convention = VoltageConvention::Absolute;
+        let v_rest = -Self::ABSOLUTE_VOLTAGE_SHIFT;
         hh.v = v_rest;
-        let (m0, h0, n0) = Self::steady_state_gating_mammalian(v_rest, hh.temperature);
+        let (m0, h0, n0) = Self::steady_state_gating(hh.relative_voltage(v_rest));
         hh.m = m0;
         hh.h = h0;
         hh.n = n0;
@@ -148,11 +228,18 @@ impl HodgkinHuxleyNeuron {
         3.0f32.powf((self.temperature - 6.3) / 10.0)
     }
 
-    /// Cortical/mammalian parameterizations use absolute mV (rest ≈ −65 mV),
-    /// whereas the squid axon uses the HH relative convention (rest = 0 mV).
-    /// We currently distinguish the two by temperature (> 20 °C for cortex).
-    fn is_cortical(&self) -> bool {
-        self.temperature > 20.0
+    fn relative_voltage(&self, v: f32) -> f32 {
+        match self.voltage_convention {
+            VoltageConvention::RelativeToRest => v,
+            VoltageConvention::Absolute => v + Self::ABSOLUTE_VOLTAGE_SHIFT,
+        }
+    }
+
+    fn resting_voltage(&self) -> f32 {
+        match self.voltage_convention {
+            VoltageConvention::RelativeToRest => 0.0,
+            VoltageConvention::Absolute => -Self::ABSOLUTE_VOLTAGE_SHIFT,
+        }
     }
 
     /// α_m(V): Na⁺ activation rate
@@ -196,7 +283,7 @@ impl HodgkinHuxleyNeuron {
     }
 
     /// Steady-state gating for any voltage in HH relative convention.
-    fn steady_state_gating_raw(v: f32) -> (f32, f32, f32) {
+    fn steady_state_gating(v: f32) -> (f32, f32, f32) {
         let am = Self::alpha_m(v);
         let bm = Self::beta_m(v);
         let ah = Self::alpha_h(v);
@@ -204,16 +291,6 @@ impl HodgkinHuxleyNeuron {
         let an = Self::alpha_n(v);
         let bn = Self::beta_n(v);
         (am / (am + bm), ah / (ah + bh), an / (an + bn))
-    }
-
-    /// Steady-state gating: x_∞ = α_x / (α_x + β_x). φ cancels at steady state.
-    fn steady_state_gating(v: f32, _temperature: f32) -> (f32, f32, f32) {
-        Self::steady_state_gating_raw(v)
-    }
-
-    /// Steady-state gating for mammalian absolute-mV voltages (shifted into HH convention).
-    fn steady_state_gating_mammalian(v: f32, _temperature: f32) -> (f32, f32, f32) {
-        Self::steady_state_gating_raw(v + Self::CORTICAL_VOLTAGE_SHIFT)
     }
 
     /// Advance by `dt_ms` with RK4 sub-steps (default 0.01 ms).
@@ -321,18 +398,12 @@ impl HodgkinHuxleyNeuron {
         (duration > 0.01f32 * 65_536.0).then_some(duration * 0.5)
     }
 
-    /// Reset to resting potential and steady-state gates for the current temperature.
+    /// Reset to nominal rest in the selected coordinates and steady-state gates.
+    /// Temperature and all other model parameters are preserved. Q₁₀ cancels
+    /// from the steady-state gate values.
     pub fn reset(&mut self) {
-        let v_rest = if self.is_cortical() {
-            -Self::CORTICAL_VOLTAGE_SHIFT
-        } else {
-            0.0
-        };
-        let (m0, h0, n0) = if self.is_cortical() {
-            Self::steady_state_gating_mammalian(v_rest, self.temperature)
-        } else {
-            Self::steady_state_gating(v_rest, self.temperature)
-        };
+        let v_rest = self.resting_voltage();
+        let (m0, h0, n0) = Self::steady_state_gating(self.relative_voltage(v_rest));
         self.v = v_rest;
         self.m = m0;
         self.h = h0;
@@ -367,6 +438,240 @@ impl Default for HodgkinHuxleyNeuron {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn convention_legacy_json_infers_only_reversals_and_preserves_state() {
+        for (preset, convention, name, rest, reversals) in [
+            (
+                HodgkinHuxleyNeuron::new(),
+                VoltageConvention::RelativeToRest,
+                "relative_to_rest",
+                0.0,
+                (115.0, -12.0, 10.6),
+            ),
+            (
+                HodgkinHuxleyNeuron::new_cortical(),
+                VoltageConvention::Absolute,
+                "absolute",
+                -65.0,
+                (50.0, -77.0, -54.387),
+            ),
+        ] {
+            assert_eq!(preset.voltage_convention, convention);
+            assert_eq!(preset.v, rest);
+            assert_eq!((preset.e_na, preset.e_k, preset.e_l), reversals);
+            for temperature in [6.3, 20.0, 20.001, 37.0] {
+                let mut hh = preset.clone();
+                hh.temperature = temperature;
+                hh.v += 17.0;
+                hh.m = 0.7;
+                hh.h = 0.2;
+                hh.n = 0.4;
+                let expected = serde_json::to_value(&hh).unwrap();
+                assert_eq!(expected["voltage_convention"], name);
+                let mut legacy = expected.clone();
+                legacy.as_object_mut().unwrap().remove("voltage_convention");
+                let decoded: HodgkinHuxleyNeuron = serde_json::from_value(legacy).unwrap();
+                assert_eq!(serde_json::to_value(decoded).unwrap(), expected);
+            }
+        }
+    }
+
+    #[test]
+    fn convention_explicit_json_wins_and_round_trips_custom_state() {
+        for convention in [
+            VoltageConvention::Absolute,
+            VoltageConvention::RelativeToRest,
+        ] {
+            for mut hh in [
+                HodgkinHuxleyNeuron::new(),
+                HodgkinHuxleyNeuron::new_cortical(),
+            ] {
+                hh.voltage_convention = convention;
+                for custom in [false, true] {
+                    if custom {
+                        hh.e_na = 123.0;
+                        hh.e_k = -23.0;
+                        hh.e_l = 4.0;
+                    }
+                    let wire = serde_json::to_value(&hh).unwrap();
+                    let decoded: HodgkinHuxleyNeuron =
+                        serde_json::from_value(wire.clone()).unwrap();
+                    assert_eq!(serde_json::to_value(decoded).unwrap(), wire);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn convention_json_retains_required_and_duplicate_field_validation() {
+        let hh = HodgkinHuxleyNeuron::new();
+        let serialized = serde_json::to_string(&hh).unwrap();
+        let duplicate = serialized.replacen('{', "{\"voltage_convention\":\"absolute\",", 1);
+        assert!(serde_json::from_str::<HodgkinHuxleyNeuron>(&duplicate).is_err());
+        let duplicate_v = serialized.replacen('{', "{\"v\":0,", 1);
+        assert!(serde_json::from_str::<HodgkinHuxleyNeuron>(&duplicate_v).is_err());
+        let value = serde_json::to_value(&hh).unwrap();
+        for field in [
+            "v",
+            "m",
+            "h",
+            "n",
+            "e_na",
+            "e_k",
+            "e_l",
+            "g_na",
+            "g_k",
+            "g_l",
+            "c_m",
+            "temperature",
+        ] {
+            let mut missing = value.clone();
+            missing.as_object_mut().unwrap().remove(field);
+            assert!(
+                serde_json::from_value::<HodgkinHuxleyNeuron>(missing).is_err(),
+                "{field}"
+            );
+        }
+        let mut extra = value.clone();
+        extra["unrelated_metadata"] = serde_json::json!(true);
+        let decoded: HodgkinHuxleyNeuron = serde_json::from_value(extra).unwrap();
+        assert_eq!(serde_json::to_value(decoded).unwrap(), value);
+    }
+
+    #[test]
+    fn convention_shifted_custom_state_has_equivalent_dynamics() {
+        for temperature in [6.3, 19.999, 20.001, 37.0] {
+            let mut relative = HodgkinHuxleyNeuron {
+                v: 7.0,
+                m: 0.2,
+                h: 0.4,
+                n: 0.3,
+                e_na: 110.0,
+                e_k: -15.0,
+                e_l: 8.0,
+                temperature,
+                ..HodgkinHuxleyNeuron::new()
+            };
+            let mut absolute = relative.clone();
+            absolute.voltage_convention = VoltageConvention::Absolute;
+            absolute.v -= 65.0;
+            absolute.e_na -= 65.0;
+            absolute.e_k -= 65.0;
+            absolute.e_l -= 65.0;
+            let (r_na, r_k, r_l) = relative.ionic_currents();
+            let (a_na, a_k, a_l) = absolute.ionic_currents();
+            for (r, a) in [r_na, r_k, r_l].into_iter().zip([a_na, a_k, a_l]) {
+                assert!((r - a).abs() < 2e-5);
+            }
+            let (r_v, r_m, r_h, r_n) = relative.rk4_stage1(2.0);
+            let (a_v, a_m, a_h, a_n) = absolute.rk4_stage1(2.0);
+            for (r, a) in [r_v, r_m, r_h, r_n].into_iter().zip([a_v, a_m, a_h, a_n]) {
+                assert!((r - a).abs() < 2e-5);
+            }
+            relative.step(2.0, 0.137);
+            absolute.step(2.0, 0.137);
+            assert!((relative.v - (absolute.v + 65.0)).abs() < 2e-5);
+            for (r, a) in [relative.m, relative.h, relative.n]
+                .into_iter()
+                .zip([absolute.m, absolute.h, absolute.n])
+            {
+                assert!((r - a).abs() < 1e-6);
+            }
+        }
+    }
+
+    #[test]
+    fn convention_temperature_only_scales_kinetics() {
+        // Independently evaluate the published rates at relative V=7 mV.
+        let v = 7.0_f64;
+        let rates = [
+            0.1 * (25.0 - v) / ((25.0 - v) / 10.0).exp_m1() * 0.8 - 4.0 * (-v / 18.0).exp() * 0.2,
+            0.07 * (-v / 20.0).exp() * 0.6 - 0.4 / (((30.0 - v) / 10.0).exp() + 1.0),
+            0.01 * (10.0 - v) / ((10.0 - v) / 10.0).exp_m1() * 0.7
+                - 0.125 * (-v / 80.0).exp() * 0.3,
+        ];
+        for mut hh in [
+            HodgkinHuxleyNeuron::new(),
+            HodgkinHuxleyNeuron::new_cortical(),
+        ] {
+            hh.v += 7.0;
+            hh.m = 0.2;
+            hh.h = 0.4;
+            hh.n = 0.3;
+            let baseline_dv = hh.derivatives(hh.v, hh.m, hh.h, hh.n, 2.0).0;
+            for temperature in [6.3, 19.999, 20.0, 20.001, 21.0, 37.0] {
+                hh.temperature = temperature;
+                let (dv, dm, dh, dn) = hh.derivatives(hh.v, hh.m, hh.h, hh.n, 2.0);
+                assert_eq!(dv, baseline_dv);
+                let phi = 3.0_f64.powf((f64::from(temperature) - 6.3) / 10.0);
+                for (actual, rate) in [dm, dh, dn].into_iter().zip(rates) {
+                    assert!(
+                        (f64::from(actual) / phi - rate).abs() < 2e-7,
+                        "T={temperature}, actual={actual}, unscaled expected={rate}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn convention_reset_preserves_coordinates_across_temperature_boundary() {
+        for preset in [
+            HodgkinHuxleyNeuron::new(),
+            HodgkinHuxleyNeuron::new_cortical(),
+        ] {
+            for temperature in [6.3, 19.999, 20.0, 20.001, 21.0, 37.0] {
+                let mut hh = preset.clone();
+                hh.temperature = temperature;
+                let expected = serde_json::to_value(&hh).unwrap();
+                hh.v += 15.0;
+                hh.m = 0.8;
+                hh.h = 0.1;
+                hh.n = 0.7;
+                hh.reset();
+                assert_eq!(serde_json::to_value(&hh).unwrap(), expected);
+                // f64 evaluation of alpha/(alpha+beta) at relative zero.
+                for (actual, expected) in
+                    [hh.m, hh.h, hh.n]
+                        .into_iter()
+                        .zip([0.0529324853, 0.5961207535, 0.3176769141])
+                {
+                    assert!((f64::from(actual) - expected).abs() < 1e-7);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn convention_rejects_malformed_explicit_json() {
+        for bad in [
+            serde_json::Value::Null,
+            serde_json::json!("cortical"),
+            serde_json::json!(3),
+            serde_json::json!({}),
+        ] {
+            let mut wire = serde_json::to_value(HodgkinHuxleyNeuron::new()).unwrap();
+            wire["voltage_convention"] = bad;
+            assert!(serde_json::from_value::<HodgkinHuxleyNeuron>(wire).is_err());
+        }
+    }
+
+    #[test]
+    fn convention_rejects_ambiguous_legacy_json() {
+        for preset in [
+            HodgkinHuxleyNeuron::new(),
+            HodgkinHuxleyNeuron::new_cortical(),
+        ] {
+            for field in ["e_na", "e_k", "e_l"] {
+                let mut wire = serde_json::to_value(&preset).unwrap();
+                wire.as_object_mut().unwrap().remove("voltage_convention");
+                let value = wire[field].as_f64().unwrap() as f32;
+                wire[field] = serde_json::json!(f32::from_bits(value.to_bits() + 1));
+                assert!(serde_json::from_value::<HodgkinHuxleyNeuron>(wire).is_err());
+            }
+        }
+    }
 
     #[test]
     fn duration_recursive_step_integrates_both_halves_after_early_spike() {
@@ -463,7 +768,7 @@ mod tests {
     #[test]
     fn test_resting_state_is_stable() {
         let hh = HodgkinHuxleyNeuron::new();
-        let (m_ss, h_ss, n_ss) = HodgkinHuxleyNeuron::steady_state_gating(0.0, 6.3);
+        let (m_ss, h_ss, n_ss) = HodgkinHuxleyNeuron::steady_state_gating(0.0);
         assert!((hh.m - m_ss).abs() < 1e-6);
         assert!((hh.h - h_ss).abs() < 1e-6);
         assert!((hh.n - n_ss).abs() < 1e-6);

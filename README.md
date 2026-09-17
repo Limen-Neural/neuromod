@@ -553,6 +553,24 @@ examples above, which resolve the local source.
    merged. Run the final-gate checklist, including `cargo package --locked`,
    `cargo publish --locked --dry-run`, the independent unpacked archive-consumer checks, archive
    checksum capture, and exact-SHA CI evidence.
+   Before packaging, run this release-content guard for the 0.6.0 candidate:
+
+   ```bash
+   python3 - <<'PY'
+   from pathlib import Path
+   import re
+
+   readme = Path("README.md").read_text()
+   changelog = Path("CHANGELOG.md").read_text()
+   for name, text in (("README.md", readme), ("CHANGELOG.md", changelog)):
+       assert not re.search(r"^(<<<<<<<|=======|>>>>>>>)", text, re.M), name
+
+   candidate = "## [0.6.0] - Unreleased"
+   headings = re.findall(r"^## \[0\.6\.0\].*$", changelog, re.M)
+   assert headings == [candidate], headings
+   print("ok: release documents have no conflict markers and one 0.6.0 candidate heading")
+   PY
+   ```
 2. Obtain separate explicit authorization before creating a release tag or running
    `cargo publish --locked`. A tag alone does not publish the crate.
 3. After the authorized tag and publication, verify the registry version and archive metadata

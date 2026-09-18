@@ -2,6 +2,14 @@
 
 All notable changes to this project are documented in this file.
 
+## [Unreleased]
+
+### Removed
+
+- Production container packaging and its Docker Hub/GHCR publishing workflow. `neuromod`
+  remains distributed as a Rust library through crates.io; the optional VS Code dev container
+  is retained for local development.
+
 ## [0.6.0] - 2026-09-17
 
 ### Added

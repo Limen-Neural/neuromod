@@ -92,18 +92,6 @@ cargo doc --all-features --no-deps
 ! grep -riE 'spikenaut|\bhft\b|\bmining\b|\bcrypto\b|eagle-lander' target/doc/neuromod/
 ```
 
-## Docker smoke
-
-```bash
-# Runtime image (example binaries only)
-docker build -t neuromod:runtime .
-docker run --rm neuromod:runtime ls /usr/local/bin
-
-# Builder stage (has Rust toolchain, runs the test suite)
-docker build --target builder -t neuromod:builder .
-docker run --rm neuromod:builder cargo test --all-features --quiet
-```
-
 ## Regression guards
 
 Verify the core public API surface has not been silently removed:
@@ -178,5 +166,4 @@ git ls-files .idea .kilo .kilocode .mimocode  # must print nothing
 - `cargo test --all-features` reports all unit tests and doctests passing
 - Examples run without panic
 - `cargo doc` domain-agnostic grep finds no forbidden terms in `target/doc/neuromod/`
-- Docker builder image compiles and tests pass
 - `git diff origin/main...HEAD` contains only intentional changes

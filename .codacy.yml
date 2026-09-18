@@ -3,7 +3,3 @@ exclude_paths:
   - "Cargo.lock"
   - ".cubic/wiki/**"
   - ".cubic/**"
-engines:
-  hadolint:
-    exclude_paths:
-      - "Dockerfile"

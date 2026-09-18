@@ -1,10 +1,12 @@
 # neuromod
 
-[![Crates.io](https://img.shields.io/crates/v/neuromod.svg?label=crates.io)](https://crates.io/crates/neuromod)
-[![docs.rs](https://docs.rs/neuromod/badge.svg)](https://docs.rs/neuromod)
 [![CI](https://github.com/Limen-Neural/neuromod/actions/workflows/ci.yml/badge.svg?branch=main&event=push)](https://github.com/Limen-Neural/neuromod/actions/workflows/ci.yml?query=branch%3Amain)
+[![Coverage](https://codecov.io/gh/Limen-Neural/neuromod/graph/badge.svg)](https://codecov.io/gh/Limen-Neural/neuromod)
+[![Code Quality: Codacy](https://img.shields.io/badge/code%20quality-Codacy-222f29?logo=codacy)](https://app.codacy.com/gh/Limen-Neural/neuromod/dashboard)
+[![Maintainability: Qlty](https://qlty.sh/gh/Limen-Neural/projects/neuromod/maintainability.svg)](https://qlty.sh/gh/Limen-Neural/projects/neuromod)
+[![crates.io](https://img.shields.io/crates/v/neuromod.svg?label=crates.io)](https://crates.io/crates/neuromod)
+[![docs.rs](https://docs.rs/neuromod/badge.svg)](https://docs.rs/neuromod)
 [![License](https://img.shields.io/crates/l/neuromod.svg)](https://github.com/Limen-Neural/neuromod#license)
-[![codecov](https://codecov.io/gh/Limen-Neural/neuromod/graph/badge.svg)](https://codecov.io/gh/Limen-Neural/neuromod)
 
 [Quick Start](#quick-start) · [Examples](#examples) · [Migration Notes](#migration-notes) · [Changelog](CHANGELOG.md) · [Validation](#maintainer-release-sequence)
 

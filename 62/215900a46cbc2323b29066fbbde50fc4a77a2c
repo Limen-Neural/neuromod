@@ -1,0 +1,19 @@
+benches/neuron_bench.rs
+  s_8eea9025403c10::t_ecfd2d4e2865c1 23,29
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "62215900a46cbc2323b29066fbbde50fc4a77a2c",
+  "prompts": {},
+  "sessions": {
+    "s_8eea9025403c10": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a0c219-c8ee-7913-8441-d42f04192b33",
+        "model": "gpt-5.6-terra"
+      },
+      "human_author": "Raul Cardenas Montoya <montoyaraul34@gmail.com>"
+    }
+  }
+}

@@ -23,7 +23,11 @@
 //! `input_spike_times`. [`SpikingNetwork::step`] uses the thread-local RNG;
 //! [`SpikingNetwork::step_with_rng`] takes a caller-owned `&mut impl rand::Rng`
 //! so one stream can drive a multi-step run. The generator is not stored on
-//! the network and is not serialized.
+//! the network and is not serialized. Held-out evaluation uses
+//! [`SpikingNetwork::step_frozen`] or [`SpikingNetwork::step_frozen_with_rng`]:
+//! both execute this same runtime pipeline while preserving
+//! plasticity-controlled state. This is not equivalent to zero dopamine, which
+//! still lets eligibility traces and other adaptive state evolve.
 
 use core::fmt;
 
@@ -237,6 +241,53 @@ pub struct SpikingNetwork {
     pub stdp_config: RmStdpConfig,
 }
 
+#[derive(Clone, Copy)]
+enum StepMode {
+    Normal,
+    Frozen,
+}
+
+struct PlasticitySnapshot {
+    modulators: NeuroModulators,
+    stdp_config: RmStdpConfig,
+    lif: Vec<LifPlasticitySnapshot>,
+}
+
+struct LifPlasticitySnapshot {
+    decay_rate: f32,
+    threshold: f32,
+    base_threshold: f32,
+}
+
+impl PlasticitySnapshot {
+    fn capture(network: &SpikingNetwork) -> Self {
+        Self {
+            modulators: network.modulators,
+            stdp_config: network.stdp_config,
+            lif: network
+                .neurons
+                .iter()
+                .map(|neuron| LifPlasticitySnapshot {
+                    decay_rate: neuron.decay_rate,
+                    threshold: neuron.threshold,
+                    base_threshold: neuron.base_threshold,
+                })
+                .collect(),
+        }
+    }
+
+    fn restore(self, network: &mut SpikingNetwork) {
+        network.modulators = self.modulators;
+        network.stdp_config = self.stdp_config;
+        debug_assert_eq!(network.neurons.len(), self.lif.len());
+        for (neuron, frozen) in network.neurons.iter_mut().zip(self.lif) {
+            neuron.decay_rate = frozen.decay_rate;
+            neuron.threshold = frozen.threshold;
+            neuron.base_threshold = frozen.base_threshold;
+        }
+    }
+}
+
 impl SpikingNetwork {
     /// Create the default network (16 LIF, 5 Izhikevich, 16 channels).
     pub fn new() -> Self {
@@ -419,6 +470,34 @@ impl SpikingNetwork {
         self.step_with_rng(stimuli, modulators, &mut rand::rng())
     }
 
+    /// Advance one held-out evaluation step without retaining plasticity changes.
+    ///
+    /// This executes the same runtime pipeline as [`Self::step`], including
+    /// modulator-driven effective dynamics, input-spike RNG decisions, membrane
+    /// integration, inhibition, spike/timestamp updates, predictive state, and
+    /// Izhikevich dynamics. It omits the post-runtime STDP/renormalization
+    /// mutation phase and restores transiently retuned persistent state, keeping
+    /// persistent modulators, R-STDP configuration, LIF thresholds and decay
+    /// parameters, weights, and eligibility traces bit-for-bit identical.
+    /// Runtime outputs and state remain advanced, and the returned LIF spikes
+    /// remain observable.
+    ///
+    /// This is stronger than passing zero dopamine to [`Self::step`]. With zero
+    /// dopamine, eligibility traces still decay and accumulate timing credit,
+    /// and acetylcholine can still retune decay rates. Use frozen stepping for
+    /// held-out evaluation that must not alter learning state.
+    ///
+    /// This convenience wrapper uses the thread-local RNG. For reproducible
+    /// evaluation, use [`Self::step_frozen_with_rng`] with one caller-owned
+    /// generator for the whole sequence.
+    pub fn step_frozen(
+        &mut self,
+        stimuli: &[f32],
+        modulators: &NeuroModulators,
+    ) -> Result<Vec<usize>, StepError> {
+        self.step_frozen_with_rng(stimuli, modulators, &mut rand::rng())
+    }
+
     /// Advance one step using a caller-injected RNG for Bernoulli encoding.
     ///
     /// Same contract and order of work as [`Self::step`], except the stochastic
@@ -448,6 +527,36 @@ impl SpikingNetwork {
         modulators: &NeuroModulators,
         rng: &mut R,
     ) -> Result<Vec<usize>, StepError> {
+        self.step_with_rng_mode(stimuli, modulators, rng, StepMode::Normal)
+    }
+
+    /// Advance one held-out evaluation step using a caller-owned RNG.
+    ///
+    /// This has the frozen-state contract of [`Self::step_frozen`] and the
+    /// deterministic replay contract of [`Self::step_with_rng`]. For an
+    /// identical starting network, input, modulators, and RNG state, it makes
+    /// exactly the same Bernoulli decisions and advances the caller's stream by
+    /// exactly the same amount as normal stepping. Rejected input consumes no
+    /// random values and leaves the network unchanged.
+    ///
+    /// Pass the same generator on every step of an evaluation sequence. The
+    /// generator is neither stored nor reseeded by the network.
+    pub fn step_frozen_with_rng<R: Rng + ?Sized>(
+        &mut self,
+        stimuli: &[f32],
+        modulators: &NeuroModulators,
+        rng: &mut R,
+    ) -> Result<Vec<usize>, StepError> {
+        self.step_with_rng_mode(stimuli, modulators, rng, StepMode::Frozen)
+    }
+
+    fn step_with_rng_mode<R: Rng + ?Sized>(
+        &mut self,
+        stimuli: &[f32],
+        modulators: &NeuroModulators,
+        rng: &mut R,
+        mode: StepMode,
+    ) -> Result<Vec<usize>, StepError> {
         validate_step_inputs(stimuli, self.num_channels, modulators)?;
 
         // Checked before any state is touched or any random-number generator is
@@ -460,12 +569,18 @@ impl SpikingNetwork {
                 global_step: self.global_step,
             });
         }
-        self.global_step =
-            self.global_step
-                .checked_add(1)
-                .ok_or(StepError::StepCounterExhausted {
-                    global_step: self.global_step,
-                })?;
+        let next_step = self
+            .global_step
+            .checked_add(1)
+            .ok_or(StepError::StepCounterExhausted {
+                global_step: self.global_step,
+            })?;
+        let frozen = match mode {
+            StepMode::Normal => None,
+            StepMode::Frozen => Some(PlasticitySnapshot::capture(self)),
+        };
+
+        self.global_step = next_step;
         self.modulators = *modulators;
 
         let stress_multiplier = (1.0 - self.modulators.norepinephrine).max(0.1);
@@ -476,9 +591,15 @@ impl SpikingNetwork {
         self.encode_input_spikes(stimuli, rng);
         self.integrate_lif_bank(stimuli, &pred_errors, stress_multiplier);
         let spike_ids = self.fire_lif_and_inhibit();
-        self.apply_stdp(learning_rate);
-        self.renormalize_lif_weights();
+        if matches!(mode, StepMode::Normal) {
+            self.apply_stdp(learning_rate);
+            self.renormalize_lif_weights();
+        }
         self.drive_izhikevich_bank();
+
+        if let Some(snapshot) = frozen {
+            snapshot.restore(self);
+        }
 
         Ok(spike_ids)
     }
@@ -2518,5 +2639,336 @@ mod tests {
             !lower.contains("rng") && !lower.contains("rand"),
             "checkpoint must not grow an implicit RNG field: {json}"
         );
+    }
+
+    // --- Frozen held-out evaluation (LIM-1423) --------------------------
+
+    #[derive(Clone, Debug, PartialEq, Eq)]
+    struct FrozenStateBits {
+        modulators: [u32; 4],
+        stdp_config: [u32; 4],
+        lif: Vec<FrozenLifBits>,
+        iz_parameters: Vec<[u32; 4]>,
+    }
+
+    #[derive(Clone, Debug, PartialEq, Eq)]
+    struct FrozenLifBits {
+        decay_rate: u32,
+        threshold: u32,
+        base_threshold: u32,
+        weights: Vec<u32>,
+        eligibility: Vec<[u32; 2]>,
+    }
+
+    impl FrozenStateBits {
+        fn capture(network: &SpikingNetwork) -> Self {
+            Self {
+                modulators: [
+                    network.modulators.dopamine.to_bits(),
+                    network.modulators.serotonin.to_bits(),
+                    network.modulators.acetylcholine.to_bits(),
+                    network.modulators.norepinephrine.to_bits(),
+                ],
+                stdp_config: [
+                    network.stdp_config.tau_eligibility.to_bits(),
+                    network.stdp_config.reward_lr.to_bits(),
+                    network.stdp_config.w_min.to_bits(),
+                    network.stdp_config.w_max.to_bits(),
+                ],
+                lif: network
+                    .neurons
+                    .iter()
+                    .map(|neuron| FrozenLifBits {
+                        decay_rate: neuron.decay_rate.to_bits(),
+                        threshold: neuron.threshold.to_bits(),
+                        base_threshold: neuron.base_threshold.to_bits(),
+                        weights: neuron.weights.iter().map(|value| value.to_bits()).collect(),
+                        eligibility: neuron
+                            .eligibility
+                            .iter()
+                            .map(|trace| [trace.value.to_bits(), trace.tau.to_bits()])
+                            .collect(),
+                    })
+                    .collect(),
+                iz_parameters: network
+                    .iz_neurons
+                    .iter()
+                    .map(|neuron| {
+                        [
+                            neuron.a.to_bits(),
+                            neuron.b.to_bits(),
+                            neuron.c.to_bits(),
+                            neuron.d.to_bits(),
+                        ]
+                    })
+                    .collect(),
+            }
+        }
+
+        fn restore(&self, network: &mut SpikingNetwork) {
+            network.modulators = NeuroModulators {
+                dopamine: f32::from_bits(self.modulators[0]),
+                serotonin: f32::from_bits(self.modulators[1]),
+                acetylcholine: f32::from_bits(self.modulators[2]),
+                norepinephrine: f32::from_bits(self.modulators[3]),
+            };
+            network.stdp_config = RmStdpConfig {
+                tau_eligibility: f32::from_bits(self.stdp_config[0]),
+                reward_lr: f32::from_bits(self.stdp_config[1]),
+                w_min: f32::from_bits(self.stdp_config[2]),
+                w_max: f32::from_bits(self.stdp_config[3]),
+            };
+            for (neuron, frozen) in network.neurons.iter_mut().zip(&self.lif) {
+                neuron.decay_rate = f32::from_bits(frozen.decay_rate);
+                neuron.threshold = f32::from_bits(frozen.threshold);
+                neuron.base_threshold = f32::from_bits(frozen.base_threshold);
+                neuron.weights = frozen.weights.iter().copied().map(f32::from_bits).collect();
+                neuron.eligibility = frozen
+                    .eligibility
+                    .iter()
+                    .map(|bits| EligibilityTrace {
+                        value: f32::from_bits(bits[0]),
+                        tau: f32::from_bits(bits[1]),
+                    })
+                    .collect();
+            }
+            for (neuron, parameters) in network.iz_neurons.iter_mut().zip(&self.iz_parameters) {
+                neuron.a = f32::from_bits(parameters[0]);
+                neuron.b = f32::from_bits(parameters[1]);
+                neuron.c = f32::from_bits(parameters[2]);
+                neuron.d = f32::from_bits(parameters[3]);
+            }
+        }
+    }
+
+    #[derive(Debug, PartialEq, Eq)]
+    struct RuntimeStateBits {
+        global_step: i64,
+        input_spike_times: Vec<i64>,
+        predictive_state: Vec<u32>,
+        lif: Vec<(u32, bool, i64)>,
+        iz: Vec<(u32, u32, i64)>,
+    }
+
+    impl RuntimeStateBits {
+        fn capture(network: &SpikingNetwork) -> Self {
+            Self {
+                global_step: network.global_step,
+                input_spike_times: network.input_spike_times.clone(),
+                predictive_state: network
+                    .predictive_state
+                    .iter()
+                    .map(|value| value.to_bits())
+                    .collect(),
+                lif: network
+                    .neurons
+                    .iter()
+                    .map(|neuron| {
+                        (
+                            neuron.membrane_potential.to_bits(),
+                            neuron.last_spike,
+                            neuron.last_spike_time,
+                        )
+                    })
+                    .collect(),
+                iz: network
+                    .iz_neurons
+                    .iter()
+                    .map(|neuron| {
+                        (
+                            neuron.v.to_bits(),
+                            neuron.u.to_bits(),
+                            neuron.last_spike_time,
+                        )
+                    })
+                    .collect(),
+            }
+        }
+    }
+
+    fn frozen_test_network() -> SpikingNetwork {
+        let mut network = SpikingNetwork::with_dimensions(4, 2, 3);
+        network.global_step = 4;
+        network.modulators = NeuroModulators {
+            dopamine: 0.125,
+            serotonin: 0.25,
+            acetylcholine: 0.375,
+            norepinephrine: 0.5,
+        };
+        network.stdp_config = RmStdpConfig {
+            tau_eligibility: 73.0,
+            reward_lr: 0.09,
+            w_min: 0.02,
+            w_max: 1.75,
+        };
+        network.predictive_state = vec![0.1, 0.2, 0.3];
+        network.input_spike_times = vec![1, 2, 3];
+
+        for (index, neuron) in network.neurons.iter_mut().enumerate() {
+            neuron.decay_rate = 0.11 + index as f32 * 0.01;
+            neuron.threshold = 0.05 + index as f32 * 0.01;
+            neuron.base_threshold = 0.03 + index as f32 * 0.001;
+            neuron.membrane_potential = index as f32 * 0.01;
+            neuron.weights = vec![0.6, 0.7, 0.7];
+            neuron.eligibility = vec![
+                EligibilityTrace {
+                    value: 0.25 + index as f32 * 0.01,
+                    tau: 73.0,
+                },
+                EligibilityTrace {
+                    value: -0.125 - index as f32 * 0.01,
+                    tau: 74.0,
+                },
+                EligibilityTrace {
+                    value: 0.0625,
+                    tau: 75.0,
+                },
+            ];
+        }
+        network
+    }
+
+    fn high_reward_modulators() -> NeuroModulators {
+        NeuroModulators {
+            dopamine: 1.0,
+            serotonin: 0.2,
+            acetylcholine: 0.8,
+            norepinephrine: 0.1,
+        }
+    }
+
+    #[test]
+    fn frozen_step_preserves_every_plasticity_field_bitwise_while_runtime_advances() {
+        let mut network = frozen_test_network();
+        let before_frozen = FrozenStateBits::capture(&network);
+        let before_runtime = RuntimeStateBits::capture(&network);
+        let spikes = network
+            .step_frozen(&[1.0, 1.0, 1.0], &high_reward_modulators())
+            .expect("finite, length matches");
+
+        assert_eq!(FrozenStateBits::capture(&network), before_frozen);
+        assert_eq!(network.global_step, before_runtime.global_step + 1);
+        assert_ne!(network.input_spike_times, before_runtime.input_spike_times);
+        assert_ne!(
+            RuntimeStateBits::capture(&network).predictive_state,
+            before_runtime.predictive_state
+        );
+        assert!(
+            !spikes.is_empty(),
+            "frozen evaluation must still expose spikes"
+        );
+        assert!(spikes.iter().all(|&id| network.neurons[id].last_spike));
+        assert_ne!(RuntimeStateBits::capture(&network).iz, before_runtime.iz);
+    }
+
+    #[test]
+    fn frozen_steps_preserve_active_learning_state_across_a_sequence() {
+        let mut network = frozen_test_network();
+        let before = FrozenStateBits::capture(&network);
+        let mut rng = StdRng::seed_from_u64(0xF0_1423);
+        let stimuli = [[0.9, 0.7, 0.5], [0.4, 1.0, 0.8], [1.0, 0.2, 0.6]];
+        let mut observed_spikes = 0;
+
+        for frame in stimuli {
+            observed_spikes += network
+                .step_frozen_with_rng(&frame, &high_reward_modulators(), &mut rng)
+                .expect("finite, length matches")
+                .len();
+        }
+
+        assert_eq!(FrozenStateBits::capture(&network), before);
+        assert_eq!(network.global_step, 7);
+        assert!(
+            observed_spikes > 0,
+            "spikes must remain observable across frozen steps"
+        );
+    }
+
+    #[test]
+    fn frozen_step_reuses_synapse_allocations() {
+        let mut network = frozen_test_network();
+        let weight_buffers: Vec<*const f32> = network
+            .neurons
+            .iter()
+            .map(|neuron| neuron.weights.as_ptr())
+            .collect();
+        let trace_buffers: Vec<*const EligibilityTrace> = network
+            .neurons
+            .iter()
+            .map(|neuron| neuron.eligibility.as_ptr())
+            .collect();
+
+        network
+            .step_frozen(&[1.0, 1.0, 1.0], &high_reward_modulators())
+            .expect("finite, length matches");
+
+        assert_eq!(
+            network
+                .neurons
+                .iter()
+                .map(|neuron| neuron.weights.as_ptr())
+                .collect::<Vec<_>>(),
+            weight_buffers,
+            "frozen stepping must not clone or replace weight buffers"
+        );
+        assert_eq!(
+            network
+                .neurons
+                .iter()
+                .map(|neuron| neuron.eligibility.as_ptr())
+                .collect::<Vec<_>>(),
+            trace_buffers,
+            "frozen stepping must not clone or replace eligibility buffers"
+        );
+    }
+
+    #[test]
+    fn frozen_and_normal_steps_share_runtime_and_rng_behavior() {
+        let mut normal = frozen_test_network();
+        let mut frozen = frozen_test_network();
+        let frozen_fields = FrozenStateBits::capture(&frozen);
+        let mut normal_rng = StdRng::seed_from_u64(1423);
+        let mut frozen_rng = StdRng::seed_from_u64(1423);
+
+        for stimuli in [[0.9, 0.7, 0.5], [0.4, 1.0, 0.8], [1.0, 0.2, 0.6]] {
+            let normal_spikes = normal
+                .step_with_rng(&stimuli, &high_reward_modulators(), &mut normal_rng)
+                .expect("finite, length matches");
+            let frozen_spikes = frozen
+                .step_frozen_with_rng(&stimuli, &high_reward_modulators(), &mut frozen_rng)
+                .expect("finite, length matches");
+
+            assert_eq!(frozen_spikes, normal_spikes);
+            assert_eq!(
+                RuntimeStateBits::capture(&frozen),
+                RuntimeStateBits::capture(&normal)
+            );
+
+            // Give the normal control the same frozen starting fields for the
+            // next frame. Runtime state stays untouched on both networks.
+            frozen_fields.restore(&mut normal);
+        }
+
+        assert_eq!(normal_rng.next_u64(), frozen_rng.next_u64());
+        assert_eq!(FrozenStateBits::capture(&frozen), frozen_fields);
+    }
+
+    #[test]
+    fn frozen_step_rejection_is_atomic_and_does_not_consume_rng() {
+        let mut network = frozen_test_network();
+        let before = capture_engine(&network);
+        let mut rng = StdRng::seed_from_u64(7);
+        let mut fresh = StdRng::seed_from_u64(7);
+
+        assert_eq!(
+            network.step_frozen_with_rng(&[0.5], &high_reward_modulators(), &mut rng),
+            Err(StepError::InputLenMismatch {
+                expected: 3,
+                got: 1,
+            })
+        );
+
+        assert_engine_unchanged(&before, &network);
+        assert_eq!(rng.next_u64(), fresh.next_u64());
     }
 }

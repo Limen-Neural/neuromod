@@ -26,9 +26,11 @@
 //!    for research use outside the engine.
 //! 7. [`gif_layer`] — [`SparseGifHiddenLayer`], a structure-of-arrays bank of GIF
 //!    neurons with deterministic sparse fan-in and batched execution.
-//! 8. Reproducibility — [`SpikingNetwork::step_with_rng`] and
-//!    [`lif::PoissonEncoder::encode_with_rng`] inject a caller RNG into the
-//!    only live stochastic paths. See the [RNG inventory](https://github.com/Limen-Neural/neuromod/blob/main/docs/rng.md).
+//! 8. Evaluation and reproducibility — [`SpikingNetwork::step_frozen`] advances
+//!    runtime dynamics without retaining plasticity changes, while
+//!    [`SpikingNetwork::step_with_rng`], [`SpikingNetwork::step_frozen_with_rng`],
+//!    and [`lif::PoissonEncoder::encode_with_rng`] inject a caller RNG into the
+//!    live stochastic paths. See the [RNG inventory](https://github.com/Limen-Neural/neuromod/blob/main/docs/rng.md).
 //!
 //! ## Engine vs standalone models
 //!
@@ -42,16 +44,21 @@
 //!   dopamine gates only the trace → weight conversion, so reward can arrive after
 //!   the coincidence it pays for. Classical Hebbian STDP utilities are separate and
 //!   unmodulated.
+//! - Held-out evaluation: [`SpikingNetwork::step_frozen`] runs the normal dynamics
+//!   and exposes spikes while preserving weights, traces, adaptive thresholds/decay,
+//!   persistent modulators, and other plasticity-controlled state. Passing zero
+//!   dopamine is not a substitute because traces still decay and accumulate.
 //!
 //! ## Reproducibility
 //!
-//! Two public paths draw random numbers: [`SpikingNetwork::step`] (Poisson-style
-//! encoding of `input_spike_times`) and [`lif::PoissonEncoder::encode`]. Each keeps
-//! a thread-local convenience wrapper and adds a `*_with_rng` variant that takes
-//! `&mut impl rand::Rng`. One caller generator can drive a full multi-step run;
-//! the engine does not store or serialize it. All other public dynamics (LIF /
-//! Izhikevich integration, R-STDP given spike times, standalone neuron models,
-//! [`SparseGifHiddenLayer`] execution) are deterministic.
+//! The engine and [`lif::PoissonEncoder`] draw random numbers for spike encoding.
+//! Their thread-local convenience wrappers have `*_with_rng` variants that take
+//! `&mut impl rand::Rng`; the engine supplies injected variants for both normal
+//! ([`SpikingNetwork::step_with_rng`]) and frozen
+//! ([`SpikingNetwork::step_frozen_with_rng`]) stepping. One caller generator can
+//! drive a full multi-step run; the engine does not store or serialize it. All
+//! other public dynamics (LIF / Izhikevich integration, R-STDP given spike times,
+//! standalone neuron models, [`SparseGifHiddenLayer`] execution) are deterministic.
 //! [`SparseGifHiddenLayer`] topology is seeded at construction via SplitMix64,
 //! not a live `rand` stream.
 //!
@@ -60,7 +67,9 @@
 //! - Topology-neutral, dynamically sized `SpikingNetwork`
 //! - Neuromodulators: dopamine, serotonin, acetylcholine, norepinephrine
 //! - Reward-modulated STDP over per-synapse eligibility traces
-//! - Caller-injected RNG on the live stochastic paths (`step_with_rng`)
+//! - Frozen held-out evaluation that preserves plasticity-controlled state
+//! - Caller-injected RNG on normal and frozen engine paths (`step_with_rng`,
+//!   `step_frozen_with_rng`)
 //!
 //! ```rust
 //! use neuromod::{NeuroModulators, SpikingNetwork};

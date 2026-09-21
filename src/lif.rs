@@ -21,6 +21,16 @@ use serde::{Deserialize, Serialize};
 
 use crate::rm_stdp::EligibilityTrace;
 
+const LIF_BASE_THRESHOLD: f32 = 0.02;
+
+fn default_base_threshold() -> f32 {
+    LIF_BASE_THRESHOLD
+}
+
+fn never_spiked() -> i64 {
+    -1
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct PoissonEncoder {
     pub num_steps: usize,
@@ -89,7 +99,7 @@ pub struct LifNeuron {
     pub threshold: f32,          // Limit to trigger an action potential
     /// Resting threshold baseline used for dynamic threshold modulation
     /// without losing the original calibrated value.
-    #[serde(default)]
+    #[serde(default = "default_base_threshold")]
     pub base_threshold: f32,
     pub last_spike: bool, // Tracks if it fired in the last step
     /// Synaptic weights — one per input channel.
@@ -101,7 +111,7 @@ pub struct LifNeuron {
     /// Shares the engine's discrete step unit: `-1` means this neuron has never
     /// spiked; a non-negative value is the [`crate::SpikingNetwork::global_step`]
     /// at which it last fired (`1..=i64::MAX` on a live network).
-    #[serde(default)]
+    #[serde(default = "never_spiked")]
     pub last_spike_time: i64,
     /// Per-synapse eligibility traces — one per input channel, indexed exactly
     /// like [`Self::weights`].
@@ -120,8 +130,8 @@ impl Default for LifNeuron {
         Self {
             membrane_potential: 0.0,
             decay_rate: 0.15,
-            threshold: 0.02, // Aggressively lowered threshold
-            base_threshold: 0.02,
+            threshold: LIF_BASE_THRESHOLD, // Aggressively lowered threshold
+            base_threshold: LIF_BASE_THRESHOLD,
             last_spike: false,
             weights: Vec::new(),
             last_spike_time: -1,
@@ -177,6 +187,29 @@ mod tests {
         assert!(neuron.weights.is_empty());
         assert_eq!(neuron.last_spike_time, -1);
         assert!(neuron.eligibility.is_empty());
+    }
+
+    #[test]
+    fn missing_checkpoint_sentinels_match_constructor_defaults() {
+        let mut value = serde_json::to_value(LifNeuron::new()).unwrap();
+        let object = value.as_object_mut().unwrap();
+        object.remove("base_threshold");
+        object.remove("last_spike_time");
+
+        let restored: LifNeuron = serde_json::from_value(value).unwrap();
+        assert_eq!(restored.base_threshold, LifNeuron::new().base_threshold);
+        assert_eq!(restored.last_spike_time, LifNeuron::new().last_spike_time);
+    }
+
+    #[test]
+    fn explicit_checkpoint_sentinels_are_preserved() {
+        let mut value = serde_json::to_value(LifNeuron::new()).unwrap();
+        value["base_threshold"] = serde_json::json!(0.37);
+        value["last_spike_time"] = serde_json::json!(42);
+
+        let restored: LifNeuron = serde_json::from_value(value).unwrap();
+        assert_eq!(restored.base_threshold, 0.37);
+        assert_eq!(restored.last_spike_time, 42);
     }
 
     #[test]

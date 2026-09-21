@@ -334,6 +334,16 @@ them: [ADR 002](https://github.com/Limen-Neural/neuromod/blob/main/docs/adr/002-
 
 ## Migration Notes
 
+### 0.6.0 — missing neuron checkpoint fields use constructor sentinels
+
+Self-describing checkpoints that omit `LifNeuron::last_spike_time` or
+`GifNeuron::last_spike_time` now restore `-1` (never fired), while omitted
+`base_threshold` fields restore the model's resting threshold (`0.02` for LIF and
+`0.65` for GIF). Explicit serialized values remain unchanged. For compatibility
+with checkpoints written before the field existed, an omitted
+`IzhikevichNeuron::last_spike_time` also restores `-1` rather than failing to
+deserialize.
+
 ### 0.6.0 — `StepError` names non-finite ingress
 
 `SpikingNetwork::step` now rejects `NaN` / `±∞` stimuli and modulator fields

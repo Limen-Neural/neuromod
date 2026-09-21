@@ -20,13 +20,13 @@ fn bench_lif_integrate(c: &mut Criterion) {
 
 fn bench_lif_check_fire(c: &mut Criterion) {
     c.bench_function("lif_check_fire/firing", |b| {
-        b.iter_batched(
+        b.iter_batched_ref(
             || {
                 let mut neuron = LifNeuron::new();
                 neuron.membrane_potential = 0.03;
                 neuron
             },
-            |mut neuron| black_box(neuron.check_fire()),
+            |neuron| black_box(neuron.check_fire()),
             // Neuron construction and threshold setup happen outside the timed routine.
             BatchSize::SmallInput,
         );

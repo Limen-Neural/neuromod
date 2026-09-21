@@ -1,0 +1,25 @@
+src/lib.rs
+  s_07e3fea240574e::t_fd9c879409c6ec 48
+src/engine.rs
+  s_07e3fea240574e::t_94a43121de2739 2888-2924
+  s_07e3fea240574e::t_8808ea82f33150 594-597
+  s_07e3fea240574e::t_8c939b0801cd53 28-30,478-483
+docs/rng.md
+  s_07e3fea240574e::t_fd9c879409c6ec 46-48
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "b73d6aeff4c2a2b708057ee0ad42f67dde884b22",
+  "prompts": {},
+  "sessions": {
+    "s_07e3fea240574e": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a0c1e7-b72d-71d0-a845-abea0938d1f7",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Raul Cardenas Montoya <montoyaraul34@gmail.com>"
+    }
+  }
+}

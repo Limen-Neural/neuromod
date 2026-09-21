@@ -1,0 +1,21 @@
+src/gif.rs
+  s_e85362d21471cc::t_70e13c4c1d1224 301,313
+src/lif.rs
+  s_e85362d21471cc::t_70e13c4c1d1224 194,206
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "8153dcc28700a0c972d574c73f2c0376658e8384",
+  "prompts": {},
+  "sessions": {
+    "s_e85362d21471cc": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a0c22b-4d7d-7761-a8cb-6aaaad95c843",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "Raul Cardenas Montoya <montoyaraul34@gmail.com>"
+    }
+  }
+}

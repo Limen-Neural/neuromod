@@ -25,9 +25,9 @@
 //! so one stream can drive a multi-step run. The generator is not stored on
 //! the network and is not serialized. Held-out evaluation uses
 //! [`SpikingNetwork::step_frozen`] or [`SpikingNetwork::step_frozen_with_rng`]:
-//! both execute this same runtime pipeline, then restore plasticity-controlled
-//! state. This is not equivalent to zero dopamine, which still lets eligibility
-//! traces and other adaptive state evolve.
+//! both execute this same runtime pipeline while preserving
+//! plasticity-controlled state. This is not equivalent to zero dopamine, which
+//! still lets eligibility traces and other adaptive state evolve.
 
 use core::fmt;
 
@@ -257,8 +257,6 @@ struct LifPlasticitySnapshot {
     decay_rate: f32,
     threshold: f32,
     base_threshold: f32,
-    weights: Vec<f32>,
-    eligibility: Vec<EligibilityTrace>,
 }
 
 impl PlasticitySnapshot {
@@ -273,8 +271,6 @@ impl PlasticitySnapshot {
                     decay_rate: neuron.decay_rate,
                     threshold: neuron.threshold,
                     base_threshold: neuron.base_threshold,
-                    weights: neuron.weights.clone(),
-                    eligibility: neuron.eligibility.clone(),
                 })
                 .collect(),
         }
@@ -288,8 +284,6 @@ impl PlasticitySnapshot {
             neuron.decay_rate = frozen.decay_rate;
             neuron.threshold = frozen.threshold;
             neuron.base_threshold = frozen.base_threshold;
-            neuron.weights = frozen.weights;
-            neuron.eligibility = frozen.eligibility;
         }
     }
 }
@@ -481,11 +475,12 @@ impl SpikingNetwork {
     /// This executes the same runtime pipeline as [`Self::step`], including
     /// modulator-driven effective dynamics, input-spike RNG decisions, membrane
     /// integration, inhibition, spike/timestamp updates, predictive state, and
-    /// Izhikevich dynamics. After the step, it restores every
-    /// plasticity-controlled field bit-for-bit: persistent modulators, R-STDP
-    /// configuration, LIF thresholds and decay parameters, weights, and
-    /// eligibility traces. Runtime outputs and state remain advanced, and the
-    /// returned LIF spikes remain observable.
+    /// Izhikevich dynamics. It omits the post-runtime STDP/renormalization
+    /// mutation phase and restores transiently retuned persistent state, keeping
+    /// persistent modulators, R-STDP configuration, LIF thresholds and decay
+    /// parameters, weights, and eligibility traces bit-for-bit identical.
+    /// Runtime outputs and state remain advanced, and the returned LIF spikes
+    /// remain observable.
     ///
     /// This is stronger than passing zero dopamine to [`Self::step`]. With zero
     /// dopamine, eligibility traces still decay and accumulate timing credit,
@@ -596,8 +591,10 @@ impl SpikingNetwork {
         self.encode_input_spikes(stimuli, rng);
         self.integrate_lif_bank(stimuli, &pred_errors, stress_multiplier);
         let spike_ids = self.fire_lif_and_inhibit();
-        self.apply_stdp(learning_rate);
-        self.renormalize_lif_weights();
+        if matches!(mode, StepMode::Normal) {
+            self.apply_stdp(learning_rate);
+            self.renormalize_lif_weights();
+        }
         self.drive_izhikevich_bank();
 
         if let Some(snapshot) = frozen {
@@ -2884,6 +2881,44 @@ mod tests {
         assert!(
             observed_spikes > 0,
             "spikes must remain observable across frozen steps"
+        );
+    }
+
+    #[test]
+    fn frozen_step_reuses_synapse_allocations() {
+        let mut network = frozen_test_network();
+        let weight_buffers: Vec<*const f32> = network
+            .neurons
+            .iter()
+            .map(|neuron| neuron.weights.as_ptr())
+            .collect();
+        let trace_buffers: Vec<*const EligibilityTrace> = network
+            .neurons
+            .iter()
+            .map(|neuron| neuron.eligibility.as_ptr())
+            .collect();
+
+        network
+            .step_frozen(&[1.0, 1.0, 1.0], &high_reward_modulators())
+            .expect("finite, length matches");
+
+        assert_eq!(
+            network
+                .neurons
+                .iter()
+                .map(|neuron| neuron.weights.as_ptr())
+                .collect::<Vec<_>>(),
+            weight_buffers,
+            "frozen stepping must not clone or replace weight buffers"
+        );
+        assert_eq!(
+            network
+                .neurons
+                .iter()
+                .map(|neuron| neuron.eligibility.as_ptr())
+                .collect::<Vec<_>>(),
+            trace_buffers,
+            "frozen stepping must not clone or replace eligibility buffers"
         );
     }
 

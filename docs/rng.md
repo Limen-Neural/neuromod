@@ -43,9 +43,9 @@ path does not construct, reseed, or store an RNG per neuron or per step.
 
 For an identical starting network, input, modulator snapshot, and RNG state,
 `step_frozen_with_rng` makes the same Bernoulli decisions and consumes the same
-draws as `step_with_rng`. It executes the normal pipeline and then restores
-plasticity-controlled state; this restoration neither draws nor rewinds the
-caller's generator.
+draws as `step_with_rng`. It executes the normal runtime pipeline while
+preserving plasticity-controlled state; this preservation neither draws nor
+rewinds the caller's generator.
 
 A rejected `step_with_rng` or `step_frozen_with_rng` call returns before any
 draw, so invalid input does not advance the caller stream.

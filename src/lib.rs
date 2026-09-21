@@ -45,7 +45,7 @@
 //!   the coincidence it pays for. Classical Hebbian STDP utilities are separate and
 //!   unmodulated.
 //! - Held-out evaluation: [`SpikingNetwork::step_frozen`] runs the normal dynamics
-//!   and exposes spikes while restoring weights, traces, adaptive thresholds/decay,
+//!   and exposes spikes while preserving weights, traces, adaptive thresholds/decay,
 //!   persistent modulators, and other plasticity-controlled state. Passing zero
 //!   dopamine is not a substitute because traces still decay and accumulate.
 //!

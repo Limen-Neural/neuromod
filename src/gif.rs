@@ -298,7 +298,7 @@ mod tests {
 
     #[test]
     fn missing_checkpoint_sentinels_match_constructor_defaults() {
-        let mut value = serde_json::to_value(GifNeuron::new()).unwrap();
+        let mut value = serde_json::to_value(GifNeuron::default()).unwrap();
         let object = value.as_object_mut().unwrap();
         object.remove("base_threshold");
         object.remove("last_spike_time");
@@ -310,7 +310,7 @@ mod tests {
 
     #[test]
     fn explicit_checkpoint_sentinels_are_preserved() {
-        let mut value = serde_json::to_value(GifNeuron::new()).unwrap();
+        let mut value = serde_json::to_value(GifNeuron::default()).unwrap();
         value["base_threshold"] = serde_json::json!(0.91);
         value["last_spike_time"] = serde_json::json!(42);
 

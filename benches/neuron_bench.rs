@@ -1,4 +1,4 @@
-use criterion::{Criterion, criterion_group, criterion_main};
+use criterion::{BatchSize, Criterion, criterion_group, criterion_main};
 use neuromod::{
     FitzHughNagumoNeuron, HodgkinHuxleyNeuron, IzhikevichNeuron, LapicqueNeuron, LifNeuron,
 }; // Import neuron types
@@ -19,16 +19,17 @@ fn bench_lif_integrate(c: &mut Criterion) {
 }
 
 fn bench_lif_check_fire(c: &mut Criterion) {
-    // Benchmark function
-    let mut neuron = LifNeuron::new(); // Create LIF neuron
-    neuron.membrane_potential = 0.03; // Above threshold
-
-    c.bench_function("lif_check_fire", |b| {
-        // Benchmark function
-        b.iter(|| {
-            // Iterate benchmark
-            let _ = neuron.check_fire(); // Check if neuron fires
-        });
+    c.bench_function("lif_check_fire/firing", |b| {
+        b.iter_batched(
+            || {
+                let mut neuron = LifNeuron::new();
+                neuron.membrane_potential = 0.03;
+                neuron
+            },
+            |mut neuron| black_box(neuron.check_fire()),
+            // Neuron construction and threshold setup happen outside the timed routine.
+            BatchSize::SmallInput,
+        );
     });
 }
 

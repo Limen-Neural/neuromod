@@ -32,18 +32,23 @@ dynamics:
 
 | Path | Convenience wrapper | Injected variant | What is random |
 |------|---------------------|------------------|----------------|
-| [`SpikingNetwork::step`](../src/engine.rs) | `step` uses [`rand::rng`](https://docs.rs/rand/latest/rand/fn.rng.html) (thread-local) | [`SpikingNetwork::step_with_rng`](../src/engine.rs) | Bernoulli encoding of `input_spike_times` for channels with `\|stimuli\| > 0.01` |
+| [`SpikingNetwork::{step, step_frozen}`](../src/engine.rs) | `step` and `step_frozen` use [`rand::rng`](https://docs.rs/rand/latest/rand/fn.rng.html) (thread-local) | [`SpikingNetwork::{step_with_rng, step_frozen_with_rng}`](../src/engine.rs) | Bernoulli encoding of `input_spike_times` for channels with `\|stimuli\| > 0.01` |
 | [`lif::PoissonEncoder::encode`](../src/lif.rs) | `encode` uses the thread-local RNG | [`PoissonEncoder::encode_with_rng`](../src/lif.rs) | One Bernoulli trial per output step at the clamped intensity |
 
-`step` and `encode` remain source-compatible. The injected methods take
-`rng: &mut impl Rng` (`R: Rng + ?Sized`, so `&mut dyn Rng` also works).
-`Rng`, `SeedableRng`, and `StdRng` are re-exported from this crate so a
-downstream `neuromod` dependency is enough to seed a stream. Pass the same
-`&mut` generator on every step of a run; the injected path does not construct,
-reseed, or store an RNG per neuron or per step.
+The injected methods take `rng: &mut impl Rng` (`R: Rng + ?Sized`, so
+`&mut dyn Rng` also works). `Rng`, `SeedableRng`, and `StdRng` are re-exported
+from this crate so a downstream `neuromod` dependency is enough to seed a
+stream. Pass the same `&mut` generator on every step of a run; the injected
+path does not construct, reseed, or store an RNG per neuron or per step.
 
-A length-mismatch error from `step_with_rng` returns before any draw, so a
-rejected step does not advance the caller stream.
+For an identical starting network, input, modulator snapshot, and RNG state,
+`step_frozen_with_rng` makes the same Bernoulli decisions and consumes the same
+draws as `step_with_rng`. It executes the normal pipeline and then restores
+plasticity-controlled state; this restoration neither draws nor rewinds the
+caller's generator.
+
+A rejected `step_with_rng` or `step_frozen_with_rng` call returns before any
+draw, so invalid input does not advance the caller stream.
 
 ## Deterministic public paths
 

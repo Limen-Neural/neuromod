@@ -63,6 +63,14 @@ pub const GIF_ADAPTATION_INCREMENT: f32 = 1.0;
 /// Default fraction of the effective threshold removed by the soft reset.
 pub const GIF_RESET_RATIO: f32 = 0.35;
 
+fn default_base_threshold() -> f32 {
+    GIF_BASE_THRESHOLD
+}
+
+fn never_spiked() -> i64 {
+    -1
+}
+
 /// Parameter block for the Generalized Integrate-and-Fire dynamics.
 ///
 /// This is the *shared* definition of the GIF equations. [`GifNeuron`] holds
@@ -175,7 +183,7 @@ pub struct GifNeuron {
     /// Construction copies this into [`Self::threshold`]. Subsequent writes
     /// here do not change firing until the caller (or a modulator) also
     /// updates `threshold`, matching [`crate::LifNeuron`].
-    #[serde(default)]
+    #[serde(default = "default_base_threshold")]
     pub base_threshold: f32,
     /// How strongly `w` inflates the effective threshold
     /// (`θ_eff = threshold + w · adaptation_scale`).
@@ -197,7 +205,7 @@ pub struct GifNeuron {
     #[serde(default)]
     pub weights: Vec<f32>,
     /// Timestep of the most recent spike (`-1` = never fired).
-    #[serde(default)]
+    #[serde(default = "never_spiked")]
     pub last_spike_time: i64,
 }
 
@@ -287,6 +295,29 @@ impl GifNeuron {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn missing_checkpoint_sentinels_match_constructor_defaults() {
+        let mut value = serde_json::to_value(GifNeuron::default()).unwrap();
+        let object = value.as_object_mut().unwrap();
+        object.remove("base_threshold");
+        object.remove("last_spike_time");
+
+        let restored: GifNeuron = serde_json::from_value(value).unwrap();
+        assert_eq!(restored.base_threshold, GIF_BASE_THRESHOLD);
+        assert_eq!(restored.last_spike_time, -1);
+    }
+
+    #[test]
+    fn explicit_checkpoint_sentinels_are_preserved() {
+        let mut value = serde_json::to_value(GifNeuron::default()).unwrap();
+        value["base_threshold"] = serde_json::json!(0.91);
+        value["last_spike_time"] = serde_json::json!(42);
+
+        let restored: GifNeuron = serde_json::from_value(value).unwrap();
+        assert_eq!(restored.base_threshold, 0.91);
+        assert_eq!(restored.last_spike_time, 42);
+    }
 
     #[test]
     fn test_no_spike_without_input() {

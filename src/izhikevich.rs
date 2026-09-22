@@ -10,6 +10,10 @@
 
 use serde::{Deserialize, Serialize};
 
+fn never_spiked() -> i64 {
+    -1
+}
+
 /// Biologically plausible neuron model by Eugene M. Izhikevich (2003).
 /// Reproduces many firing patterns (regular spiking, bursting, chattering,
 /// fast-spiking interneurons) with only two equations and four parameters.
@@ -25,6 +29,7 @@ pub struct IzhikevichNeuron {
     pub v: f32, // Membrane potential (mV)
     pub u: f32, // Membrane recovery variable
     /// Timestep of the most recent spike (used by Hebbian STDP).
+    #[serde(default = "never_spiked")]
     pub last_spike_time: i64,
 
     // Parameters that define firing patterns
@@ -156,6 +161,24 @@ impl IzhikevichNeuron {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn missing_last_spike_time_loads_as_never_spiked() {
+        let mut value = serde_json::to_value(IzhikevichNeuron::new_regular_spiking()).unwrap();
+        value.as_object_mut().unwrap().remove("last_spike_time");
+
+        let restored: IzhikevichNeuron = serde_json::from_value(value).unwrap();
+        assert_eq!(restored.last_spike_time, -1);
+    }
+
+    #[test]
+    fn explicit_last_spike_time_is_preserved() {
+        let mut value = serde_json::to_value(IzhikevichNeuron::new_regular_spiking()).unwrap();
+        value["last_spike_time"] = serde_json::json!(42);
+
+        let restored: IzhikevichNeuron = serde_json::from_value(value).unwrap();
+        assert_eq!(restored.last_spike_time, 42);
+    }
 
     #[test]
     fn test_regular_spiking_fires_under_sustained_input() {

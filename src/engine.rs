@@ -2076,6 +2076,29 @@ mod tests {
                 .all(|t| t.tau == RmStdpConfig::default().tau_eligibility)
         );
     }
+
+    #[test]
+    fn missing_lif_spike_time_does_not_create_first_pre_spike_depression() {
+        let network = SpikingNetwork::with_dimensions(1, 0, 1);
+        let mut state = serde_json::to_value(network).expect("network serializes");
+        let neuron = state["neurons"][0]
+            .as_object_mut()
+            .expect("LIF neuron is a JSON object");
+        neuron.remove("last_spike_time");
+        neuron.remove("base_threshold");
+
+        let mut restored: SpikingNetwork =
+            serde_json::from_value(state).expect("older checkpoint deserializes");
+        assert_eq!(restored.neurons[0].last_spike_time, -1);
+        assert_eq!(restored.neurons[0].base_threshold, 0.02);
+
+        restored
+            .step(&[1.0], &NeuroModulators::default())
+            .expect("length matches");
+
+        assert_eq!(restored.input_spike_times[0], 1);
+        assert_eq!(restored.neurons[0].eligibility[0].value, 0.0);
+    }
     // --- Non-finite step ingress (LIM-1226) ---
 
     /// Full serialized snapshot so a rejected step cannot hide a mutation in

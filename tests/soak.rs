@@ -52,9 +52,15 @@ fn linux_rss_kib() -> Option<u64> {
 
 fn run_engine_soak(steps: usize) {
     let mut network = SpikingNetwork::with_dimensions(LIF_NEURONS, IZH_NEURONS, CHANNELS);
+    // Start off-budget so a no-op learning/normalize path cannot vacuously pass.
     for neuron in &mut network.neurons {
-        neuron.weights.fill(WEIGHT_BUDGET / CHANNELS as f32);
+        neuron.weights.fill(0.0);
     }
+    let initial_weights: Vec<Vec<f32>> = network
+        .neurons
+        .iter()
+        .map(|neuron| neuron.weights.clone())
+        .collect();
 
     let initial_capacities = EngineCapacities::capture(&network);
     let report_rss = std::env::var_os("NEUROMOD_SOAK_RSS").is_some();
@@ -113,6 +119,15 @@ fn run_engine_soak(steps: usize) {
             && neuron.d.is_finite()
     }));
 
+    assert!(
+        network
+            .neurons
+            .iter()
+            .zip(initial_weights.iter())
+            .any(|(neuron, before)| neuron.weights.as_slice() != before.as_slice()),
+        "rewarded soak must change at least one weight (non-vacuous learning path)"
+    );
+
     for (index, neuron) in network.neurons.iter().enumerate() {
         let l1: f32 = neuron.weights.iter().map(|weight| weight.abs()).sum();
         assert!(
@@ -132,3 +147,4 @@ fn soak_engine_10k_steps() {
 fn soak_engine_million_steps() {
     run_engine_soak(1_000_000);
 }
+

@@ -56,7 +56,7 @@ pub fn apply_classical_stdp(
     current_weight: f32,
     params: &StdpParams,
 ) -> f32 {
-    let delta_t = post_spike_time - pre_spike_time;
+    let delta_t = i128::from(post_spike_time) - i128::from(pre_spike_time);
     let weight_change = if delta_t > 0 {
         params.a_plus * (-delta_t as f32 / params.tau_plus).exp()
     } else if delta_t < 0 {
@@ -116,7 +116,8 @@ mod tests {
         let params = StdpParams::default();
         let w0 = 0.5;
         let w1 = apply_classical_stdp(0, 5, w0, &params);
-        assert!(w1 > w0, "Pre before post should potentiate (LTP)");
+        let expected = w0 + params.a_plus * (-5.0 / params.tau_plus).exp();
+        assert_eq!(w1, expected, "Pre before post should potentiate (LTP)");
     }
 
     #[test]
@@ -124,7 +125,8 @@ mod tests {
         let params = StdpParams::default();
         let w0 = 0.5;
         let w1 = apply_classical_stdp(5, 0, w0, &params);
-        assert!(w1 < w0, "Post before pre should depress (LTD)");
+        let expected = w0 - params.a_minus * (-5.0 / params.tau_minus).exp();
+        assert_eq!(w1, expected, "Post before pre should depress (LTD)");
     }
 
     #[test]
@@ -135,6 +137,23 @@ mod tests {
         assert_eq!(
             w1, w0,
             "Simultaneous spikes should produce no weight change"
+        );
+    }
+
+    #[test]
+    fn test_extreme_timestamp_differences_decay_without_overflow() {
+        let params = StdpParams::default();
+        let w0 = 0.5;
+
+        assert_eq!(
+            apply_classical_stdp(i64::MIN, i64::MAX, w0, &params),
+            w0,
+            "an extreme causal interval should decay to no weight change"
+        );
+        assert_eq!(
+            apply_classical_stdp(i64::MAX, i64::MIN, w0, &params),
+            w0,
+            "an extreme anti-causal interval should decay to no weight change"
         );
     }
 

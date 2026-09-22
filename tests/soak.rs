@@ -52,9 +52,10 @@ fn linux_rss_kib() -> Option<u64> {
 
 fn run_engine_soak(steps: usize) {
     let mut network = SpikingNetwork::with_dimensions(LIF_NEURONS, IZH_NEURONS, CHANNELS);
-    // Start off-budget so a no-op learning/normalize path cannot vacuously pass.
+    // Start far above L1 budget so a no-op normalize path cannot vacuously pass.
+    // (Zeros stay zeros under reward updates in this harness.)
     for neuron in &mut network.neurons {
-        neuron.weights.fill(0.0);
+        neuron.weights.fill(1.0);
     }
     let initial_weights: Vec<Vec<f32>> = network
         .neurons
@@ -147,4 +148,3 @@ fn soak_engine_10k_steps() {
 fn soak_engine_million_steps() {
     run_engine_soak(1_000_000);
 }
-

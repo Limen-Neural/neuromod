@@ -86,7 +86,7 @@ fn rejects_checkpoint_with_non_finite_float_payloads() {
     let overflow: serde_json::Value = serde_json::Number::from_f64(1e40).unwrap().into();
 
     for field in ["weights", "membrane", "adaptation"] {
-        let err = decode_corrupted(|v| v[field][0] = overflow.clone()).unwrap_err();
+        let err = decode_corrupted(|v| v[field][0].clone_from(&overflow)).unwrap_err();
         assert!(
             err.to_string()
                 .contains(&format!("{field} contains a non-finite value")),
@@ -109,7 +109,7 @@ fn rejects_checkpoint_with_non_finite_gif_params() {
         "adaptation_increment",
         "reset_ratio",
     ] {
-        let err = decode_corrupted(|v| v["params"][field] = overflow.clone()).unwrap_err();
+        let err = decode_corrupted(|v| v["params"][field].clone_from(&overflow)).unwrap_err();
         assert!(
             err.to_string().contains(&format!("params.{field}")),
             "overflowed params.{field} should be rejected, got: {err}"

@@ -1,5 +1,6 @@
 use super::*;
 use crate::gif::GifNeuron;
+use std::time::Instant;
 
 fn config(num_inputs: usize, num_neurons: usize, fan_in: usize, seed: u64) -> SparseGifLayerConfig {
     SparseGifLayerConfig {
@@ -19,6 +20,64 @@ fn ramp_train(num_steps: usize, num_inputs: usize) -> Vec<Vec<f32>> {
                 .collect()
         })
         .collect()
+}
+
+#[derive(Debug, PartialEq, Eq)]
+struct LayerCapacities {
+    fan_in_offsets: usize,
+    fan_in_sources: usize,
+    weights: usize,
+    membrane: usize,
+    adaptation: usize,
+    last_spike_time: usize,
+}
+
+impl LayerCapacities {
+    fn capture(layer: &SparseGifHiddenLayer) -> Self {
+        Self {
+            fan_in_offsets: layer.fan_in_offsets.capacity(),
+            fan_in_sources: layer.fan_in_sources.capacity(),
+            weights: layer.weights.capacity(),
+            membrane: layer.membrane.capacity(),
+            adaptation: layer.adaptation.capacity(),
+            last_spike_time: layer.last_spike_time.capacity(),
+        }
+    }
+}
+
+fn run_gif_layer_soak(steps: usize) {
+    const INPUTS: usize = 16;
+    const NEURONS: usize = 8;
+    let mut layer = SparseGifHiddenLayer::new(&config(INPUTS, NEURONS, 4, 0x5A17_1338)).unwrap();
+    let initial_capacities = LayerCapacities::capture(&layer);
+    let mut stimuli = [0.0; INPUTS];
+    let mut spikes = [false; NEURONS];
+    let started = Instant::now();
+
+    for step in 0..steps {
+        for (channel, value) in stimuli.iter_mut().enumerate() {
+            *value = usize::from((step + channel) % 4 == 0) as f32;
+        }
+        layer.step_into(&stimuli, &mut spikes).unwrap();
+    }
+
+    eprintln!("GIF layer soak: {steps} steps in {:?}", started.elapsed());
+    assert_eq!(layer.step_count(), steps as i64);
+    assert_eq!(LayerCapacities::capture(&layer), initial_capacities);
+    assert!(layer.weights().iter().all(|value| value.is_finite()));
+    assert!(layer.membrane().iter().all(|value| value.is_finite()));
+    assert!(layer.adaptation().iter().all(|value| value.is_finite()));
+}
+
+#[test]
+fn soak_gif_layer_10k_steps() {
+    run_gif_layer_soak(10_000);
+}
+
+#[test]
+#[ignore = "million-step reliability gate; run with `cargo test soak -- --ignored --nocapture`"]
+fn soak_gif_layer_million_steps() {
+    run_gif_layer_soak(1_000_000);
 }
 
 // --- structure -------------------------------------------------------

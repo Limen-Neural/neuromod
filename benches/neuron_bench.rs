@@ -29,8 +29,8 @@ fn bench_lif_check_fire(c: &mut Criterion) {
             |neuron| {
                 let _ = black_box(neuron.check_fire());
             },
-            // Neuron construction and threshold setup happen outside the timed routine.
-            BatchSize::SmallInput,
+            // Keep input batch size small enough to remain cache-resident and avoid memory bandwidth bottlenecks.
+            BatchSize::LargeInput,
         );
     });
 }

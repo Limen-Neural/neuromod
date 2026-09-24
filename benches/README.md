@@ -116,14 +116,18 @@ before relying on any of this for a decision.
 
 | Benchmark | Point estimate |
 | --- | --- |
-| `lif_check_fire` *(obsolete; non-firing stateful)* | 0.55 ns |
-| `lif_check_fire/firing` *(restored precondition)* | ~1.6 ns |
+| `lif_check_fire` *(obsolete)* | 0.55 ns |
 | `lapicque_step` | 1.64 ns |
 | `lif_integrate` | 2.35 ns |
 | `lif_full_step` | 4.64 ns |
 | `izhikevich_step` | 10.05 ns |
 | `fitzhugh_nagumo_step` | 321 ns |
 | `hodgkin_huxley_step` | 627 ns |
+
+> **Note on `lif_check_fire`:** The 0.55 ns result above reflects the legacy stateful benchmark
+> on commit `5a6ac98` (2026-09-06) where only the first iteration fired. The corrected benchmark
+> `lif_check_fire/firing` restores the above-threshold precondition per sample via `iter_batched_ref`
+> (measured at ~1.6 ns on `x86_64-unknown-linux-gnu` with `rustc 1.98.1` via `cargo bench --bench neuron_bench -- lif_check_fire`).
 
 On this run the ranking is LIF < Izhikevich < FitzHugh-Nagumo < Hodgkin-Huxley, consistent
 with their relative model complexity: LIF integrates a single membrane-potential state,

@@ -42,7 +42,7 @@ cargo bench -- --baseline main
 
 Benchmarks individual neuron model performance:
 - `lif_integrate` - LIF neuron integration step
-- `lif_check_fire` - LIF neuron spike detection
+- `lif_check_fire/firing` - LIF neuron spike detection (with firing precondition restored per sample)
 - `lif_full_step` - Complete LIF neuron step (integrate + check)
 - `izhikevich_step` - Izhikevich neuron step
 - `lapicque_step` - Lapicque neuron step
@@ -116,7 +116,8 @@ before relying on any of this for a decision.
 
 | Benchmark | Point estimate |
 | --- | --- |
-| `lif_check_fire` | 0.55 ns |
+| `lif_check_fire` *(obsolete; non-firing stateful)* | 0.55 ns |
+| `lif_check_fire/firing` *(restored precondition)* | ~1.6 ns |
 | `lapicque_step` | 1.64 ns |
 | `lif_integrate` | 2.35 ns |
 | `lif_full_step` | 4.64 ns |

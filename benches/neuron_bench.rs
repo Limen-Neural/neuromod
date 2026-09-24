@@ -26,7 +26,9 @@ fn bench_lif_check_fire(c: &mut Criterion) {
                 neuron.membrane_potential = 0.03;
                 neuron
             },
-            |neuron| black_box(neuron.check_fire()),
+            |neuron| {
+                let _ = black_box(neuron.check_fire());
+            },
             // Neuron construction and threshold setup happen outside the timed routine.
             BatchSize::SmallInput,
         );

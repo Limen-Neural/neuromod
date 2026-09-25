@@ -42,7 +42,7 @@ cargo bench -- --baseline main
 
 Benchmarks individual neuron model performance:
 - `lif_integrate` - LIF neuron integration step
-- `lif_check_fire` - LIF neuron spike detection
+- `lif_check_fire/firing` - LIF neuron spike detection (with firing precondition restored per sample)
 - `lif_full_step` - Complete LIF neuron step (integrate + check)
 - `izhikevich_step` - Izhikevich neuron step
 - `lapicque_step` - Lapicque neuron step
@@ -116,13 +116,21 @@ before relying on any of this for a decision.
 
 | Benchmark | Point estimate |
 | --- | --- |
-| `lif_check_fire` | 0.55 ns |
+| `lif_check_fire` *(obsolete)* | 0.55 ns |
 | `lapicque_step` | 1.64 ns |
 | `lif_integrate` | 2.35 ns |
 | `lif_full_step` | 4.64 ns |
 | `izhikevich_step` | 10.05 ns |
 | `fitzhugh_nagumo_step` | 321 ns |
 | `hodgkin_huxley_step` | 627 ns |
+
+> **Note on `lif_check_fire`:** The 0.55 ns result above reflects the legacy stateful benchmark
+> on commit `5a6ac98` (2026-09-06) where only the first iteration fired. The corrected benchmark
+> `lif_check_fire/firing` restores the above-threshold precondition per sample via `iter_batched_ref`
+> with `BatchSize::LargeInput` (cache-resident input) and observes the post-reset potential to prevent
+> dead-store elimination of the reset write. On an AMD Ryzen 9 9950X 16-Core Processor
+> (`x86_64-unknown-linux-gnu`, `rustc 1.98.1`, `cargo bench --bench neuron_bench -- lif_check_fire`),
+> it measures ~0.45 ns (450 ps) point estimate.
 
 On this run the ranking is LIF < Izhikevich < FitzHugh-Nagumo < Hodgkin-Huxley, consistent
 with their relative model complexity: LIF integrates a single membrane-potential state,

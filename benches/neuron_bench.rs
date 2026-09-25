@@ -27,7 +27,8 @@ fn bench_lif_check_fire(c: &mut Criterion) {
                 neuron
             },
             |neuron| {
-                let _ = black_box(neuron.check_fire());
+                let spike = neuron.check_fire();
+                black_box((spike, neuron.membrane_potential));
             },
             // Keep input batch size small enough to remain cache-resident and avoid memory bandwidth bottlenecks.
             BatchSize::LargeInput,

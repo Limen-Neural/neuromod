@@ -84,6 +84,42 @@ cargo bench --no-run --all-features
 # the structured libtest protocol these targets don't emit.
 ```
 
+## Long-horizon soak tests
+
+The always-on 10,000-step variants run with the normal test suite. Run the
+explicitly ignored million-step engine and sparse GIF layer gates with:
+
+```bash
+cargo test soak -- --ignored --nocapture
+```
+
+Both variants use fixed topology and deterministic binary (`0` or `1`) inputs.
+They assert exact counters and finite numeric state. The engine test starts with
+nonzero weights, exercises reward-modulated learning and normalization, and
+checks the documented default-bounds precedence contract by requiring each
+neuron's weight L1 sum to remain within `1e-4` of the `2.0` budget.
+
+The capacity checks cover persistent allocations only. For `SpikingNetwork`
+these are both neuron banks, input spike times, predictive state, and every LIF
+neuron's weights and eligibility traces. For `SparseGifHiddenLayer` they are the
+CSR offsets, sources, and weights plus membrane, adaptation, and spike-time
+banks. Temporary per-step outputs are deliberately excluded.
+
+On Linux, `NEUROMOD_SOAK_RSS=1 cargo test soak -- --ignored --nocapture` prints
+best-effort `/proc/self/status` RSS samples. RSS is diagnostic only and is never
+asserted because allocator and operating-system behavior is not portable.
+
+Recorded locally on 2026-09-22 with rustc 1.98.1 in the repository dev profile:
+
+| Variant | 10,000 steps | 1,000,000 steps |
+| --- | ---: | ---: |
+| `SpikingNetwork` | 69 ms | 7.15 s |
+| `SparseGifHiddenLayer` | 1.59 ms | 110 ms |
+
+These correctness tests are distinct from `benches/memory_bench.rs`: that
+Criterion suite measures fixed object layout and construction/allocation
+latency, not persistent capacity growth across steps or process RSS.
+
 ## Docs and domain hygiene
 
 ```bash

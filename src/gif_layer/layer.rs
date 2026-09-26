@@ -135,6 +135,45 @@ impl SparseGifHiddenLayerRepr {
     fn validate_values(&self) -> Result<(), GifLayerError> {
         let malformed = |detail| GifLayerError::MalformedCheckpoint { detail };
 
+        if self.weights.iter().any(|value| !value.is_finite()) {
+            return Err(malformed("weights contains a non-finite value"));
+        }
+        if self.membrane.iter().any(|value| !value.is_finite()) {
+            return Err(malformed("membrane contains a non-finite value"));
+        }
+        if self.adaptation.iter().any(|value| !value.is_finite()) {
+            return Err(malformed("adaptation contains a non-finite value"));
+        }
+
+        let params = [
+            (self.params.leak, "params.leak is non-finite"),
+            (self.params.drive_scale, "params.drive_scale is non-finite"),
+            (
+                self.params.base_threshold,
+                "params.base_threshold is non-finite",
+            ),
+            (
+                self.params.adaptation_scale,
+                "params.adaptation_scale is non-finite",
+            ),
+            (
+                self.params.adaptation_decay,
+                "params.adaptation_decay is non-finite",
+            ),
+            (
+                self.params.adaptation_coupling,
+                "params.adaptation_coupling is non-finite",
+            ),
+            (
+                self.params.adaptation_increment,
+                "params.adaptation_increment is non-finite",
+            ),
+            (self.params.reset_ratio, "params.reset_ratio is non-finite"),
+        ];
+        if let Some((_, detail)) = params.iter().find(|(value, _)| !value.is_finite()) {
+            return Err(malformed(detail));
+        }
+
         if self
             .fan_in_sources
             .iter()

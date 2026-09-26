@@ -82,6 +82,42 @@ fn rejects_checkpoint_whose_payload_disagrees_with_offsets() {
 }
 
 #[test]
+fn rejects_checkpoint_with_non_finite_float_payloads() {
+    let overflow: serde_json::Value = serde_json::Number::from_f64(1e40).unwrap().into();
+
+    for field in ["weights", "membrane", "adaptation"] {
+        let err = decode_corrupted(|v| v[field][0].clone_from(&overflow)).unwrap_err();
+        assert!(
+            err.to_string()
+                .contains(&format!("{field} contains a non-finite value")),
+            "overflowed {field} should be rejected, got: {err}"
+        );
+    }
+}
+
+#[test]
+fn rejects_checkpoint_with_non_finite_gif_params() {
+    let overflow: serde_json::Value = serde_json::Number::from_f64(1e40).unwrap().into();
+
+    for field in [
+        "leak",
+        "drive_scale",
+        "base_threshold",
+        "adaptation_scale",
+        "adaptation_decay",
+        "adaptation_coupling",
+        "adaptation_increment",
+        "reset_ratio",
+    ] {
+        let err = decode_corrupted(|v| v["params"][field].clone_from(&overflow)).unwrap_err();
+        assert!(
+            err.to_string().contains(&format!("params.{field}")),
+            "overflowed params.{field} should be rejected, got: {err}"
+        );
+    }
+}
+
+#[test]
 fn rejects_checkpoint_sourcing_a_nonexistent_channel() {
     // num_inputs is 8, so channel 99 does not exist.
     let err = decode_corrupted(|v| v["fan_in_sources"][0] = 99.into()).unwrap_err();

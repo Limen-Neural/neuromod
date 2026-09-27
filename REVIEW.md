@@ -84,6 +84,45 @@ cargo bench --no-run --all-features
 # the structured libtest protocol these targets don't emit.
 ```
 
+## Long-horizon soak tests
+
+The always-on 10,000-step variants run with the normal test suite. Run the
+explicitly ignored million-step engine and sparse GIF layer gates with:
+
+```bash
+cargo test soak -- --ignored --nocapture
+```
+
+Both variants use fixed topology and deterministic binary (`0` or `1`) inputs.
+They assert exact counters and finite numeric state. The engine test starts with
+off-budget nonzero weights and compares rewarded stepping against a same-seed
+control with reward learning disabled. This separates learning from the
+normalization both runs perform. It also checks the documented default-bounds
+precedence contract after every returned engine step by requiring each neuron's
+weight L1 sum to remain within `1e-4` of the `2.0` budget.
+
+The capacity checks cover persistent allocations only. For `SpikingNetwork`
+these are both neuron banks, input spike times, predictive state, and every LIF
+neuron's weights and eligibility traces. For `SparseGifHiddenLayer` they are the
+CSR offsets, sources, and weights plus membrane, adaptation, and spike-time
+banks. Temporary per-step outputs are deliberately excluded.
+
+On Linux, `NEUROMOD_SOAK_RSS=1 cargo test soak -- --ignored --nocapture` prints
+best-effort `/proc/self/status` RSS samples. RSS is diagnostic only and is never
+asserted because allocator and operating-system behavior is not portable.
+
+Illustrative local runtimes with rustc 1.98.1 in the repository dev profile
+(engine with paired control recorded 2026-09-27; sparse GIF recorded 2026-09-22):
+
+| Variant | 10,000 steps | 1,000,000 steps |
+| --- | ---: | ---: |
+| `SpikingNetwork` | 57 ms | 5.50 s |
+| `SparseGifHiddenLayer` | 1.59 ms | 110 ms |
+
+These correctness tests are distinct from `benches/memory_bench.rs`: that
+Criterion suite measures fixed object layout and construction/allocation
+latency, not persistent capacity growth across steps or process RSS.
+
 ## Docs and domain hygiene
 
 ```bash

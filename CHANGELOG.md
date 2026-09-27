@@ -4,6 +4,38 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-09-27
+
+### Changed
+
+- **`StepError` gained `CheckpointShapeMismatch`** and the crate re-exports the new
+  `ChannelVector` field-identity enum. `StepError` is **not** `#[non_exhaustive]`, so this is a
+  breaking change for exhaustive `match`es that name every variant: add a
+  `StepError::CheckpointShapeMismatch { field, expected, got }` arm (or a `_` wildcard). Matches
+  using a wildcard, and normal well-shaped checkpoints, are unaffected (#143).
+
+### Fixed
+
+- **`SpikingNetwork::step` validates stored per-channel vector shapes before mutation**
+  (`src/engine.rs`, [#143](https://github.com/Limen-Neural/neuromod/issues/143),
+  [LIM-1363](https://linear.app/rpd-34/issue/LIM-1363/fixserde-validate-spikingnetwork-checkpoint-dimensions-before-stepping)).
+  The step preflight validated the caller's `stimuli.len()` against `num_channels` but not the
+  deserialized `predictive_state` and `input_spike_times` lengths. A malformed self-describing
+  checkpoint (or a hand-edited public field) could carry either vector at the wrong length; the
+  runtime incremented `global_step` and then indexed them by channel in
+  `update_predictive_errors` / `encode_input_spikes`, so a short vector panicked *after* partial
+  mutation and a long one silently dropped trailing entries. `step` now checks both vector
+  lengths (predictive state first, then input spike times) after the stimulus and modulator
+  checks and immediately before the counter check, returning
+  `StepError::CheckpointShapeMismatch` before any mutation or RNG draw. Both short and long
+  vectors are rejected without repair; the malformed checkpoint still **deserializes** so it can
+  be inspected, matching the exhausted/negative-counter contract. All step entry points (`step`,
+  `step_frozen`, `step_with_rng`, `step_frozen_with_rng`) share this path. The check is limited
+  to the two network per-channel vectors and deliberately does not police neuron `weights` /
+  `eligibility` width, whose runtime access (`integrate_lif_bank`, `apply_stdp`) is already
+  bounded and tolerant by design. Debug + release regression coverage proves malformed shapes
+  cannot panic after partial mutation and consume no RNG draws.
+
 ### Removed
 
 - Production container packaging and its Docker Hub/GHCR publishing workflow. `neuromod`

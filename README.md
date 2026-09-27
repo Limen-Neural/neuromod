@@ -168,7 +168,9 @@ fn main() {
 
 ## Step Errors
 
-`step` validates the call **before** mutating the network or drawing from the random-number generator (RNG). A length mismatch, a non-finite input, or an exhausted tick counter returns a structured [`StepError`](https://docs.rs/neuromod/latest/neuromod/enum.StepError.html) and leaves every field unchanged (failure-atomic no-op). Finite signed values still go through the existing `abs().clamp` magnitude path.
+`step` validates the call **before** mutating the network or drawing from the random-number generator (RNG). A stimulus length mismatch, a non-finite input, a stored per-channel state vector whose length disagrees with `num_channels`, or an exhausted tick counter returns a structured [`StepError`](https://docs.rs/neuromod/latest/neuromod/enum.StepError.html) and leaves every field unchanged (failure-atomic no-op). Finite signed values still go through the existing `abs().clamp` magnitude path.
+
+A malformed self-describing checkpoint (or a hand-edited public field) can leave `predictive_state` or `input_spike_times` shorter or longer than `num_channels`. Those vectors deserialize as-is — decode never rejects them — but `step` indexes them by channel, so it returns `StepError::CheckpointShapeMismatch` (naming the offending vector) before any mutation or RNG draw rather than panicking on a short vector or silently dropping a long one mid-step. The check is limited to those two vectors; it does **not** police each neuron's `weights` / `eligibility` width, which the engine tolerates by design (see the neuron weight-width note below).
 
 `global_step` is a discrete tick counter in **steps** (not wall-clock time), range `0..=i64::MAX`. Spike timestamps (`LifNeuron::last_spike_time`, `input_spike_times`) use the same unit; `-1` is the sentinel for no recorded spike. A restored checkpoint sitting at `i64::MAX` (or with a negative counter) still deserializes — `step` then returns `StepCounterExhausted` instead of panicking in debug, wrapping in release, or stamping the `-1` sentinel. Call `reset()` to start a new epoch; the engine will not renumber a live network for you.
 
@@ -193,6 +195,9 @@ fn main() {
         }
         Err(StepError::StepCounterExhausted { global_step }) => {
             println!("step counter cannot advance from {global_step}");
+        }
+        Err(StepError::CheckpointShapeMismatch { field, expected, got }) => {
+            println!("CheckpointShapeMismatch: {field:?} has {got}, expected {expected}");
         }
     }
 
@@ -333,6 +338,42 @@ the real trace and weight numbers. Rationale for wiring the types in rather than
 them: [ADR 002](https://github.com/Limen-Neural/neuromod/blob/main/docs/adr/002-wire-eligibility-traces.md).
 
 ## Migration Notes
+
+### 0.7 — `StepError::CheckpointShapeMismatch` for malformed channel vectors
+
+**Exhaustive matches on `StepError` need a new arm.** `SpikingNetwork::step`
+now returns `StepError::CheckpointShapeMismatch { field, expected, got }` when
+`predictive_state` or `input_spike_times` does not have exactly `num_channels`
+entries. `field` is a `ChannelVector` naming the offending vector; `expected`
+is `num_channels`; `got` is the vector's actual length. Add the arm (or a `_`
+wildcard). `StepError` is not `#[non_exhaustive]`, so this is a source-level
+break for matches that spell out every variant (#143).
+
+**Malformed shapes deserialize but fail at step time.** These vectors are
+serde-visible, so a self-describing checkpoint (or a hand-edited public field)
+can carry the wrong length. Decode does **not** reject it — the state loads so
+it can be inspected, exactly like an exhausted or negative `global_step`. The
+step then rejects it atomically: a short vector would panic on a channel index
+and a long one would silently drop trailing entries, so both are caught before
+`global_step` advances, before the modulator snapshot is stored, and before any
+RNG draw. The preflight sits immediately before the counter check, so a
+checkpoint that is both malformed and exhausted reports the shape mismatch
+first.
+
+**Neuron weight-width mismatch is tolerated, not policed.** The shape check is
+deliberately limited to the two per-channel network vectors. A `LifNeuron` may
+carry more (or fewer) `weights` / `eligibility` entries than the network has
+channels, and the engine handles that width mismatch by design rather than
+rejecting it: `integrate_lif_bank` skips channels past a neuron's `weights`
+length, and `apply_stdp` (1) resizes a neuron's `eligibility` to match its
+`weights` before use — this is how a pre-0.6 checkpoint with no traces starts
+learning again — (2) bounds its per-channel timing loop by
+`min(input_spike_times.len(), weights.len())`, so a wider neuron never reads a
+missing timestamp, and (3) decays any eligibility trace beyond the channel
+count so a planted or deserialized trace on an input-less synapse does not stay
+frozen. That timestamp access is therefore **bounded** regardless of weight
+width; widening a neuron cannot make `step` panic or read out of range. Bringing
+weight width under validation is intentionally out of scope for this fix.
 
 ### 0.6.0 — missing neuron checkpoint fields use constructor sentinels
 

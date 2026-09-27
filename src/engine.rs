@@ -117,15 +117,44 @@ impl fmt::Display for ModulatorField {
     }
 }
 
+/// Per-channel state vector whose length disagreed with
+/// [`SpikingNetwork::num_channels`] in [`StepError::CheckpointShapeMismatch`].
+///
+/// These are the two serde-visible vectors the step pipeline indexes directly
+/// by channel (`predictive_state` in `update_predictive_errors`,
+/// `input_spike_times` in `encode_input_spikes`). The scan reports them in that
+/// order.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ChannelVector {
+    /// [`SpikingNetwork::predictive_state`].
+    PredictiveState,
+    /// [`SpikingNetwork::input_spike_times`].
+    InputSpikeTimes,
+}
+
+impl fmt::Display for ChannelVector {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::PredictiveState => f.write_str("predictive_state"),
+            Self::InputSpikeTimes => f.write_str("input_spike_times"),
+        }
+    }
+}
+
 /// Errors from [`SpikingNetwork::step`].
 ///
 /// Every variant is returned **before** the network is mutated: a failed step
 /// is atomic. Adding a variant is a source-level break for exhaustive `match`es:
-/// handle [`Self::NonFiniteStimulus`], [`Self::NonFiniteModulator`], and
-/// [`Self::StepCounterExhausted`], or use a `_` wildcard.
+/// handle [`Self::NonFiniteStimulus`], [`Self::NonFiniteModulator`],
+/// [`Self::StepCounterExhausted`], and [`Self::CheckpointShapeMismatch`], or use
+/// a `_` wildcard.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StepError {
     /// `stimuli.len()` did not match the network's `num_channels`.
+    ///
+    /// This is specific to the caller-supplied stimulus slice. A deserialized
+    /// per-channel state vector whose length disagrees with `num_channels` is
+    /// reported by [`Self::CheckpointShapeMismatch`] instead.
     InputLenMismatch { expected: usize, got: usize },
     /// A stimulus sample was NaN or infinite.
     NonFiniteStimulus { index: usize, class: NonFiniteClass },
@@ -136,6 +165,22 @@ pub enum StepError {
     },
     /// `global_step` has reached `i64::MAX` or is negative.
     StepCounterExhausted { global_step: i64 },
+    /// A stored per-channel state vector's length did not match
+    /// [`SpikingNetwork::num_channels`].
+    ///
+    /// A malformed self-describing checkpoint (or a hand-edited public field)
+    /// can leave [`SpikingNetwork::predictive_state`] or
+    /// [`SpikingNetwork::input_spike_times`] shorter or longer than
+    /// `num_channels`. Those vectors are indexed by channel during the step, so
+    /// the mismatch is caught up front and returned before any mutation or RNG
+    /// draw rather than panicking (short vector) or silently ignoring trailing
+    /// entries (long vector) mid-step. `field` names the offending vector,
+    /// `expected` is `num_channels`, and `got` is the vector's actual length.
+    CheckpointShapeMismatch {
+        field: ChannelVector,
+        expected: usize,
+        got: usize,
+    },
 }
 
 impl fmt::Display for StepError {
@@ -152,6 +197,13 @@ impl fmt::Display for StepError {
             }
             Self::StepCounterExhausted { global_step } => {
                 write!(f, "step counter cannot advance from {global_step}")
+            }
+            Self::CheckpointShapeMismatch {
+                field,
+                expected,
+                got,
+            } => {
+                write!(f, "{field} has {got} entries, expected {expected}")
             }
         }
     }
@@ -189,6 +241,41 @@ fn validate_step_inputs(
         if let Some(class) = NonFiniteClass::classify(value) {
             return Err(StepError::NonFiniteModulator { field, class });
         }
+    }
+
+    Ok(())
+}
+
+/// Confirm each per-channel state vector the step indexes by channel has exactly
+/// `num_channels` entries. `predictive_state` is checked first, then
+/// `input_spike_times`, matching the order they are touched in the pipeline.
+///
+/// A deserialized checkpoint or a hand-written public field can leave either
+/// vector too short (a channel index would panic) or too long (trailing entries
+/// would be silently ignored). Both are rejected. This runs after the stimulus
+/// and modulator checks and before any mutation or RNG draw, so a shape
+/// mismatch is a no-op. It is two `O(1)` length comparisons and allocates
+/// nothing. It deliberately does not inspect neuron `weights` / `eligibility`
+/// widths, which the runtime tolerates by design (see `apply_stdp`).
+fn validate_step_shape(
+    num_channels: usize,
+    predictive_state: &[f32],
+    input_spike_times: &[i64],
+) -> Result<(), StepError> {
+    if predictive_state.len() != num_channels {
+        return Err(StepError::CheckpointShapeMismatch {
+            field: ChannelVector::PredictiveState,
+            expected: num_channels,
+            got: predictive_state.len(),
+        });
+    }
+
+    if input_spike_times.len() != num_channels {
+        return Err(StepError::CheckpointShapeMismatch {
+            field: ChannelVector::InputSpikeTimes,
+            expected: num_channels,
+            got: input_spike_times.len(),
+        });
     }
 
     Ok(())
@@ -379,6 +466,16 @@ impl SpikingNetwork {
     ///   field name) plus the [`NonFiniteClass`]. Finite signed values,
     ///   including `0.0` / `-0.0` and [`f32::MAX`] / [`f32::MIN`], still
     ///   pass through the existing `abs().clamp(0.0, 1.0)` magnitude path.
+    /// - [`Self::predictive_state`] and [`Self::input_spike_times`] must each
+    ///   have exactly [`Self::num_channels`] entries, else
+    ///   [`StepError::CheckpointShapeMismatch`] (naming the offending
+    ///   [`ChannelVector`]). These vectors are serde-visible, so a malformed
+    ///   self-describing checkpoint or a hand-edited public field can leave
+    ///   them the wrong length; the step indexes them by channel, so both a
+    ///   short vector (would panic) and a long one (would silently drop
+    ///   trailing entries) are rejected before any mutation. This does **not**
+    ///   police each neuron's `weights` / `eligibility` width, which the
+    ///   pipeline tolerates by design.
     /// - [`Self::global_step`] is a discrete tick counter in **steps**, range
     ///   `0..=i64::MAX`. A call that would increment past [`i64::MAX`], or a
     ///   negative counter, returns [`StepError::StepCounterExhausted`] and
@@ -391,13 +488,15 @@ impl SpikingNetwork {
     ///   predictive state / membranes / traces / weights change, and before
     ///   any random-number generator (RNG) draw. A rejected step is a no-op.
     /// - Preflight is a single linear pass over the stimulus slice plus the
-    ///   four modulator fields and allocates nothing.
+    ///   four modulator fields and two `O(1)` state-vector length checks; it
+    ///   allocates nothing.
     /// - Returns the indices of **LIF** neurons that fired this step (Izhikevich
     ///   spikes are not listed in the return value).
     ///
     /// # Order of work
     ///
-    /// 1. Preflight: reject a length mismatch, non-finite input, or an exhausted `global_step`.
+    /// 1. Preflight: reject a stimulus length mismatch, non-finite input, a
+    ///    per-channel state-vector shape mismatch, or an exhausted `global_step`.
     /// 2. Store `modulators` and derive stress / learning rates.
     /// 3. Recompute LIF targets from neuromodulators: assign `decay_rate`
     ///    directly; soft-update `threshold` toward its target (learning-rate blend).
@@ -558,6 +657,19 @@ impl SpikingNetwork {
         mode: StepMode,
     ) -> Result<Vec<usize>, StepError> {
         validate_step_inputs(stimuli, self.num_channels, modulators)?;
+
+        // A malformed self-describing checkpoint (or a hand-edited public field)
+        // can leave `predictive_state` or `input_spike_times` a different length
+        // than `num_channels`. Both are indexed by channel below
+        // (`update_predictive_errors`, `encode_input_spikes`), so a short vector
+        // would panic and a long one would silently drop trailing entries —
+        // after `global_step` had already advanced. Reject the shape here, still
+        // before any mutation or RNG draw, so the step stays atomic.
+        validate_step_shape(
+            self.num_channels,
+            &self.predictive_state,
+            &self.input_spike_times,
+        )?;
 
         // Checked before any state is touched or any random-number generator is
         // drawn. A restored checkpoint can carry a counter at i64::MAX
@@ -1009,10 +1121,11 @@ mod tests {
             StepError::NonFiniteStimulus { .. } => {}
             StepError::NonFiniteModulator { .. } => {}
             StepError::StepCounterExhausted { .. } => {}
+            StepError::CheckpointShapeMismatch { .. } => {}
         }
     }
 
-    fn all_step_error_variants() -> [StepError; 4] {
+    fn all_step_error_variants() -> [StepError; 5] {
         [
             StepError::InputLenMismatch {
                 expected: 4,
@@ -1028,6 +1141,11 @@ mod tests {
             },
             StepError::StepCounterExhausted {
                 global_step: i64::MAX,
+            },
+            StepError::CheckpointShapeMismatch {
+                field: ChannelVector::PredictiveState,
+                expected: 4,
+                got: 3,
             },
         ]
     }
@@ -2993,5 +3111,334 @@ mod tests {
 
         assert_engine_unchanged(&before, &network);
         assert_eq!(rng.next_u64(), fresh.next_u64());
+    }
+
+    // --- Checkpoint channel-vector shape validation (#143 / LIM-1363) ------
+    //
+    // A malformed self-describing checkpoint can carry `predictive_state` or
+    // `input_spike_times` whose length disagrees with `num_channels`. The step
+    // indexes both by channel, so a short vector used to panic and a long one
+    // used to silently drop trailing entries — after `global_step` had already
+    // advanced. These tests prove the shape is rejected atomically, before any
+    // mutation or RNG draw, in every step entry point.
+
+    /// Round-trip a network through serde, letting `edit` mutate the JSON object
+    /// first. Deserialization itself must still succeed: the malformed shape is
+    /// caught at step time, not at decode, so the state can be inspected.
+    fn restored_with_json_edit(
+        network: &SpikingNetwork,
+        edit: impl FnOnce(&mut serde_json::Map<String, serde_json::Value>),
+    ) -> SpikingNetwork {
+        let mut state = serde_json::to_value(network).expect("network serializes");
+        edit(state.as_object_mut().expect("network is a JSON object"));
+        serde_json::from_value(state).expect("malformed-shape checkpoint still deserializes")
+    }
+
+    /// Overwrite a `[f32]` JSON array field with `len` zeros.
+    fn set_f32_array_len(
+        object: &mut serde_json::Map<String, serde_json::Value>,
+        key: &str,
+        len: usize,
+    ) {
+        object.insert(
+            key.to_owned(),
+            serde_json::Value::Array(vec![serde_json::json!(0.0_f32); len]),
+        );
+    }
+
+    /// Overwrite an `[i64]` JSON array field with `len` `-1` sentinels.
+    fn set_i64_array_len(
+        object: &mut serde_json::Map<String, serde_json::Value>,
+        key: &str,
+        len: usize,
+    ) {
+        object.insert(
+            key.to_owned(),
+            serde_json::Value::Array(vec![serde_json::json!(-1_i64); len]),
+        );
+    }
+
+    /// A JSON-object edit that corrupts a checkpoint's channel-vector shape.
+    type ShapeEdit = Box<dyn Fn(&mut serde_json::Map<String, serde_json::Value>)>;
+
+    /// A named malformed-shape case: a label, the edit that produces it, and the
+    /// `StepError` the step must return.
+    type ShapeMismatchCase = (&'static str, ShapeEdit, StepError);
+
+    /// Every malformed channel-vector shape a checkpoint can carry, paired with
+    /// the error each must produce. `num_channels` stays at 4 (matched by the
+    /// 4-wide stimulus below) except the last case, which changes the count
+    /// itself so the untouched channel vectors are the ones that mismatch.
+    fn shape_mismatch_cases() -> Vec<ShapeMismatchCase> {
+        let mismatch = |field, expected, got| StepError::CheckpointShapeMismatch {
+            field,
+            expected,
+            got,
+        };
+        let f32_len = |key: &'static str, len: usize| -> ShapeEdit {
+            Box::new(move |o| set_f32_array_len(o, key, len))
+        };
+        let i64_len = |key: &'static str, len: usize| -> ShapeEdit {
+            Box::new(move |o| set_i64_array_len(o, key, len))
+        };
+        use ChannelVector::{InputSpikeTimes, PredictiveState};
+        vec![
+            (
+                "predictive_state short",
+                f32_len("predictive_state", 3),
+                mismatch(PredictiveState, 4, 3),
+            ),
+            (
+                "predictive_state long",
+                f32_len("predictive_state", 5),
+                mismatch(PredictiveState, 4, 5),
+            ),
+            (
+                "input_spike_times short",
+                i64_len("input_spike_times", 3),
+                mismatch(InputSpikeTimes, 4, 3),
+            ),
+            (
+                "input_spike_times long",
+                i64_len("input_spike_times", 5),
+                mismatch(InputSpikeTimes, 4, 5),
+            ),
+            (
+                // Change only the declared channel count. Both stored vectors
+                // stay length 4, so `predictive_state` is the first to mismatch
+                // the new count of 6 and is reported first.
+                "num_channels raised",
+                Box::new(|o| {
+                    o.insert("num_channels".to_owned(), serde_json::json!(6_usize));
+                }),
+                mismatch(PredictiveState, 6, 4),
+            ),
+        ]
+    }
+
+    /// Drive a malformed network once and assert the rejection is a no-op on
+    /// every serialized field and consumes nothing from the caller's stream.
+    /// A stimulus of `1.0` (well above the `0.01` Bernoulli floor) would draw
+    /// from the RNG on any channel that survived the preflight, so an untouched
+    /// stream proves the draw never happened.
+    fn assert_shape_rejection_atomic(
+        make: impl Fn() -> SpikingNetwork,
+        expected: StepError,
+        frozen: bool,
+    ) {
+        // `num_channels` may have been edited, so size the (valid-length)
+        // stimulus to whatever the restored network now declares.
+        let mut network = make();
+        let stimuli = vec![1.0_f32; network.num_channels];
+        let modulators = NeuroModulators {
+            dopamine: 0.4,
+            ..Default::default()
+        };
+        let before = capture_network(&network);
+        let mut rng = StdRng::seed_from_u64(0x5EED_1363);
+        let mut fresh = StdRng::seed_from_u64(0x5EED_1363);
+
+        let result = if frozen {
+            network.step_frozen_with_rng(&stimuli, &modulators, &mut rng)
+        } else {
+            network.step_with_rng(&stimuli, &modulators, &mut rng)
+        };
+
+        assert_eq!(result, Err(expected), "frozen={frozen}");
+        assert_network_unchanged(&network, &before);
+        assert_eq!(
+            rng.next_u64(),
+            fresh.next_u64(),
+            "a rejected step must not draw from the caller stream (frozen={frozen})"
+        );
+    }
+
+    #[test]
+    fn checkpoint_shape_mismatch_rejected_atomically_normal_and_frozen() {
+        for (label, edit, expected) in shape_mismatch_cases() {
+            let base = SpikingNetwork::with_dimensions(4, 1, 4);
+            // A fresh malformed network per path so the frozen run cannot see a
+            // mutation the normal run might have left behind.
+            let make = || restored_with_json_edit(&base, &edit);
+            for frozen in [false, true] {
+                assert_shape_rejection_atomic(make, expected, frozen);
+            }
+            // Touch `label` so a future reviewer sees which case failed in the
+            // panic message rather than a bare index.
+            let _ = label;
+        }
+    }
+
+    #[test]
+    fn checkpoint_shape_mismatch_still_deserializes_for_inspection() {
+        // Decode must succeed; only `step` rejects. This mirrors the
+        // exhausted-counter contract for the shape defect.
+        let base = SpikingNetwork::with_dimensions(4, 1, 4);
+        for (_label, edit, _expected) in shape_mismatch_cases() {
+            let restored = restored_with_json_edit(&base, |o| edit(o));
+            // The malformed vector is readable — the network was loaded, not
+            // rejected on the way in.
+            assert!(
+                restored.predictive_state.len() != restored.num_channels
+                    || restored.input_spike_times.len() != restored.num_channels,
+                "fixture must actually be malformed"
+            );
+        }
+    }
+
+    #[test]
+    fn checkpoint_shape_predictive_state_checked_before_input_spike_times() {
+        // Both vectors malformed at once: `predictive_state` is scanned first,
+        // so it is the reported field.
+        let base = SpikingNetwork::with_dimensions(4, 1, 4);
+        let mut restored = restored_with_json_edit(&base, |o| {
+            set_f32_array_len(o, "predictive_state", 2);
+            set_i64_array_len(o, "input_spike_times", 7);
+        });
+
+        let err = restored
+            .step(&[1.0; 4], &NeuroModulators::default())
+            .expect_err("both vectors malformed");
+        assert_eq!(
+            err,
+            StepError::CheckpointShapeMismatch {
+                field: ChannelVector::PredictiveState,
+                expected: 4,
+                got: 2,
+            }
+        );
+    }
+
+    #[test]
+    fn checkpoint_shape_stimulus_length_mismatch_takes_precedence() {
+        // A wrong-length stimulus is a caller error and is reported before the
+        // stored shape is even consulted.
+        let base = SpikingNetwork::with_dimensions(4, 1, 4);
+        let mut network =
+            restored_with_json_edit(&base, |o| set_f32_array_len(o, "predictive_state", 3));
+        let before = capture_network(&network);
+
+        let err = network
+            .step(&[1.0; 2], &NeuroModulators::default())
+            .expect_err("stimulus length mismatch");
+        assert_eq!(
+            err,
+            StepError::InputLenMismatch {
+                expected: 4,
+                got: 2,
+            }
+        );
+        assert_network_unchanged(&network, &before);
+    }
+
+    #[test]
+    fn checkpoint_shape_non_finite_input_takes_precedence() {
+        let base = SpikingNetwork::with_dimensions(4, 1, 4);
+
+        // Non-finite stimulus beats the shape check.
+        let mut on_stimulus =
+            restored_with_json_edit(&base, |o| set_f32_array_len(o, "predictive_state", 3));
+        let before = capture_network(&on_stimulus);
+        let mut stimuli = [1.0_f32; 4];
+        stimuli[2] = f32::INFINITY;
+        assert_eq!(
+            on_stimulus.step(&stimuli, &NeuroModulators::default()),
+            Err(StepError::NonFiniteStimulus {
+                index: 2,
+                class: NonFiniteClass::PosInfinity,
+            })
+        );
+        assert_network_unchanged(&on_stimulus, &before);
+
+        // Non-finite modulator beats the shape check too.
+        let mut on_modulator =
+            restored_with_json_edit(&base, |o| set_i64_array_len(o, "input_spike_times", 5));
+        let before = capture_network(&on_modulator);
+        let bad_mods = NeuroModulators {
+            serotonin: f32::NAN,
+            ..Default::default()
+        };
+        assert_eq!(
+            on_modulator.step(&[1.0; 4], &bad_mods),
+            Err(StepError::NonFiniteModulator {
+                field: ModulatorField::Serotonin,
+                class: NonFiniteClass::Nan,
+            })
+        );
+        assert_network_unchanged(&on_modulator, &before);
+    }
+
+    #[test]
+    fn checkpoint_shape_check_precedes_counter_check() {
+        // The shape preflight sits immediately before the counter check, so a
+        // checkpoint that is both malformed *and* has an exhausted or negative
+        // counter reports the shape mismatch first. Either way the malformed
+        // state is untouched and no RNG is drawn.
+        let base = SpikingNetwork::with_dimensions(4, 1, 4);
+        for bad in [i64::MAX, -1_i64] {
+            let mut network = restored_with_json_edit(&base, |o| {
+                set_f32_array_len(o, "predictive_state", 3);
+                o.insert("global_step".to_owned(), serde_json::json!(bad));
+            });
+            let before = capture_network(&network);
+            let mut rng = StdRng::seed_from_u64(0x5EED_1363);
+            let mut fresh = StdRng::seed_from_u64(0x5EED_1363);
+
+            let err = network
+                .step_with_rng(&[1.0; 4], &NeuroModulators::default(), &mut rng)
+                .expect_err("malformed shape with a spent counter");
+            assert_eq!(
+                err,
+                StepError::CheckpointShapeMismatch {
+                    field: ChannelVector::PredictiveState,
+                    expected: 4,
+                    got: 3,
+                },
+                "shape check runs before the counter check (global_step={bad})"
+            );
+            assert_network_unchanged(&network, &before);
+            assert_eq!(rng.next_u64(), fresh.next_u64());
+        }
+    }
+
+    #[test]
+    fn checkpoint_shape_valid_shape_still_reports_spent_counter() {
+        // A well-shaped checkpoint whose counter is exhausted or negative still
+        // reports `StepCounterExhausted` — the shape check passes and the
+        // counter check that follows it fires. This guards that adding the
+        // shape preflight did not swallow the counter contract.
+        let base = SpikingNetwork::with_dimensions(4, 1, 4);
+        for bad in [i64::MAX, -1_i64] {
+            let mut network = restored_with_json_edit(&base, |o| {
+                o.insert("global_step".to_owned(), serde_json::json!(bad));
+            });
+            let before = capture_network(&network);
+            let mut rng = StdRng::seed_from_u64(0x5EED_1363);
+            let mut fresh = StdRng::seed_from_u64(0x5EED_1363);
+
+            let err = network
+                .step_with_rng(&[1.0; 4], &NeuroModulators::default(), &mut rng)
+                .expect_err("exhausted or negative counter");
+            assert_eq!(err, StepError::StepCounterExhausted { global_step: bad });
+            assert_network_unchanged(&network, &before);
+            assert_eq!(rng.next_u64(), fresh.next_u64());
+        }
+    }
+
+    #[test]
+    fn checkpoint_shape_valid_restore_then_step_succeeds() {
+        // A well-formed current-network round-trip must still step cleanly,
+        // proving the preflight does not reject legitimate checkpoints.
+        let base = SpikingNetwork::with_dimensions(4, 1, 4);
+        let mut restored: SpikingNetwork =
+            serde_json::from_value(serde_json::to_value(&base).expect("serializes"))
+                .expect("round-trip");
+        let mut rng = StdRng::seed_from_u64(0x5EED_1363);
+
+        let spikes = restored
+            .step_with_rng(&[1.0; 4], &NeuroModulators::default(), &mut rng)
+            .expect("valid restored network must step");
+        assert!(spikes.iter().all(|&i| i < 4));
+        assert_eq!(restored.global_step, 1);
     }
 }

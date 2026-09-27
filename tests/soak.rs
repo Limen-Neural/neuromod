@@ -50,6 +50,16 @@ fn linux_rss_kib() -> Option<u64> {
     })
 }
 
+fn assert_l1_budget(network: &SpikingNetwork) {
+    for (index, neuron) in network.neurons.iter().enumerate() {
+        let l1: f32 = neuron.weights.iter().map(|weight| weight.abs()).sum();
+        assert!(
+            (l1 - WEIGHT_BUDGET).abs() <= L1_EPSILON,
+            "neuron {index} L1 sum {l1} exceeded budget epsilon {L1_EPSILON}"
+        );
+    }
+}
+
 fn assert_engine_soak_result(
     network: &SpikingNetwork,
     no_learning_control: &SpikingNetwork,
@@ -93,13 +103,7 @@ fn assert_engine_soak_result(
         "rewarded soak must diverge from the same-seed, zero-learning-rate control"
     );
 
-    for (index, neuron) in network.neurons.iter().enumerate() {
-        let l1: f32 = neuron.weights.iter().map(|weight| weight.abs()).sum();
-        assert!(
-            (l1 - WEIGHT_BUDGET).abs() <= L1_EPSILON,
-            "neuron {index} L1 sum {l1} exceeded budget epsilon {L1_EPSILON}"
-        );
-    }
+    assert_l1_budget(network);
 }
 
 fn run_engine_soak(steps: usize) {
@@ -133,6 +137,7 @@ fn run_engine_soak(steps: usize) {
         network
             .step_with_rng(&stimuli, &modulators, &mut rng)
             .expect("fixed-width finite inputs must step");
+        assert_l1_budget(&network);
         no_learning_control
             .step_with_rng(&stimuli, &modulators, &mut control_rng)
             .expect("fixed-width finite inputs must step");

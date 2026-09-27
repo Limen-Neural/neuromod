@@ -98,8 +98,8 @@ They assert exact counters and finite numeric state. The engine test starts with
 off-budget nonzero weights and compares rewarded stepping against a same-seed
 control with reward learning disabled. This separates learning from the
 normalization both runs perform. It also checks the documented default-bounds
-precedence contract by requiring each neuron's weight L1 sum to remain within
-`1e-4` of the `2.0` budget.
+precedence contract after every returned engine step by requiring each neuron's
+weight L1 sum to remain within `1e-4` of the `2.0` budget.
 
 The capacity checks cover persistent allocations only. For `SpikingNetwork`
 these are both neuron banks, input spike times, predictive state, and every LIF
@@ -116,7 +116,7 @@ Illustrative local runtimes with rustc 1.98.1 in the repository dev profile
 
 | Variant | 10,000 steps | 1,000,000 steps |
 | --- | ---: | ---: |
-| `SpikingNetwork` | 53 ms | 5.35 s |
+| `SpikingNetwork` | 57 ms | 5.50 s |
 | `SparseGifHiddenLayer` | 1.59 ms | 110 ms |
 
 These correctness tests are distinct from `benches/memory_bench.rs`: that

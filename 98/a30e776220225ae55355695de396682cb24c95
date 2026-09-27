@@ -1,21 +1,7 @@
-REVIEW.md
-  s_1759040288d0f3::t_dd3ccb1ac03821 98-102,114-115,119
-tests/soak.rs
-  s_1759040288d0f3::t_1e04aa939d68f6 55-57,59-62,73,84-86,130-132
 ---
 {
   "schema_version": "authorship/3.0.0",
   "git_ai_version": "1.5.2",
   "base_commit_sha": "98a30e776220225ae55355695de396682cb24c95",
-  "prompts": {},
-  "sessions": {
-    "s_1759040288d0f3": {
-      "agent_id": {
-        "tool": "codex",
-        "id": "01a0e4c2-4ca6-7d62-a95a-fa83229e266a",
-        "model": "gpt-6-sol"
-      },
-      "human_author": "Raul Cardenas Montoya <montoyaraul34@gmail.com>"
-    }
-  }
+  "prompts": {}
 }

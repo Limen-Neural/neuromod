@@ -50,6 +50,58 @@ fn linux_rss_kib() -> Option<u64> {
     })
 }
 
+fn assert_engine_soak_result(
+    network: &SpikingNetwork,
+    no_learning_control: &SpikingNetwork,
+    initial_capacities: &EngineCapacities,
+    steps: usize,
+) {
+    assert_eq!(network.global_step, steps as i64);
+    assert_eq!(&EngineCapacities::capture(network), initial_capacities);
+    assert!(
+        network
+            .predictive_state
+            .iter()
+            .all(|value| value.is_finite())
+    );
+    assert!(network.neurons.iter().all(|neuron| {
+        neuron.membrane_potential.is_finite()
+            && neuron.decay_rate.is_finite()
+            && neuron.threshold.is_finite()
+            && neuron.base_threshold.is_finite()
+            && neuron.weights.iter().all(|weight| weight.is_finite())
+            && neuron
+                .eligibility
+                .iter()
+                .all(|trace| trace.value.is_finite() && trace.tau.is_finite())
+    }));
+    assert!(network.iz_neurons.iter().all(|neuron| {
+        neuron.v.is_finite()
+            && neuron.u.is_finite()
+            && neuron.a.is_finite()
+            && neuron.b.is_finite()
+            && neuron.c.is_finite()
+            && neuron.d.is_finite()
+    }));
+
+    assert!(
+        network
+            .neurons
+            .iter()
+            .zip(&no_learning_control.neurons)
+            .any(|(rewarded, control)| rewarded.weights != control.weights),
+        "rewarded soak must diverge from the same-seed, zero-learning-rate control"
+    );
+
+    for (index, neuron) in network.neurons.iter().enumerate() {
+        let l1: f32 = neuron.weights.iter().map(|weight| weight.abs()).sum();
+        assert!(
+            (l1 - WEIGHT_BUDGET).abs() <= L1_EPSILON,
+            "neuron {index} L1 sum {l1} exceeded budget epsilon {L1_EPSILON}"
+        );
+    }
+}
+
 fn run_engine_soak(steps: usize) {
     let mut network = SpikingNetwork::with_dimensions(LIF_NEURONS, IZH_NEURONS, CHANNELS);
     let mut no_learning_control =
@@ -95,50 +147,7 @@ fn run_engine_soak(steps: usize) {
         );
     }
 
-    assert_eq!(network.global_step, steps as i64);
-    assert_eq!(EngineCapacities::capture(&network), initial_capacities);
-    assert!(
-        network
-            .predictive_state
-            .iter()
-            .all(|value| value.is_finite())
-    );
-    assert!(network.neurons.iter().all(|neuron| {
-        neuron.membrane_potential.is_finite()
-            && neuron.decay_rate.is_finite()
-            && neuron.threshold.is_finite()
-            && neuron.base_threshold.is_finite()
-            && neuron.weights.iter().all(|weight| weight.is_finite())
-            && neuron
-                .eligibility
-                .iter()
-                .all(|trace| trace.value.is_finite() && trace.tau.is_finite())
-    }));
-    assert!(network.iz_neurons.iter().all(|neuron| {
-        neuron.v.is_finite()
-            && neuron.u.is_finite()
-            && neuron.a.is_finite()
-            && neuron.b.is_finite()
-            && neuron.c.is_finite()
-            && neuron.d.is_finite()
-    }));
-
-    assert!(
-        network
-            .neurons
-            .iter()
-            .zip(&no_learning_control.neurons)
-            .any(|(rewarded, control)| rewarded.weights != control.weights),
-        "rewarded soak must diverge from the same-seed, zero-learning-rate control"
-    );
-
-    for (index, neuron) in network.neurons.iter().enumerate() {
-        let l1: f32 = neuron.weights.iter().map(|weight| weight.abs()).sum();
-        assert!(
-            (l1 - WEIGHT_BUDGET).abs() <= L1_EPSILON,
-            "neuron {index} L1 sum {l1} exceeded budget epsilon {L1_EPSILON}"
-        );
-    }
+    assert_engine_soak_result(&network, &no_learning_control, &initial_capacities, steps);
 }
 
 #[test]

@@ -95,9 +95,11 @@ cargo test soak -- --ignored --nocapture
 
 Both variants use fixed topology and deterministic binary (`0` or `1`) inputs.
 They assert exact counters and finite numeric state. The engine test starts with
-nonzero weights, exercises reward-modulated learning and normalization, and
-checks the documented default-bounds precedence contract by requiring each
-neuron's weight L1 sum to remain within `1e-4` of the `2.0` budget.
+off-budget nonzero weights and compares rewarded stepping against a same-seed
+control with reward learning disabled. This separates learning from the
+normalization both runs perform. It also checks the documented default-bounds
+precedence contract by requiring each neuron's weight L1 sum to remain within
+`1e-4` of the `2.0` budget.
 
 The capacity checks cover persistent allocations only. For `SpikingNetwork`
 these are both neuron banks, input spike times, predictive state, and every LIF
@@ -109,11 +111,12 @@ On Linux, `NEUROMOD_SOAK_RSS=1 cargo test soak -- --ignored --nocapture` prints
 best-effort `/proc/self/status` RSS samples. RSS is diagnostic only and is never
 asserted because allocator and operating-system behavior is not portable.
 
-Recorded locally on 2026-09-22 with rustc 1.98.1 in the repository dev profile:
+Illustrative local runtimes with rustc 1.98.1 in the repository dev profile
+(engine with paired control recorded 2026-09-27; sparse GIF recorded 2026-09-22):
 
 | Variant | 10,000 steps | 1,000,000 steps |
 | --- | ---: | ---: |
-| `SpikingNetwork` | 69 ms | 7.15 s |
+| `SpikingNetwork` | 53 ms | 5.35 s |
 | `SparseGifHiddenLayer` | 1.59 ms | 110 ms |
 
 These correctness tests are distinct from `benches/memory_bench.rs`: that

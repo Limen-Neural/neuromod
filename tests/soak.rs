@@ -52,16 +52,15 @@ fn linux_rss_kib() -> Option<u64> {
 
 fn run_engine_soak(steps: usize) {
     let mut network = SpikingNetwork::with_dimensions(LIF_NEURONS, IZH_NEURONS, CHANNELS);
+    let mut no_learning_control =
+        SpikingNetwork::with_dimensions(LIF_NEURONS, IZH_NEURONS, CHANNELS);
+    no_learning_control.stdp_config.reward_lr = 0.0;
     // Start far above L1 budget so a no-op normalize path cannot vacuously pass.
-    // (Zeros stay zeros under reward updates in this harness.)
-    for neuron in &mut network.neurons {
-        neuron.weights.fill(1.0);
+    for candidate in [&mut network, &mut no_learning_control] {
+        for neuron in &mut candidate.neurons {
+            neuron.weights.fill(1.0);
+        }
     }
-    let initial_weights: Vec<Vec<f32>> = network
-        .neurons
-        .iter()
-        .map(|neuron| neuron.weights.clone())
-        .collect();
 
     let initial_capacities = EngineCapacities::capture(&network);
     let report_rss = std::env::var_os("NEUROMOD_SOAK_RSS").is_some();
@@ -71,6 +70,7 @@ fn run_engine_soak(steps: usize) {
         ..NeuroModulators::default()
     };
     let mut rng = StdRng::seed_from_u64(0x5A17_1338);
+    let mut control_rng = StdRng::seed_from_u64(0x5A17_1338);
     let mut stimuli = [0.0; CHANNELS];
     let started = Instant::now();
 
@@ -80,6 +80,9 @@ fn run_engine_soak(steps: usize) {
         }
         network
             .step_with_rng(&stimuli, &modulators, &mut rng)
+            .expect("fixed-width finite inputs must step");
+        no_learning_control
+            .step_with_rng(&stimuli, &modulators, &mut control_rng)
             .expect("fixed-width finite inputs must step");
     }
 
@@ -124,9 +127,9 @@ fn run_engine_soak(steps: usize) {
         network
             .neurons
             .iter()
-            .zip(initial_weights.iter())
-            .any(|(neuron, before)| neuron.weights.as_slice() != before.as_slice()),
-        "rewarded soak must change at least one weight (non-vacuous learning path)"
+            .zip(&no_learning_control.neurons)
+            .any(|(rewarded, control)| rewarded.weights != control.weights),
+        "rewarded soak must diverge from the same-seed, zero-learning-rate control"
     );
 
     for (index, neuron) in network.neurons.iter().enumerate() {

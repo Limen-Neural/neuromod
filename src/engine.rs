@@ -3170,42 +3170,38 @@ mod tests {
     /// 4-wide stimulus below) except the last case, which changes the count
     /// itself so the untouched channel vectors are the ones that mismatch.
     fn shape_mismatch_cases() -> Vec<ShapeMismatchCase> {
+        let mismatch = |field, expected, got| StepError::CheckpointShapeMismatch {
+            field,
+            expected,
+            got,
+        };
+        let f32_len = |key: &'static str, len: usize| -> ShapeEdit {
+            Box::new(move |o| set_f32_array_len(o, key, len))
+        };
+        let i64_len = |key: &'static str, len: usize| -> ShapeEdit {
+            Box::new(move |o| set_i64_array_len(o, key, len))
+        };
+        use ChannelVector::{InputSpikeTimes, PredictiveState};
         vec![
             (
                 "predictive_state short",
-                Box::new(|o| set_f32_array_len(o, "predictive_state", 3)),
-                StepError::CheckpointShapeMismatch {
-                    field: ChannelVector::PredictiveState,
-                    expected: 4,
-                    got: 3,
-                },
+                f32_len("predictive_state", 3),
+                mismatch(PredictiveState, 4, 3),
             ),
             (
                 "predictive_state long",
-                Box::new(|o| set_f32_array_len(o, "predictive_state", 5)),
-                StepError::CheckpointShapeMismatch {
-                    field: ChannelVector::PredictiveState,
-                    expected: 4,
-                    got: 5,
-                },
+                f32_len("predictive_state", 5),
+                mismatch(PredictiveState, 4, 5),
             ),
             (
                 "input_spike_times short",
-                Box::new(|o| set_i64_array_len(o, "input_spike_times", 3)),
-                StepError::CheckpointShapeMismatch {
-                    field: ChannelVector::InputSpikeTimes,
-                    expected: 4,
-                    got: 3,
-                },
+                i64_len("input_spike_times", 3),
+                mismatch(InputSpikeTimes, 4, 3),
             ),
             (
                 "input_spike_times long",
-                Box::new(|o| set_i64_array_len(o, "input_spike_times", 5)),
-                StepError::CheckpointShapeMismatch {
-                    field: ChannelVector::InputSpikeTimes,
-                    expected: 4,
-                    got: 5,
-                },
+                i64_len("input_spike_times", 5),
+                mismatch(InputSpikeTimes, 4, 5),
             ),
             (
                 // Change only the declared channel count. Both stored vectors
@@ -3215,11 +3211,7 @@ mod tests {
                 Box::new(|o| {
                     o.insert("num_channels".to_owned(), serde_json::json!(6_usize));
                 }),
-                StepError::CheckpointShapeMismatch {
-                    field: ChannelVector::PredictiveState,
-                    expected: 6,
-                    got: 4,
-                },
+                mismatch(PredictiveState, 6, 4),
             ),
         ]
     }

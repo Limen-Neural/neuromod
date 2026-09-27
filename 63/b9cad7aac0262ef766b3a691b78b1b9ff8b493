@@ -1,7 +1,5 @@
 tests/soak.rs
-  s_1759040288d0f3::t_c9754eaae5fcc9 53-62,106,140
-REVIEW.md
-  s_1759040288d0f3::t_206228dc04b17c 101-102,119
+  s_1759040288d0f3::t_7505fab7a2f870 54-62,106
 ---
 {
   "schema_version": "authorship/3.0.0",

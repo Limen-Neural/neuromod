@@ -4,6 +4,8 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-09-27
+
 ### Changed
 
 - **`StepError` gained `CheckpointShapeMismatch`** and the crate re-exports the new

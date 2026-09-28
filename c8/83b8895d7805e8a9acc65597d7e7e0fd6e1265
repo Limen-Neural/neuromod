@@ -1,0 +1,34 @@
+.github/workflows/ci.yml
+  s_0ce4ccefb29d9e::t_85a8ab877ad39f 78-92
+.gitattributes
+  s_0ce4ccefb29d9e::t_85a8ab877ad39f 1
+tests/reference/corinth_gif/src/sha256.rs
+  s_0ce4ccefb29d9e::t_ad1109c37506c6 1,3-5,14-26,30-79,83-85,105-108
+  s_0ce4ccefb29d9e::t_398193616e8ace 2,6-13,27-29,80-82
+  s_0ce4ccefb29d9e::t_9ce81212a396d1 86-104,109-111
+tests/reference/corinth_gif/Cargo.toml
+  s_0ce4ccefb29d9e::t_85a8ab877ad39f 12-14
+tests/reference/corinth_gif/src/main.rs
+  s_0ce4ccefb29d9e::t_85a8ab877ad39f 22-24
+  s_0ce4ccefb29d9e::t_aa0237196b20d5 28
+  s_0ce4ccefb29d9e::t_3d0242205a87f2 32
+  s_0ce4ccefb29d9e::t_a0cf0b2043dca2 139
+tests/reference/corinth_gif_parity.NOTICE.md
+  s_0ce4ccefb29d9e::t_aa0237196b20d5 174,177-179,190-192,211-215
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "c883b8895d7805e8a9acc65597d7e7e0fd6e1265",
+  "prompts": {},
+  "sessions": {
+    "s_0ce4ccefb29d9e": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a0e88e-21ca-7c52-be66-5827c1222397",
+        "model": "gpt-6-luna"
+      },
+      "human_author": "Raul Cardenas Montoya <montoyaraul34@gmail.com>"
+    }
+  }
+}

@@ -1,0 +1,23 @@
+.codescene/code-health-rules.json
+  s_0ce4ccefb29d9e::t_39e2f0f57a2696 1-12
+tests/reference/corinth_gif_parity.NOTICE.md
+  s_0ce4ccefb29d9e::t_46057b9f0e9602 227-228,232-242
+Cargo.toml
+  s_0ce4ccefb29d9e::t_39e2f0f57a2696 13
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "35554a516a2a392bf4ec199282e1069e25855eb3",
+  "prompts": {},
+  "sessions": {
+    "s_0ce4ccefb29d9e": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a0e88e-21ca-7c52-be66-5827c1222397",
+        "model": "gpt-6-sol"
+      },
+      "human_author": "Raul Cardenas Montoya <montoyaraul34@gmail.com>"
+    }
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "rule_sets": [
+    {
+      "matching_content_path": "tests/reference/corinth_gif/src/funnel_vendored.rs",
+      "matching_content_path_doc": "This file preserves the pinned Corinth implementation verbatim; its control flow cannot be refactored without breaking the provenance check. All other files use the default rules.",
+      "rules": [
+        { "name": "Bumpy Road Ahead", "weight": 0.0 },
+        { "name": "Deep, Nested Complexity", "weight": 0.0 }
+      ]
+    }
+  ]
+}

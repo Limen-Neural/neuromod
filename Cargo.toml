@@ -10,6 +10,7 @@ exclude = [
     ".gitignore",
     "docs/",
     ".cubic/",
+    ".codescene/",
     ".github/",
     ".devcontainer/",
     ".devin/",

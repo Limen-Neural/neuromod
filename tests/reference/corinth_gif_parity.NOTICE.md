@@ -224,19 +224,19 @@ arithmetic is a faithful excerpt of them.
 dev tool whose whole purpose is to vendor a **byte-/arithmetic-identical** copy
 of the pinned upstream `funnel.rs` (`funnel_vendored.rs`). That byte identity is
 the provenance guarantee, so the vendored copy must never be restructured to
-satisfy a complexity or duplication metric. The directory is therefore excluded
-from the repository's static-analysis tools that support in-repo exclusion:
+satisfy a complexity or duplication metric. The repository records these
+analysis boundaries:
 
 - **Codacy** — added to `exclude_paths` in `.codacy.yml`.
 - **DeepSource** — added to `exclude_patterns` in `.deepsource.toml`.
+- **CodeScene** — `.codescene/code-health-rules.json` disables only the
+  `Bumpy Road Ahead` and `Deep, Nested Complexity` rules for the exact
+  `tests/reference/corinth_gif/src/funnel_vendored.rs` path. Those findings
+  describe the unchanged upstream control flow in `new()` and `run()`. All
+  other files and rules keep their normal CodeScene checks.
 
-**CodeScene** has no documented in-repo file that excludes content from
-analysis; its file/content exclusion is a project-level (dashboard) setting
-("Specify the content to exclude from your analysis"). Rather than commit a
-config file that would silently do nothing, the exclusion of
-`tests/reference/corinth_gif/` from CodeScene must be applied maintainer-side in
-the CodeScene project configuration. Until then, the remaining CodeScene "Code
-Health" flags on `funnel_vendored.rs` (`SparseGifHiddenLayer::new`/`run`: Bumpy
-Road / Deep Nested Complexity) are inherent to the verbatim vendored upstream
-copy and cannot be resolved in-repo without breaking the provenance guarantee;
-they require a maintainer-side CodeScene suppression, not a code change.
+CodeScene documents path-specific rule sets in
+[`code-health-rules.json`](https://codescene.io/docs/guides/technical/code-health.html#customize-the-code-health-rules-via-json),
+including their use in pull-request quality gates. This exception is scoped to
+the pinned vendor file and can be removed if that upstream dependency is no
+longer compiled by the generator.

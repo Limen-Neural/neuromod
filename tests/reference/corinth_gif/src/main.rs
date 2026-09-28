@@ -4,9 +4,10 @@
 //
 // Before emitting anything, it self-verifies the vendored dynamics against the
 // pinned upstream `funnel.rs` (SHA-256 of an embedded verbatim copy must equal
-// the recorded provenance hash, and the vendored arithmetic regions must appear
-// in that verified upstream text). It panics with a nonzero exit on any drift,
-// so a stale or mismatched provenance stamp can never reach the fixture.
+// the recorded provenance hash, and the COMPLETE `new()`/`run()` bodies
+// extracted from that verified upstream text must appear character-for-character
+// in the vendored source). It panics with a nonzero exit on any drift, so a
+// stale or mismatched provenance stamp can never reach the fixture.
 //
 // It then runs the audited 512-step x 2048-neuron case through the UNMODIFIED
 // `SparseGifHiddenLayer::run` dynamics vendored (arithmetic-identical) from the
@@ -123,16 +124,20 @@ fn selected_steps() -> Vec<usize> {
 ///     live in `funnel_vendored.rs`, which is an arithmetic-identical excerpt
 ///     of that upstream file plus local, non-arithmetic additions (SPDX header,
 ///     read-only accessors, `pub const`). We cannot hash it to the upstream
-///     SHA, so instead we assert that the exact source region it vendors — the
-///     `new()` and `run()` bodies — appears character-for-character inside the
-///     verified upstream text. If the vendored arithmetic ever drifts from the
-///     pinned source, this substring check fails.
+///     SHA, so instead we extract the COMPLETE `new()` and `run()` function
+///     bodies (the contiguous source spans that carry the audited GIF
+///     dynamics) out of the SHA-verified upstream text and assert each appears
+///     character-for-character inside `funnel_vendored.rs`. Because the
+///     upstream text is already proven authentic by check (1), proving the
+///     vendored file contains those full bodies verbatim establishes that every
+///     character of the vendored audited arithmetic came from the pinned
+///     upstream, not just a couple of hand-picked anchor lines.
 ///
 /// What this does NOT guarantee: it does not re-run upstream Corinth (that
-/// pulls in CUDA/sentry/rustls and is not offline-viable), and the substring
-/// check trusts that the extracted `new()`/`run()` regions are the whole of the
-/// audited dynamics path (the accessors and dropped `reset`/`state_activity`
-/// are provably non-arithmetic; see `corinth_gif_parity.NOTICE.md`).
+/// pulls in CUDA/sentry/rustls and is not offline-viable), and it trusts that
+/// `new()` and `run()` are the whole of the audited dynamics path (the
+/// accessors and dropped `reset`/`state_activity` are provably non-arithmetic;
+/// see `corinth_gif_parity.NOTICE.md`).
 fn verify_vendored_against_pinned_upstream() {
     // (1) Upstream identity.
     let digest = Sha256::digest(UPSTREAM_FUNNEL_RS.as_bytes());
@@ -146,37 +151,77 @@ fn verify_vendored_against_pinned_upstream() {
          hash unless the pinned commit itself is being re-audited."
     );
 
-    // (2) Vendored fidelity: the arithmetic-bearing regions the generator runs
-    // must be present verbatim in the verified upstream source. These anchors
-    // are the exact `new()` and `run()` signatures plus their shared body
-    // hallmarks; a change to the vendored arithmetic breaks at least one.
+    // (2) Vendored fidelity: the COMPLETE audited-arithmetic bodies the
+    // generator runs (`new()` and `run()`) must be present verbatim in the
+    // vendored file. We pull each full body out of the SHA-verified upstream
+    // text (check 1) and require the vendored copy to contain it
+    // character-for-character. This validates the entire body, not just a
+    // couple of anchor lines, so arithmetic anywhere inside `new()`/`run()`
+    // cannot drift from the pinned upstream undetected.
     const VENDORED_SOURCE: &str = include_str!("funnel_vendored.rs");
-    for region in required_vendored_regions() {
-        assert!(
-            VENDORED_SOURCE.contains(region),
-            "vendored funnel_vendored.rs is missing an expected dynamics region; \
-             its arithmetic may have drifted from the pinned upstream:\n{region}"
-        );
-        assert!(
-            UPSTREAM_FUNNEL_RS.contains(region),
-            "dynamics region present in funnel_vendored.rs is NOT in the verified \
-             pinned upstream funnel.rs; the vendored arithmetic has drifted from \
-             the pinned source:\n{region}"
-        );
-    }
+
+    let new_body = extract_impl_fn_body(UPSTREAM_FUNNEL_RS, "pub fn new() -> Self {")
+        .expect("could not locate the SparseGifHiddenLayer::new() body in the verified upstream");
+    let run_body = extract_impl_fn_body(UPSTREAM_FUNNEL_RS, "pub fn run(")
+        .expect("could not locate the SparseGifHiddenLayer::run() body in the verified upstream");
+
+    assert!(
+        VENDORED_SOURCE.contains(new_body),
+        "vendored funnel_vendored.rs does NOT contain the complete new() body from \
+         the SHA-verified pinned upstream funnel.rs; the vendored new() arithmetic \
+         has drifted from the pinned source. Expected verbatim body:\n{new_body}"
+    );
+    assert!(
+        VENDORED_SOURCE.contains(run_body),
+        "vendored funnel_vendored.rs does NOT contain the complete run() body from \
+         the SHA-verified pinned upstream funnel.rs; the vendored run() arithmetic \
+         has drifted from the pinned source. Expected verbatim body:\n{run_body}"
+    );
 }
 
-/// The contiguous source regions that carry the audited GIF arithmetic. Each
-/// must appear character-for-character in both the vendored excerpt and the
-/// SHA-verified upstream file. They deliberately exclude the local-only
-/// additions (SPDX header, accessors) that make byte-identity impossible.
-fn required_vendored_regions() -> [&'static str; 2] {
-    [
-        // The `new()` topology-generation body (cursor walk + weight rule).
-        "let tuned_negative = hidden % 2 == 1;\n            let mut indices = [0usize; GIF_FAN_IN];\n            let mut values = [0.0f32; GIF_FAN_IN];\n            let mut cursor = (hidden * 11 + 3) % FUNNEL_INPUT_NEURONS;",
-        // The `run()` per-step integrate / threshold / soft-reset arithmetic.
-        "self.membrane[hidden] = self.membrane[hidden] * self.leak\n                    + drive * self.drive_scale\n                    - self.adaptation[hidden] * 0.05;",
-    ]
+/// Extract the full balanced-brace body of the `SparseGifHiddenLayer` method
+/// whose signature starts with `signature`, out of `source`.
+///
+/// The returned span runs from the opening `{` of the body through its matching
+/// closing `}` (inclusive), so it covers the ENTIRE function body. This is a
+/// deterministic brace-depth scan over the `&str`, not a full Rust parser: it
+/// counts `{`/`}` from the first `{` after the signature until depth returns to
+/// zero. The audited dynamics contain no braces inside string or char literals,
+/// so a plain depth count is exact for this source.
+///
+/// `signature` is anchored WITHIN the `impl SparseGifHiddenLayer` block, so an
+/// identically named method on another type in the same file (e.g.
+/// `SignedSplitBankBridge::new`) is not matched.
+fn extract_impl_fn_body<'a>(source: &'a str, signature: &str) -> Option<&'a str> {
+    // Anchor the search inside the SparseGifHiddenLayer impl so a same-named
+    // method on another struct in the file is never picked up.
+    let impl_start = source.find("impl SparseGifHiddenLayer {")?;
+    let region = &source[impl_start..];
+
+    let sig_at = region.find(signature)?;
+    // First `{` at or after the signature opens the body (for `run(`, this is
+    // the `{` after the return type, which is the first brace following the
+    // signature text).
+    let body_open = region[sig_at..].find('{')? + sig_at;
+
+    let bytes = region.as_bytes();
+    let mut depth = 0usize;
+    let mut i = body_open;
+    while i < bytes.len() {
+        match bytes[i] {
+            b'{' => depth += 1,
+            b'}' => {
+                depth -= 1;
+                if depth == 0 {
+                    // Inclusive of the closing brace.
+                    return Some(&region[body_open..=i]);
+                }
+            }
+            _ => {}
+        }
+        i += 1;
+    }
+    None
 }
 
 /// Lowercase hex encoding of a byte digest (no external hex crate needed).

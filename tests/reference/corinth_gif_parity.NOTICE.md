@@ -194,10 +194,17 @@ drift:
    never edit the recorded hash unless the pinned commit is being re-audited.
 2. **Vendored fidelity.** Because `funnel_vendored.rs` carries local, non-
    arithmetic additions (SPDX header, read-only accessors, `pub const`), it
-   cannot reproduce that whole-file hash. The generator instead asserts that the
-   exact `new()`/`run()` arithmetic regions it runs appear character-for-
-   character inside the SHA-verified upstream text, so a drift in the vendored
-   arithmetic is caught even though the vendored file is not byte-identical.
+   cannot reproduce that whole-file hash. The generator instead extracts the
+   **complete** `new()` and `run()` function bodies (the contiguous source spans
+   that carry the audited GIF arithmetic) out of the SHA-verified upstream text
+   (via a deterministic balanced-brace scan anchored inside the
+   `impl SparseGifHiddenLayer` block) and asserts each full body appears
+   character-for-character inside `funnel_vendored.rs`. Because the upstream text
+   is already proven authentic by check (1), proving the vendored file contains
+   those full bodies verbatim establishes that every character of the vendored
+   audited arithmetic came from the pinned upstream. Any drift anywhere inside
+   `new()`/`run()`, not just at a couple of anchor lines, is therefore caught
+   even though the vendored file is not byte-identical to the whole upstream.
 
 This is why the generator now depends on `sha2` in addition to `serde_json`.
 Both are tiny and offline-resolvable, and the crate remains workspace- and

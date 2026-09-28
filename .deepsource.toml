@@ -2,6 +2,10 @@ version = 1
 
 exclude_patterns = [
   "README.md",
+  # Standalone parity-fixture generator vendoring a byte-identical copy of the
+  # pinned upstream corinth-canal funnel.rs; it is dev-only, workspace/package
+  # excluded, and must not be restructured (see .codacy.yml for rationale).
+  "tests/reference/corinth_gif/**",
 ]
 
 [[analyzers]]

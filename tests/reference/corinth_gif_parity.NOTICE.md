@@ -212,3 +212,26 @@ package-excluded, so neuromod never compiles `sha2` and it is never shipped in
 the published crate. The check does **not** re-run upstream Corinth (which pulls
 in CUDA/`sentry`/`rustls` and is not offline-viable); it verifies the pinned
 bytes and that the vendored arithmetic is a faithful excerpt of them.
+
+## Static analysis scope
+
+`tests/reference/corinth_gif/` is a standalone, workspace- and package-excluded
+dev tool whose whole purpose is to vendor a **byte-/arithmetic-identical** copy
+of the pinned upstream `funnel.rs` (`funnel_vendored.rs`). That byte identity is
+the provenance guarantee, so the vendored copy must never be restructured to
+satisfy a complexity or duplication metric. The directory is therefore excluded
+from the repository's static-analysis tools that support in-repo exclusion:
+
+- **Codacy** — added to `exclude_paths` in `.codacy.yml`.
+- **DeepSource** — added to `exclude_patterns` in `.deepsource.toml`.
+
+**CodeScene** has no documented in-repo file that excludes content from
+analysis; its file/content exclusion is a project-level (dashboard) setting
+("Specify the content to exclude from your analysis"). Rather than commit a
+config file that would silently do nothing, the exclusion of
+`tests/reference/corinth_gif/` from CodeScene must be applied maintainer-side in
+the CodeScene project configuration. Until then, the remaining CodeScene "Code
+Health" flags on `funnel_vendored.rs` (`SparseGifHiddenLayer::new`/`run`: Bumpy
+Road / Deep Nested Complexity) are inherent to the verbatim vendored upstream
+copy and cannot be resolved in-repo without breaking the provenance guarantee;
+they require a maintainer-side CodeScene suppression, not a code change.

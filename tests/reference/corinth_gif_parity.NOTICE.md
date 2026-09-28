@@ -129,10 +129,14 @@ Raster rows (fired IDs at chosen steps) are exported for:
 > every 64th step (`0, 64, 128, 192, 256, 320, 384, 448`) plus the final step
 > (`511`).
 
-The full 512-frame output raster is **not** dumped; per-step spike **counts**
-are recorded for all 512 steps, and fired IDs are recorded at the selected steps
-above. The complete raster is reconstructed by replaying the fixture through
-neuromod (FEAT-002).
+Fired IDs are recorded for **every** step in `per_step_fired_ids` (a per-step
+ascending list of hidden-neuron IDs), so the parity test can verify the exact
+spike ID on all 512 steps, not merely the spike count. Per-step spike **counts**
+are also recorded for all 512 steps, and the selected steps above are retained
+as `selected_raster_rows` (a documented subset that must agree with
+`per_step_fired_ids` at those steps). `per_step_fired_ids` is the exhaustive
+oracle and is internally consistent with both `per_step_spike_count` and
+`selected_raster_rows`.
 
 ## Parity ordering requirement (why edge order matters)
 
@@ -171,7 +175,33 @@ cargo run --release > ../corinth_gif_parity.json
 ```
 
 The generator is fully deterministic: running it twice produces byte-identical
-output. It depends only on `serde_json` and resolves offline against a populated
-Cargo registry cache. `sha2` was not added as a dependency (not present in the
-offline cache); the funnel SHA-256 above is verified out-of-band with
-`sha256sum` and pinned in both this NOTICE and the generator source.
+output.
+
+### Built-in provenance self-check
+
+Before emitting the fixture, the generator verifies the vendored dynamics
+against the pinned upstream source and aborts (nonzero exit, no stdout) on any
+drift:
+
+1. **Upstream identity.** It embeds a verbatim, byte-identical copy of the
+   pinned upstream `src/funnel.rs`
+   (`tests/reference/corinth_gif/src/funnel_upstream_pinned.rs.txt`, included as
+   raw text so it is never compiled) and recomputes its SHA-256 with the `sha2`
+   crate. That digest must equal `CORINTH_FUNNEL_RS_SHA256`
+   (`10192537…`), which is the hash of the **unmodified whole** upstream file.
+   Refresh the embedded copy with
+   `git -C <corinth-canal> show 8e54e234ac005dd84e4ad2bedbf9f5bceb082355:src/funnel.rs`;
+   never edit the recorded hash unless the pinned commit is being re-audited.
+2. **Vendored fidelity.** Because `funnel_vendored.rs` carries local, non-
+   arithmetic additions (SPDX header, read-only accessors, `pub const`), it
+   cannot reproduce that whole-file hash. The generator instead asserts that the
+   exact `new()`/`run()` arithmetic regions it runs appear character-for-
+   character inside the SHA-verified upstream text, so a drift in the vendored
+   arithmetic is caught even though the vendored file is not byte-identical.
+
+This is why the generator now depends on `sha2` in addition to `serde_json`.
+Both are tiny and offline-resolvable, and the crate remains workspace- and
+package-excluded, so neuromod never compiles `sha2` and it is never shipped in
+the published crate. The check does **not** re-run upstream Corinth (which pulls
+in CUDA/`sentry`/`rustls` and is not offline-viable); it verifies the pinned
+bytes and that the vendored arithmetic is a faithful excerpt of them.

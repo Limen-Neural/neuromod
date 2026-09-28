@@ -4,6 +4,23 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+### Added
+
+- **Provenance-pinned cross-repository Corinth parity fixtures for `SparseGifHiddenLayer`**
+  ([#144](https://github.com/Limen-Neural/neuromod/issues/144),
+  [LIM-1364](https://linear.app/rpd-34/issue/LIM-1364/testgif-preserve-provenance-pinned-corinth-parity-fixtures-in-the)).
+  Bit-parity vectors captured from `rmems/corinth-canal` (`src/funnel.rs`,
+  `SparseGifHiddenLayer`) at the pinned source commit
+  `8e54e234ac005dd84e4ad2bedbf9f5bceb082355` are committed under
+  `tests/reference/corinth_gif_parity.json`, with attribution and the regeneration recipe in
+  `tests/reference/corinth_gif_parity.NOTICE.md`. A new offline test
+  (`src/gif_layer/layer_corinth_parity_tests.rs`) replays them with zero tolerance on spike IDs
+  and final membrane/adaptation f32 bits, reconstructing Corinth's explicit fan-in via
+  `SparseGifHiddenLayer::from_topology` under matched topology and dense 0/1 frame conversion. The
+  test has no runtime or network dependency on Corinth, and the standalone fixture generator under
+  `tests/reference/corinth_gif/` is excluded from the crate's build, test, and package graph. This
+  documents the port's parity guarantee (issue #101) without changing public API or GIF arithmetic.
+
 ## [0.7.0] - 2026-09-27
 
 ### Changed

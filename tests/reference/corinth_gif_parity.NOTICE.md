@@ -171,7 +171,12 @@ The generator is a standalone crate with its own empty `[workspace]` table, so
 
 ```sh
 cd tests/reference/corinth_gif
-cargo run --locked --offline --release > ../corinth_gif_parity.json
+set -euo pipefail
+tmp="$(mktemp ../corinth_gif_parity.json.XXXXXX)"
+trap 'rm -f "$tmp"' EXIT
+cargo run --locked --offline --release > "$tmp"
+mv "$tmp" ../corinth_gif_parity.json
+trap - EXIT
 ```
 
 The generator's `Cargo.lock` pins its dependency graph. The CI workflow runs
@@ -196,17 +201,16 @@ drift:
    never edit the recorded hash unless the pinned commit is being re-audited.
 2. **Vendored fidelity.** Because `funnel_vendored.rs` carries local, non-
    arithmetic additions (SPDX header, read-only accessors, `pub const`), it
-   cannot reproduce that whole-file hash. The generator instead extracts the
-   **complete** `new()` and `run()` function bodies (the contiguous source spans
-   that carry the audited GIF arithmetic) out of the SHA-verified upstream text
-   (via a deterministic balanced-brace scan anchored inside the
-   `impl SparseGifHiddenLayer` block) and asserts each full body appears
-   character-for-character inside `funnel_vendored.rs`. Because the upstream text
-   is already proven authentic by check (1), proving the vendored file contains
-   those full bodies verbatim establishes that every character of the vendored
-   audited arithmetic came from the pinned upstream. Any drift anywhere inside
-   `new()`/`run()`, not just at a couple of anchor lines, is therefore caught
-   even though the vendored file is not byte-identical to the whole upstream.
+   cannot reproduce that whole-file hash. The generator compares the referenced
+   `FUNNEL_INPUT_NEURONS`, `FUNNEL_HIDDEN_NEURONS`, `GIF_FAN_IN`, and
+   `GIF_IZ_NEURONS` declarations plus the complete `SparseGifHiddenLayer` state
+   struct against the pinned source. It also extracts the **complete** `new()`
+   and `run()` function bodies (via a deterministic balanced-brace scan anchored
+   inside the `impl SparseGifHiddenLayer` block) and asserts each full body
+   appears character-for-character inside `funnel_vendored.rs`. Because the
+   upstream text is already proven authentic by check (1), this verifies the
+   dimensions, fan-in, state field types, and every character of the vendored
+   audited arithmetic instead of a few hand-picked anchors.
 
 The generator depends only on `serde_json`, which is already a neuromod
 development dependency; provenance hashing adds no external crate. The check

@@ -4,9 +4,9 @@
 //
 // Before emitting anything, it self-verifies the vendored dynamics against the
 // pinned upstream `funnel.rs` (SHA-256 of an embedded verbatim copy must equal
-// the recorded provenance hash, and the COMPLETE `new()`/`run()` bodies
-// extracted from that verified upstream text must appear character-for-character
-// in the vendored source). It panics with a nonzero exit on any drift, so a
+// the recorded provenance hash, and the referenced constants, state struct,
+// and COMPLETE `new()`/`run()` bodies from that verified source must match the
+// vendored declarations). It panics with a nonzero exit on any drift, so a
 // stale or mismatched provenance stamp can never reach the fixture.
 //
 // It then runs the audited 512-step x 2048-neuron case through the UNMODIFIED
@@ -25,14 +25,21 @@
 //
 // Regenerate with:
 //   cd tests/reference/corinth_gif
-//   cargo run --locked --offline --release > ../corinth_gif_parity.json
+//   set -euo pipefail
+//   tmp="$(mktemp ../corinth_gif_parity.json.XXXXXX)"
+//   trap 'rm -f "$tmp"' EXIT
+//   cargo run --locked --offline --release > "$tmp"
+//   mv "$tmp" ../corinth_gif_parity.json
+//   trap - EXIT
 // (see corinth_gif_parity.NOTICE.md).
 
 mod funnel_vendored;
 mod sha256;
 
-use funnel_vendored::{FUNNEL_HIDDEN_NEURONS, FUNNEL_INPUT_NEURONS, GIF_FAN_IN, SparseGifHiddenLayer};
-use serde_json::{Map, Value, json};
+use funnel_vendored::{
+    SparseGifHiddenLayer, FUNNEL_HIDDEN_NEURONS, FUNNEL_INPUT_NEURONS, GIF_FAN_IN,
+};
+use serde_json::{json, Map, Value};
 
 /// Verbatim, byte-identical copy of the pinned upstream `corinth-canal`
 /// `src/funnel.rs` at commit `CORINTH_SOURCE_COMMIT`. This is embedded as raw
@@ -56,8 +63,7 @@ const NUM_STEPS: usize = 512;
 const CORINTH_SOURCE_COMMIT: &str = "8e54e234ac005dd84e4ad2bedbf9f5bceb082355";
 const CORINTH_FUNNEL_RS_SHA256: &str =
     "10192537a1a096fc8ec8a9a87740b643624b64c9fc3f3408faf06653b6694b47";
-const HISTORICAL_AUDITED_NEUROMOD_COMMIT: &str =
-    "263ec19e807454eac943681993623989fb986cc6";
+const HISTORICAL_AUDITED_NEUROMOD_COMMIT: &str = "263ec19e807454eac943681993623989fb986cc6";
 const CORINTH_REPO: &str = "https://github.com/rmems/corinth-canal";
 const CORINTH_LICENSE: &str = "Apache-2.0 OR MIT";
 const CORINTH_COPYRIGHT: &str = "Copyright (c) 2026 Raul Montoya Cardenas and contributors";
@@ -120,14 +126,11 @@ fn selected_steps() -> Vec<usize> {
 ///     live in `funnel_vendored.rs`, which is an arithmetic-identical excerpt
 ///     of that upstream file plus local, non-arithmetic additions (SPDX header,
 ///     read-only accessors, `pub const`). We cannot hash it to the upstream
-///     SHA, so instead we extract the COMPLETE `new()` and `run()` function
-///     bodies (the contiguous source spans that carry the audited GIF
-///     dynamics) out of the SHA-verified upstream text and assert each appears
-///     character-for-character inside `funnel_vendored.rs`. Because the
-///     upstream text is already proven authentic by check (1), proving the
-///     vendored file contains those full bodies verbatim establishes that every
-///     character of the vendored audited arithmetic came from the pinned
-///     upstream, not just a couple of hand-picked anchor lines.
+///     SHA, so instead we compare the referenced dimensions and fan-in
+///     constants, the complete `SparseGifHiddenLayer` state struct, and the
+///     COMPLETE `new()` and `run()` function bodies against the SHA-verified
+///     upstream text. This verifies both computation and the declarations it
+///     depends on, not only a few hand-picked anchor lines.
 ///
 /// What this does NOT guarantee: it does not re-run upstream Corinth (that
 /// pulls in CUDA/sentry/rustls and is not offline-viable), and it trusts that
@@ -154,6 +157,13 @@ fn verify_vendored_against_pinned_upstream() {
     // couple of anchor lines, so arithmetic anywhere inside `new()`/`run()`
     // cannot drift from the pinned upstream undetected.
     const VENDORED_SOURCE: &str = include_str!("funnel_vendored.rs");
+    let declaration_mismatches =
+        find_vendored_declaration_mismatches(UPSTREAM_FUNNEL_RS, VENDORED_SOURCE);
+    assert!(
+        declaration_mismatches.is_empty(),
+        "vendored declarations differ from the SHA-verified upstream: {}",
+        declaration_mismatches.join("; ")
+    );
 
     let new_body = extract_impl_fn_body(UPSTREAM_FUNNEL_RS, "pub fn new() -> Self {")
         .expect("could not locate the SparseGifHiddenLayer::new() body in the verified upstream");
@@ -172,6 +182,65 @@ fn verify_vendored_against_pinned_upstream() {
          the SHA-verified pinned upstream funnel.rs; the vendored run() arithmetic \
          has drifted from the pinned source. Expected verbatim body:\n{run_body}"
     );
+}
+
+fn find_vendored_declaration_mismatches(upstream: &str, vendored: &str) -> Vec<String> {
+    let mut mismatches = Vec::new();
+    for name in [
+        "FUNNEL_INPUT_NEURONS",
+        "FUNNEL_HIDDEN_NEURONS",
+        "GIF_FAN_IN",
+        "GIF_IZ_NEURONS",
+    ] {
+        let expected = find_const_declaration(upstream, name).map(without_visibility);
+        let actual = find_const_declaration(vendored, name).map(without_visibility);
+        if expected != actual {
+            mismatches.push(format!(
+                "const {name}: expected {expected:?}, found {actual:?}"
+            ));
+        }
+    }
+
+    const STRUCT: &str = "#[derive(Debug, Clone)]\npub struct SparseGifHiddenLayer {";
+    let upstream_struct = extract_braced_declaration(upstream, STRUCT);
+    let vendored_struct = extract_braced_declaration(vendored, STRUCT);
+    if upstream_struct != vendored_struct {
+        mismatches.push("SparseGifHiddenLayer field declaration differs".to_owned());
+    }
+
+    mismatches
+}
+
+fn find_const_declaration<'a>(source: &'a str, name: &str) -> Option<&'a str> {
+    let declaration = format!("const {name}:");
+    source
+        .lines()
+        .map(str::trim)
+        .find(|line| without_visibility(line).starts_with(&declaration))
+}
+
+fn without_visibility(declaration: &str) -> &str {
+    declaration.strip_prefix("pub ").unwrap_or(declaration)
+}
+
+fn extract_braced_declaration<'a>(source: &'a str, signature: &str) -> Option<&'a str> {
+    let start = source.find(signature)?;
+    let open = start + source[start..].find('{')?;
+    let bytes = source.as_bytes();
+    let mut depth = 0usize;
+    for (index, byte) in bytes.iter().enumerate().skip(open) {
+        match byte {
+            b'{' => depth += 1,
+            b'}' => {
+                depth -= 1;
+                if depth == 0 {
+                    return Some(&source[start..=index]);
+                }
+            }
+            _ => {}
+        }
+    }
+    None
 }
 
 /// Extract the full balanced-brace body of the `SparseGifHiddenLayer` method
@@ -443,4 +512,35 @@ fn main() {
     // deterministic. Either way the output is stable across runs.
     let out = serde_json::to_string(&fixture).expect("serialize fixture");
     print!("{out}");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{find_vendored_declaration_mismatches, UPSTREAM_FUNNEL_RS};
+
+    const VENDORED_SOURCE: &str = include_str!("funnel_vendored.rs");
+
+    #[test]
+    fn detects_drift_in_vendored_constants_and_state_types() {
+        assert!(
+            find_vendored_declaration_mismatches(UPSTREAM_FUNNEL_RS, VENDORED_SOURCE).is_empty()
+        );
+
+        let changed_fan_in = VENDORED_SOURCE.replace(
+            "pub const GIF_FAN_IN: usize = 4;",
+            "pub const GIF_FAN_IN: usize = 8;",
+        );
+        assert!(
+            !find_vendored_declaration_mismatches(UPSTREAM_FUNNEL_RS, &changed_fan_in).is_empty(),
+            "changing a constant referenced by the bodies must be detected"
+        );
+
+        let changed_field_type =
+            VENDORED_SOURCE.replace("membrane: Vec<f32>", "membrane: Vec<f64>");
+        assert!(
+            !find_vendored_declaration_mismatches(UPSTREAM_FUNNEL_RS, &changed_field_type)
+                .is_empty(),
+            "changing a vendored state type must be detected"
+        );
+    }
 }

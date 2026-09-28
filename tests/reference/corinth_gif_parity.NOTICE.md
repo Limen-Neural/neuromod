@@ -171,11 +171,12 @@ The generator is a standalone crate with its own empty `[workspace]` table, so
 
 ```sh
 cd tests/reference/corinth_gif
-cargo run --release > ../corinth_gif_parity.json
+cargo run --locked --offline --release > ../corinth_gif_parity.json
 ```
 
-The generator is fully deterministic: running it twice produces byte-identical
-output.
+The generator's `Cargo.lock` pins its dependency graph. The CI workflow runs
+the generator in offline mode and compares its output byte-for-byte with the
+committed fixture. Running it twice produces byte-identical output.
 
 ### Built-in provenance self-check
 
@@ -186,8 +187,9 @@ drift:
 1. **Upstream identity.** It embeds a verbatim, byte-identical copy of the
    pinned upstream `src/funnel.rs`
    (`tests/reference/corinth_gif/src/funnel_upstream_pinned.rs.txt`, included as
-   raw text so it is never compiled) and recomputes its SHA-256 with the `sha2`
-   crate. That digest must equal `CORINTH_FUNNEL_RS_SHA256`
+   raw text so it is never compiled) and recomputes its SHA-256 with the
+   generator's small self-contained implementation, checked against standard
+   SHA-256 test vectors. That digest must equal `CORINTH_FUNNEL_RS_SHA256`
    (`10192537…`), which is the hash of the **unmodified whole** upstream file.
    Refresh the embedded copy with
    `git -C <corinth-canal> show 8e54e234ac005dd84e4ad2bedbf9f5bceb082355:src/funnel.rs`;
@@ -206,12 +208,11 @@ drift:
    `new()`/`run()`, not just at a couple of anchor lines, is therefore caught
    even though the vendored file is not byte-identical to the whole upstream.
 
-This is why the generator now depends on `sha2` in addition to `serde_json`.
-Both are tiny and offline-resolvable, and the crate remains workspace- and
-package-excluded, so neuromod never compiles `sha2` and it is never shipped in
-the published crate. The check does **not** re-run upstream Corinth (which pulls
-in CUDA/`sentry`/`rustls` and is not offline-viable); it verifies the pinned
-bytes and that the vendored arithmetic is a faithful excerpt of them.
+The generator depends only on `serde_json`, which is already a neuromod
+development dependency; provenance hashing adds no external crate. The check
+does **not** re-run upstream Corinth (which pulls in CUDA/`sentry`/`rustls` and
+is not offline-viable); it verifies the pinned bytes and that the vendored
+arithmetic is a faithful excerpt of them.
 
 ## Static analysis scope
 

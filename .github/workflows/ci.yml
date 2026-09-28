@@ -75,6 +75,21 @@ jobs:
       - name: Test (unit tests and doctests)
         run: cargo test --locked --all-features
 
+      # Keep the provenance generator's pinned upstream copy and committed
+      # oracle tied together. The generator uses only serde_json, which the
+      # root test suite has already fetched, and its local SHA-256 verifier so
+      # this check can run with Cargo offline.
+      - name: Verify Corinth parity fixture regeneration
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo test --manifest-path tests/reference/corinth_gif/Cargo.toml --locked --offline
+          generated=$(mktemp)
+          trap 'rm -f "$generated"' EXIT
+          cargo run --manifest-path tests/reference/corinth_gif/Cargo.toml --locked --release --offline > "$generated"
+          cmp tests/reference/corinth_gif_parity.json "$generated"
+
       - name: Release test regression suite
         if: runner.os == 'Linux'
         run: cargo test --locked --release --all-features

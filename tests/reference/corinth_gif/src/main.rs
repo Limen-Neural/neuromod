@@ -19,20 +19,20 @@
 // f32 bit patterns.
 //
 // Determinism: no RNG, no wall clock, no iteration over unordered containers.
-// The only hashing is the fixed provenance self-check over embedded constant
-// bytes, which is order-independent. Running it twice produces byte-identical
-// output.
+// The only hashing is a local SHA-256 implementation used for the fixed
+// provenance self-check over embedded constant bytes. It adds no dependency to
+// the isolated generator. Running it twice produces byte-identical output.
 //
 // Regenerate with:
 //   cd tests/reference/corinth_gif
-//   cargo run --release > ../corinth_gif_parity.json
+//   cargo run --locked --offline --release > ../corinth_gif_parity.json
 // (see corinth_gif_parity.NOTICE.md).
 
 mod funnel_vendored;
+mod sha256;
 
 use funnel_vendored::{FUNNEL_HIDDEN_NEURONS, FUNNEL_INPUT_NEURONS, GIF_FAN_IN, SparseGifHiddenLayer};
 use serde_json::{Map, Value, json};
-use sha2::{Digest, Sha256};
 
 /// Verbatim, byte-identical copy of the pinned upstream `corinth-canal`
 /// `src/funnel.rs` at commit `CORINTH_SOURCE_COMMIT`. This is embedded as raw
@@ -136,8 +136,7 @@ fn selected_steps() -> Vec<usize> {
 /// see `corinth_gif_parity.NOTICE.md`).
 fn verify_vendored_against_pinned_upstream() {
     // (1) Upstream identity.
-    let digest = Sha256::digest(UPSTREAM_FUNNEL_RS.as_bytes());
-    let actual = hex_lower(&digest);
+    let actual = sha256::hex_digest(UPSTREAM_FUNNEL_RS.as_bytes());
     assert_eq!(
         actual, CORINTH_FUNNEL_RS_SHA256,
         "embedded pinned upstream funnel.rs SHA-256 mismatch: the verbatim \

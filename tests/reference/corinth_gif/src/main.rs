@@ -90,11 +90,7 @@ fn mask_to_hex(active: &[usize]) -> String {
             bytes[i / 8] |= 1u8 << (i % 8);
         }
     }
-    let mut hex = String::with_capacity(bytes.len() * 2);
-    for b in bytes {
-        hex.push_str(&format!("{b:02x}"));
-    }
-    hex
+    hex_lower(&bytes)
 }
 
 /// Deterministic selected-step rule for exported raster rows: every 64th step
@@ -226,32 +222,23 @@ fn extract_impl_fn_body<'a>(source: &'a str, signature: &str) -> Option<&'a str>
 
 /// Lowercase hex encoding of a byte digest (no external hex crate needed).
 fn hex_lower(bytes: &[u8]) -> String {
+    use std::fmt::Write as _;
     let mut out = String::with_capacity(bytes.len() * 2);
     for b in bytes {
-        out.push_str(&format!("{b:02x}"));
+        let _ = write!(out, "{b:02x}");
     }
     out
 }
 
-fn main() {
-    // 0. Provenance self-check: prove the vendored dynamics still correspond to
-    //    the pinned upstream source BEFORE stamping any provenance or emitting
-    //    the fixture. Panics (nonzero exit, no stdout) on drift.
-    verify_vendored_against_pinned_upstream();
-
-    // 1. Build the input train and run the UNMODIFIED vendored dynamics.
-    let input_train = deterministic_input_train();
-    let mut layer = SparseGifHiddenLayer::new();
-    let (spike_train, _potentials, _iz) = layer.run(&input_train);
-
-    // 2. Deduplicate input masks: build a mask table (unique hex strings) plus a
-    //    per-step index into that table. The rule is deterministic so many steps
-    //    share a mask; storing each unique mask once keeps the fixture compact.
+/// Deduplicate input masks: build a mask table (unique hex strings) plus a
+/// per-step index into that table. The rule is deterministic so many steps
+/// share a mask; storing each unique mask once keeps the fixture compact.
+fn build_mask_table(input_train: &[Vec<usize>]) -> (Vec<String>, Vec<usize>) {
     let mut mask_table: Vec<String> = Vec::new();
     let mut mask_index_of: std::collections::HashMap<String, usize> =
         std::collections::HashMap::new();
     let mut per_step_mask_index: Vec<usize> = Vec::with_capacity(NUM_STEPS);
-    for step in &input_train {
+    for step in input_train {
         let hex = mask_to_hex(step);
         let idx = *mask_index_of.entry(hex.clone()).or_insert_with(|| {
             mask_table.push(hex.clone());
@@ -259,31 +246,35 @@ fn main() {
         });
         per_step_mask_index.push(idx);
     }
+    (mask_table, per_step_mask_index)
+}
 
-    // 3. Per-step fired IDs for EVERY step, plus per-step counts + total. The
-    //    fired IDs are the oracle for a bit-parity-for-every-spike-ID contract,
-    //    so the fixture exports the full per-step fired-ID raster (not just the
-    //    selected rows). The raster is sparse (~8357 spikes across 512 steps),
-    //    so a per-step Vec<usize> of ascending fired IDs stays compact.
-    //    `selected_raster_rows` is retained below as a documented, NOTICE-
-    //    referenced subset; `per_step_fired_ids` is the exhaustive source and
-    //    is internally consistent with both it and `per_step_spike_count`.
+/// Per-step fired IDs for EVERY step, plus per-step counts + total. The fired
+/// IDs are the oracle for a bit-parity-for-every-spike-ID contract, so the
+/// fixture exports the full per-step fired-ID raster (not just the selected
+/// rows). The raster is sparse (~8357 spikes across 512 steps), so a per-step
+/// `Vec<usize>` of ascending fired IDs stays compact. `selected_raster_rows`
+/// (see `build_selected_rows`) is retained as a documented, NOTICE-referenced
+/// subset; `per_step_fired_ids` is the exhaustive source and is internally
+/// consistent with both it and `per_step_spike_count`.
+fn build_per_step_arrays(spike_train: &[Vec<usize>]) -> (Vec<Value>, Vec<usize>, usize) {
     let mut per_step_fired_ids: Vec<Value> = Vec::with_capacity(NUM_STEPS);
     let mut per_step_spike_count: Vec<usize> = Vec::with_capacity(NUM_STEPS);
     let mut total_spikes: usize = 0;
-    for fired in &spike_train {
+    for fired in spike_train {
         per_step_fired_ids.push(Value::Array(fired.iter().map(|&id| json!(id)).collect()));
         per_step_spike_count.push(fired.len());
         total_spikes += fired.len();
     }
+    (per_step_fired_ids, per_step_spike_count, total_spikes)
+}
 
-    // 4. Selected raster rows (fired IDs at the documented selected steps).
-    //    Retained as a stable, NOTICE-referenced subset even though
-    //    `per_step_fired_ids` now covers every step; the selected rows and
-    //    their rule are cited by the docs/NOTICE and must match the exhaustive
-    //    raster at those steps.
-    let sel = selected_steps();
-    let selected_rows: Vec<Value> = sel
+/// Selected raster rows (fired IDs at the documented selected steps). Retained
+/// as a stable, NOTICE-referenced subset even though `per_step_fired_ids` now
+/// covers every step; the selected rows and their rule are cited by the
+/// docs/NOTICE and must match the exhaustive raster at those steps.
+fn build_selected_rows(spike_train: &[Vec<usize>]) -> Vec<Value> {
+    selected_steps()
         .iter()
         .map(|&t| {
             json!({
@@ -292,16 +283,17 @@ fn main() {
                 "spike_count": spike_train[t].len(),
             })
         })
-        .collect();
+        .collect()
+}
 
-    // 5. Ordered per-neuron fan-in topology in Corinth EDGE ORDER (indices[0..4],
-    //    NOT sorted), as (source, weight_bits) rows. `weight_bits` are f32
-    //    `to_bits()` so the fixture carries exact bit patterns, not decimals.
-    //    Each row is encoded as a FLAT integer array in edge order:
-    //    [source_0, weight_bits_0, source_1, weight_bits_1, ...] with
-    //    GIF_FAN_IN (source, weight_bits) pairs. This keeps the ordering
-    //    (source then its weight, edge 0..fan_in) unambiguous while staying
-    //    compact. `weight_bits` are f32 `to_bits()` (exact bit patterns).
+/// Ordered per-neuron fan-in topology in Corinth EDGE ORDER (indices[0..4],
+/// NOT sorted), as (source, weight_bits) rows. `weight_bits` are f32
+/// `to_bits()` so the fixture carries exact bit patterns, not decimals. Each
+/// row is encoded as a FLAT integer array in edge order:
+/// `[source_0, weight_bits_0, source_1, weight_bits_1, ...]` with GIF_FAN_IN
+/// (source, weight_bits) pairs. This keeps the ordering (source then its
+/// weight, edge 0..fan_in) unambiguous while staying compact.
+fn build_topology(layer: &SparseGifHiddenLayer) -> Vec<Value> {
     let mut topology: Vec<Value> = Vec::with_capacity(FUNNEL_HIDDEN_NEURONS);
     for hidden in 0..FUNNEL_HIDDEN_NEURONS {
         let indices = layer.weight_indices(hidden);
@@ -313,11 +305,14 @@ fn main() {
         }
         topology.push(Value::Array(row));
     }
+    topology
+}
 
-    // 6. GIF parameter defaults as f32 BIT patterns. These are the exact
-    //    constants the vendored `SparseGifHiddenLayer` uses (fields + the two
-    //    literals `0.05` adaptation_coupling and `1.0` adaptation_increment in
-    //    the `run` loop). They match neuromod `GifParams::default()` bit-for-bit.
+/// GIF parameter defaults as f32 BIT patterns. These are the exact constants
+/// the vendored `SparseGifHiddenLayer` uses (fields + the two literals `0.05`
+/// adaptation_coupling and `1.0` adaptation_increment in the `run` loop). They
+/// match neuromod `GifParams::default()` bit-for-bit.
+fn build_param_bits() -> Map<String, Value> {
     let mut param_bits = Map::new();
     param_bits.insert("leak".into(), json!(0.92f32.to_bits()));
     param_bits.insert("drive_scale".into(), json!(0.75f32.to_bits()));
@@ -327,8 +322,11 @@ fn main() {
     param_bits.insert("adaptation_coupling".into(), json!(0.05f32.to_bits()));
     param_bits.insert("adaptation_increment".into(), json!(1.0f32.to_bits()));
     param_bits.insert("reset_ratio".into(), json!(0.35f32.to_bits()));
+    param_bits
+}
 
-    // 7. Final membrane / adaptation banks as f32 bit patterns for all neurons.
+/// Final membrane / adaptation banks as f32 bit patterns for all neurons.
+fn build_final_state_bits(layer: &SparseGifHiddenLayer) -> (Vec<Value>, Vec<Value>) {
     let final_membrane_bits: Vec<Value> = layer
         .membrane()
         .iter()
@@ -339,9 +337,27 @@ fn main() {
         .iter()
         .map(|v| json!(v.to_bits()))
         .collect();
+    (final_membrane_bits, final_adaptation_bits)
+}
 
-    // 8. Assemble the fixture.
-    let fixture = json!({
+/// Assemble the compact parity fixture from the pre-built sections. The keys
+/// are emitted in the same order and structure as before this was extracted, so
+/// the serialized output stays byte-stable.
+#[allow(clippy::too_many_arguments)]
+fn build_fixture(
+    param_bits: Map<String, Value>,
+    mask_table: Vec<String>,
+    per_step_mask_index: Vec<usize>,
+    per_step_spike_count: Vec<usize>,
+    per_step_fired_ids: Vec<Value>,
+    selected_rows: Vec<Value>,
+    topology: Vec<Value>,
+    final_membrane_bits: Vec<Value>,
+    final_adaptation_bits: Vec<Value>,
+    total_spikes: usize,
+) -> Value {
+    let num_unique_input_masks = mask_table.len();
+    json!({
         "provenance": {
             "corinth_repo": CORINTH_REPO,
             "corinth_source_commit": CORINTH_SOURCE_COMMIT,
@@ -364,7 +380,7 @@ fn main() {
         },
         "counts": {
             "total_spikes": total_spikes,
-            "num_unique_input_masks": mask_table.len(),
+            "num_unique_input_masks": num_unique_input_masks,
         },
         "param_bits": Value::Object(param_bits),
         "input_masks_hex": mask_table,
@@ -375,13 +391,57 @@ fn main() {
         "topology_edge_order": topology,
         "final_membrane_bits": final_membrane_bits,
         "final_adaptation_bits": final_adaptation_bits,
-    });
+    })
+}
+
+fn main() {
+    // 0. Provenance self-check: prove the vendored dynamics still correspond to
+    //    the pinned upstream source BEFORE stamping any provenance or emitting
+    //    the fixture. Panics (nonzero exit, no stdout) on drift.
+    verify_vendored_against_pinned_upstream();
+
+    // 1. Build the input train and run the UNMODIFIED vendored dynamics.
+    let input_train = deterministic_input_train();
+    let mut layer = SparseGifHiddenLayer::new();
+    let (spike_train, _potentials, _iz) = layer.run(&input_train);
+
+    // 2. Deduplicated input mask table + per-step index.
+    let (mask_table, per_step_mask_index) = build_mask_table(&input_train);
+
+    // 3. Exhaustive per-step fired IDs, counts, and total.
+    let (per_step_fired_ids, per_step_spike_count, total_spikes) =
+        build_per_step_arrays(&spike_train);
+
+    // 4. Selected raster rows (documented, NOTICE-referenced subset).
+    let selected_rows = build_selected_rows(&spike_train);
+
+    // 5. Ordered per-neuron fan-in topology in Corinth edge order.
+    let topology = build_topology(&layer);
+
+    // 6. GIF parameter defaults as f32 bit patterns.
+    let param_bits = build_param_bits();
+
+    // 7. Final membrane / adaptation banks as f32 bit patterns.
+    let (final_membrane_bits, final_adaptation_bits) = build_final_state_bits(&layer);
+
+    // 8. Assemble the fixture from the pre-built sections.
+    let fixture = build_fixture(
+        param_bits,
+        mask_table,
+        per_step_mask_index,
+        per_step_spike_count,
+        per_step_fired_ids,
+        selected_rows,
+        topology,
+        final_membrane_bits,
+        final_adaptation_bits,
+        total_spikes,
+    );
 
     // Compact, deterministic serialization (no trailing newline variance):
-    // serde_json orders map keys as inserted for `Value::Object`? No — serde_json
-    // preserves insertion order only with the `preserve_order` feature; by default
-    // it sorts `Map` keys via BTreeMap, which is ALSO fully deterministic. Either
-    // way the output is stable across runs.
+    // serde_json preserves insertion order only with the `preserve_order`
+    // feature; by default it sorts `Map` keys via BTreeMap, which is ALSO fully
+    // deterministic. Either way the output is stable across runs.
     let out = serde_json::to_string(&fixture).expect("serialize fixture");
     print!("{out}");
 }

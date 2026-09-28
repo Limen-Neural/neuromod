@@ -154,12 +154,10 @@ fn hex_nibble(c: u8) -> u8 {
     }
 }
 
-#[test]
-fn corinth_gif_parity_is_bit_exact() {
-    let fixture: Fixture =
-        serde_json::from_str(FIXTURE_JSON).expect("corinth_gif_parity.json must be valid JSON");
-
-    // --- provenance: the vectors describe the pinned Corinth revision -------
+/// Assert the fixture carries the pinned Corinth provenance. A drift here means
+/// the vectors were regenerated against a different Corinth revision and the
+/// parity claim no longer describes what was actually audited.
+fn assert_provenance(fixture: &Fixture) {
     assert_eq!(
         fixture.provenance.corinth_source_commit, PINNED_CORINTH_COMMIT,
         "fixture pins a different corinth-canal source commit"
@@ -168,8 +166,11 @@ fn corinth_gif_parity_is_bit_exact() {
         fixture.provenance.corinth_funnel_rs_sha256, PINNED_FUNNEL_SHA256,
         "fixture pins a different funnel.rs SHA-256"
     );
+}
 
-    // --- dimensions ---------------------------------------------------------
+/// Assert the audited-case dimensions and that every fixture array is sized as
+/// those dimensions claim before we start indexing them.
+fn assert_dimensions(fixture: &Fixture) {
     assert_eq!(fixture.dimensions.num_steps, EXPECT_NUM_STEPS);
     assert_eq!(fixture.dimensions.num_neurons, EXPECT_NUM_NEURONS);
     assert_eq!(fixture.dimensions.num_inputs, EXPECT_NUM_INPUTS);
@@ -177,10 +178,7 @@ fn corinth_gif_parity_is_bit_exact() {
 
     let num_steps = fixture.dimensions.num_steps;
     let num_neurons = fixture.dimensions.num_neurons;
-    let num_inputs = fixture.dimensions.num_inputs;
 
-    // Internal fixture consistency: the arrays must be sized as the dimensions
-    // claim before we start indexing them.
     assert_eq!(fixture.topology_edge_order.len(), num_neurons);
     assert_eq!(fixture.final_membrane_bits.len(), num_neurons);
     assert_eq!(fixture.final_adaptation_bits.len(), num_neurons);
@@ -191,10 +189,13 @@ fn corinth_gif_parity_is_bit_exact() {
         num_steps,
         "per_step_fired_ids must cover every step"
     );
+}
 
-    // The exhaustive fired-ID oracle must agree with the per-step counts and
-    // the selected raster rows it supersedes, or the fixture is internally
-    // inconsistent before we replay anything.
+/// Assert the exhaustive fired-ID oracle is internally consistent with the
+/// per-step counts and the selected raster rows it supersedes, before we replay
+/// anything.
+fn assert_oracle_self_consistent(fixture: &Fixture) {
+    let num_steps = fixture.dimensions.num_steps;
     for step in 0..num_steps {
         let fired_ids = &fixture.per_step_fired_ids[step];
         assert_eq!(
@@ -214,10 +215,12 @@ fn corinth_gif_parity_is_bit_exact() {
             row.step
         );
     }
+}
 
-    // --- default GifParams bits ---------------------------------------------
-    // The parity claim only holds if this crate's defaults are the exact f32
-    // constants Corinth ran with; compare bit patterns, not approximate values.
+/// Assert this crate's `GifParams::default()` are the exact f32 constants
+/// Corinth ran with; compare bit patterns, not approximate values, and return
+/// the params so the caller can rebuild the topology with them.
+fn assert_param_bits(fixture: &Fixture) -> GifParams {
     let params = GifParams::default();
     assert_eq!(params.leak.to_bits(), fixture.param_bits.leak, "param leak");
     assert_eq!(
@@ -255,13 +258,17 @@ fn corinth_gif_parity_is_bit_exact() {
         fixture.param_bits.reset_ratio,
         "param reset_ratio"
     );
+    params
+}
 
-    // --- reconstruct topology in fixture (Corinth edge) order ---------------
-    // Each flat row is [src0, wbits0, src1, wbits1, ...]. We keep the pairs in
-    // the order given and decode weights via `f32::from_bits`. DO NOT sort:
-    // fixed-order f32 accumulation is part of the bit contract, and
-    // `from_topology` preserves the row order we hand it.
-    let rows: Vec<Vec<(usize, f32)>> = fixture
+/// Reconstruct the per-neuron fan-in topology in fixture (Corinth edge) order.
+///
+/// Each flat row is `[src0, wbits0, src1, wbits1, ...]`. We keep the pairs in
+/// the order given and decode weights via `f32::from_bits`. DO NOT sort:
+/// fixed-order f32 accumulation is part of the bit contract, and
+/// `from_topology` preserves the row order we hand it.
+fn rebuild_topology(fixture: &Fixture) -> Vec<Vec<(usize, f32)>> {
+    fixture
         .topology_edge_order
         .iter()
         .enumerate()
@@ -279,20 +286,22 @@ fn corinth_gif_parity_is_bit_exact() {
                 })
                 .collect()
         })
-        .collect();
+        .collect()
+}
 
-    let mut layer = SparseGifHiddenLayer::from_topology(num_inputs, params, &rows)
-        .expect("reconstructing Corinth topology must succeed");
+/// Replay all 512 frames through `layer` and assert bit parity on every step.
+///
+/// Corinth drives each neuron by summing the weights of its *active* input
+/// edges. Converting each frame to a dense 0/1 vector and letting `step` sum
+/// `weight * stimuli[source]` is bit-equivalent because in f32
+/// `weight * 1.0 == weight` and `weight * 0.0 == 0.0` exactly (no rounding),
+/// and the per-row accumulation order matches Corinth's because the topology
+/// row order was preserved when the layer was rebuilt. So the dense sum equals
+/// Corinth's active-index sum term for term, in the same order.
+fn replay_and_assert(layer: &mut SparseGifHiddenLayer, fixture: &Fixture) {
+    let num_steps = fixture.dimensions.num_steps;
+    let num_inputs = fixture.dimensions.num_inputs;
 
-    // --- replay all 512 frames via a REUSABLE dense 0/1 buffer --------------
-    //
-    // Corinth drives each neuron by summing the weights of its *active* input
-    // edges. Converting each frame to a dense 0/1 vector and letting
-    // `step` sum `weight * stimuli[source]` is bit-equivalent because in f32
-    // `weight * 1.0 == weight` and `weight * 0.0 == 0.0` exactly (no rounding),
-    // and the per-row accumulation order matches Corinth's because the topology
-    // row order was preserved above. So the dense sum equals Corinth's
-    // active-index sum term for term, in the same order.
     let mut dense = vec![0.0f32; num_inputs];
     // Selected raster rows are keyed by step; resolve each as we reach it.
     let mut selected_by_step: std::collections::HashMap<usize, &RasterRow> =
@@ -358,8 +367,11 @@ fn corinth_gif_parity_is_bit_exact() {
         num_steps as i64,
         "step_count() must equal the number of replayed frames"
     );
+}
 
-    // --- final membrane / adaptation, every neuron, exact bits -------------
+/// Assert the final membrane and adaptation banks match the fixture for every
+/// neuron, exact bits.
+fn assert_final_state(layer: &SparseGifHiddenLayer, fixture: &Fixture) {
     for (i, &value) in layer.membrane().iter().enumerate() {
         let got = value.to_bits();
         let want = fixture.final_membrane_bits[i];
@@ -376,4 +388,34 @@ fn corinth_gif_parity_is_bit_exact() {
             "final adaptation divergence at neuron {i}: got bits {got:#010x}, want bits {want:#010x}"
         );
     }
+}
+
+#[test]
+fn corinth_gif_parity_is_bit_exact() {
+    let fixture: Fixture =
+        serde_json::from_str(FIXTURE_JSON).expect("corinth_gif_parity.json must be valid JSON");
+
+    // --- provenance: the vectors describe the pinned Corinth revision -------
+    assert_provenance(&fixture);
+
+    // --- dimensions + internal array-size consistency -----------------------
+    assert_dimensions(&fixture);
+
+    // --- exhaustive fired-ID oracle self-consistency ------------------------
+    assert_oracle_self_consistent(&fixture);
+
+    // --- default GifParams bits ---------------------------------------------
+    let params = assert_param_bits(&fixture);
+
+    // --- reconstruct topology in fixture (Corinth edge) order ---------------
+    let rows = rebuild_topology(&fixture);
+    let mut layer =
+        SparseGifHiddenLayer::from_topology(fixture.dimensions.num_inputs, params, &rows)
+            .expect("reconstructing Corinth topology must succeed");
+
+    // --- replay all 512 frames via a REUSABLE dense 0/1 buffer --------------
+    replay_and_assert(&mut layer, &fixture);
+
+    // --- final membrane / adaptation, every neuron, exact bits -------------
+    assert_final_state(&layer, &fixture);
 }

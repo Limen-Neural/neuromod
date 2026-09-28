@@ -1,0 +1,35 @@
+# Standalone parity-fixture generator for `tests/reference/corinth_gif_parity.json`.
+#
+# This crate is intentionally ISOLATED from the neuromod crate:
+#   * It declares its own EMPTY `[workspace]` table below, so a `cargo` command
+#     run anywhere inside the neuromod tree never absorbs it as a workspace
+#     member.
+#   * neuromod's own Cargo.toml additionally lists `tests/reference/corinth_gif`
+#     in both its `[workspace] exclude` and `[package] exclude` lists, so
+#     `cargo build/test/package` in neuromod ignores it and it is never shipped
+#     in the published crate.
+#
+# It deliberately depends ONLY on tiny, offline-resolvable crates (serde_json).
+# It does NOT depend on the whole `corinth-canal` crate, which pulls in CUDA
+# (`cust`), `sentry`, `rustls`, `memmap2`, etc. and is not offline-viable.
+# Instead it vendors ONLY the minimal `SparseGifHiddenLayer` dynamics from the
+# pinned `corinth-canal` `src/funnel.rs` (see `src/funnel_vendored.rs`).
+
+[package]
+name = "corinth-gif-parity-gen"
+version = "0.0.0"
+edition = "2021"
+publish = false
+license = "Apache-2.0 OR MIT"
+description = "Offline generator for the neuromod Corinth GIF parity fixture. Not part of the neuromod crate."
+
+# Empty workspace table: makes this a workspace ROOT of its own so `cargo`
+# invoked inside neuromod never treats it as a member of neuromod's workspace.
+[workspace]
+
+[[bin]]
+name = "corinth-gif-parity-gen"
+path = "src/main.rs"
+
+[dependencies]
+serde_json = "1.0"

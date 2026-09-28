@@ -24,6 +24,9 @@ exclude = [
     "REVIEW.md",
     "benches/README.md",
     "examples/crates-io-standalone/",
+    # Standalone parity-fixture generator (own empty [workspace] table). Kept
+    # out of the published crate; it is a dev-only offline tool, not library code.
+    "tests/reference/corinth_gif/",
 ]
 repository = "https://github.com/Limen-Neural/neuromod"
 readme = "README.md"
@@ -34,7 +37,9 @@ documentation = "https://docs.rs/neuromod"
 
 [workspace]
 # Nested outsider demo resolves `neuromod` from crates.io, not this path crate.
-exclude = ["examples/crates-io-standalone"]
+# The parity-fixture generator has its own empty [workspace] table too; excluding
+# it here keeps `cargo build/test` in neuromod from ever absorbing it.
+exclude = ["examples/crates-io-standalone", "tests/reference/corinth_gif"]
 
 [lib]
 name = "neuromod"

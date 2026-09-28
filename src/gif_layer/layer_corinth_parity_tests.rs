@@ -7,6 +7,13 @@
 //! [`SparseGifHiddenLayer`] reproduces every spike ID and every final
 //! membrane/adaptation f32 *bit for bit*, with no tolerance.
 //!
+//! "Every spike ID" is literal: the fixture carries a per-step fired-ID oracle
+//! (`per_step_fired_ids`) for all 512 steps, and the replay asserts the exact
+//! ascending fired-ID list on each step. Per-step spike counts and the
+//! deterministically selected raster rows are still checked, but they are
+//! redundant safety nets over the exhaustive per-step ID comparison, not the
+//! guarantee itself.
+//!
 //! # Scope
 //!
 //! The parity contract is the **shared GIF dynamics only**: the per-step
@@ -61,6 +68,11 @@ struct Fixture {
     input_masks_hex: Vec<String>,
     per_step_mask_index: Vec<usize>,
     per_step_spike_count: Vec<usize>,
+    /// Exhaustive per-step fired-ID oracle: `per_step_fired_ids[t]` is the
+    /// ascending list of hidden-neuron IDs that fired at step `t`, for every
+    /// one of the 512 steps. This is what lets the replay verify the exact
+    /// spike ID (not merely the count) on all steps.
+    per_step_fired_ids: Vec<Vec<usize>>,
     selected_raster_rows: Vec<RasterRow>,
     /// One flat row per neuron: `[src0, wbits0, src1, wbits1, ...]` in Corinth
     /// edge order (NOT sorted).
@@ -174,6 +186,34 @@ fn corinth_gif_parity_is_bit_exact() {
     assert_eq!(fixture.final_adaptation_bits.len(), num_neurons);
     assert_eq!(fixture.per_step_mask_index.len(), num_steps);
     assert_eq!(fixture.per_step_spike_count.len(), num_steps);
+    assert_eq!(
+        fixture.per_step_fired_ids.len(),
+        num_steps,
+        "per_step_fired_ids must cover every step"
+    );
+
+    // The exhaustive fired-ID oracle must agree with the per-step counts and
+    // the selected raster rows it supersedes, or the fixture is internally
+    // inconsistent before we replay anything.
+    for step in 0..num_steps {
+        let fired_ids = &fixture.per_step_fired_ids[step];
+        assert_eq!(
+            fired_ids.len(),
+            fixture.per_step_spike_count[step],
+            "per_step_fired_ids[{step}] length disagrees with per_step_spike_count[{step}]"
+        );
+        assert!(
+            fired_ids.windows(2).all(|w| w[0] < w[1]),
+            "per_step_fired_ids[{step}] is not strictly ascending: {fired_ids:?}"
+        );
+    }
+    for row in &fixture.selected_raster_rows {
+        assert_eq!(
+            fixture.per_step_fired_ids[row.step], row.fired_ids,
+            "selected_raster_rows[{}] disagrees with per_step_fired_ids",
+            row.step
+        );
+    }
 
     // --- default GifParams bits ---------------------------------------------
     // The parity claim only holds if this crate's defaults are the exact f32
@@ -279,8 +319,20 @@ fn corinth_gif_parity_is_bit_exact() {
         );
         running_total_spikes += fired.len();
 
-        // Selected fired-ID rows must match exactly (indices are ascending from
-        // `step`, matching the fixture's ordering).
+        // Every-step fired-ID parity, no tolerance. This is the core bit-parity
+        // guarantee: a regression that returned a wrong neuron ID while keeping
+        // the count intact would slip past a count-only check, so compare the
+        // exact fired-ID list on ALL 512 steps, not just the selected ones. The
+        // fixture stores IDs ascending and `step` returns them ascending, so
+        // this reports the first divergent step and the exact IDs involved.
+        let want_fired = &fixture.per_step_fired_ids[step];
+        assert_eq!(
+            &fired, want_fired,
+            "fired-ID divergence at step {step}: got {fired:?}, want {want_fired:?}"
+        );
+
+        // Selected fired-ID rows remain valid and NOTICE-referenced; assert
+        // they still agree at their steps (indices ascending from `step`).
         if let Some(row) = selected_by_step.get(&step) {
             assert_eq!(
                 row.spike_count, want_count,

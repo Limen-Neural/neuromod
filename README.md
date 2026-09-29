@@ -168,7 +168,7 @@ fn main() {
 
 ## Step Errors
 
-`step` validates the call **before** mutating the network or drawing from the random-number generator (RNG). A stimulus length mismatch, a non-finite input, a stored per-channel state vector whose length disagrees with `num_channels`, or an exhausted tick counter returns a structured [`StepError`](https://docs.rs/neuromod/latest/neuromod/enum.StepError.html) and leaves every field unchanged (failure-atomic no-op). Finite signed values still go through the existing `abs().clamp` magnitude path.
+`step` validates the call **before** mutating the network or drawing from the random-number generator (RNG). A stimulus length mismatch, a non-finite input, a stored per-channel state vector whose length disagrees with `num_channels`, a non-finite stored predictive value, or an exhausted tick counter returns a structured [`StepError`](https://docs.rs/neuromod/latest/neuromod/enum.StepError.html) and leaves every field unchanged (failure-atomic no-op). Finite signed values still go through the existing `abs().clamp` magnitude path.
 
 A malformed self-describing checkpoint (or a hand-edited public field) can leave `predictive_state` or `input_spike_times` shorter or longer than `num_channels`. Those vectors deserialize as-is — decode never rejects them — but `step` indexes them by channel, so it returns `StepError::CheckpointShapeMismatch` (naming the offending vector) before any mutation or RNG draw rather than panicking on a short vector or silently dropping a long one mid-step. The check is limited to those two vectors; it does **not** police each neuron's `weights` / `eligibility` width, which the engine tolerates by design (see the neuron weight-width note below).
 
@@ -192,6 +192,9 @@ fn main() {
         }
         Err(StepError::NonFiniteModulator { field, class }) => {
             println!("NonFiniteModulator {field:?}: {class:?}");
+        }
+        Err(StepError::NonFinitePredictiveState { index, class }) => {
+            println!("NonFinitePredictiveState at {index}: {class:?}");
         }
         Err(StepError::StepCounterExhausted { global_step }) => {
             println!("step counter cannot advance from {global_step}");

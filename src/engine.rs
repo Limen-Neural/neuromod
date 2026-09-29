@@ -3525,8 +3525,7 @@ mod tests {
         fn step(
             self,
             network: &mut SpikingNetwork,
-            stimuli: &[f32],
-            mods: &NeuroModulators,
+            (stimuli, mods): (&[f32], &NeuroModulators),
             rng: &mut StdRng,
         ) -> Result<Vec<usize>, StepError> {
             match self {
@@ -3541,8 +3540,7 @@ mod tests {
     fn assert_predictive_rejection(
         path: PredictiveStepPath,
         network: &mut SpikingNetwork,
-        stimuli: &[f32],
-        mods: &NeuroModulators,
+        inputs: (&[f32], &NeuroModulators),
         expected: StepError,
     ) {
         let before = capture_network(network);
@@ -3552,7 +3550,7 @@ mod tests {
         let mut rng = StdRng::seed_from_u64(177);
         let mut twin = StdRng::seed_from_u64(177);
         assert_eq!(
-            path.step(network, stimuli, mods, &mut rng),
+            path.step(network, inputs, &mut rng),
             Err(expected),
             "{path:?}"
         );
@@ -3566,6 +3564,48 @@ mod tests {
         }
     }
 
+    fn assert_predictive_public_value(
+        path: PredictiveStepPath,
+        restored: bool,
+        value: f32,
+        class: NonFiniteClass,
+    ) {
+        let mut network = SpikingNetwork::with_dimensions(4, 1, 4);
+        if restored {
+            network = restored_with_json_edit(&network, |_| {});
+        }
+        network.predictive_state[2] = value;
+        network.predictive_state[3] = f32::INFINITY;
+        assert_predictive_rejection(
+            path,
+            &mut network,
+            (&[1.0; 4], &NeuroModulators::default()),
+            StepError::NonFinitePredictiveState { index: 2, class },
+        );
+        network.predictive_state.fill(0.0);
+        let mut rng = StdRng::seed_from_u64(177);
+        path.step(
+            &mut network,
+            (&[1.0; 4], &NeuroModulators::default()),
+            &mut rng,
+        )
+        .expect("repair permits retry");
+        assert_eq!(network.global_step, 1);
+        assert!(network.predictive_state.iter().all(|v| v.is_finite()));
+        assert!(
+            network
+                .neurons
+                .iter()
+                .all(|n| n.membrane_potential.is_finite())
+        );
+        assert!(
+            network
+                .iz_neurons
+                .iter()
+                .all(|n| n.v.is_finite() && n.u.is_finite())
+        );
+    }
+
     #[test]
     fn checkpoint_predictive_public_values_atomic_all_paths_and_retry() {
         for path in PREDICTIVE_STEP_PATHS {
@@ -3574,42 +3614,7 @@ mod tests {
                     .into_iter()
                     .chain([(f32::from_bits(0x7fc0_0177), NonFiniteClass::Nan)])
                 {
-                    let mut network = SpikingNetwork::with_dimensions(4, 1, 4);
-                    if restored {
-                        network = restored_with_json_edit(&network, |_| {});
-                    }
-                    network.predictive_state[2] = value;
-                    network.predictive_state[3] = f32::INFINITY;
-                    assert_predictive_rejection(
-                        path,
-                        &mut network,
-                        &[1.0; 4],
-                        &NeuroModulators::default(),
-                        StepError::NonFinitePredictiveState { index: 2, class },
-                    );
-                    network.predictive_state.fill(0.0);
-                    let mut rng = StdRng::seed_from_u64(177);
-                    path.step(
-                        &mut network,
-                        &[1.0; 4],
-                        &NeuroModulators::default(),
-                        &mut rng,
-                    )
-                    .expect("repair permits retry");
-                    assert_eq!(network.global_step, 1);
-                    assert!(network.predictive_state.iter().all(|v| v.is_finite()));
-                    assert!(
-                        network
-                            .neurons
-                            .iter()
-                            .all(|n| n.membrane_potential.is_finite())
-                    );
-                    assert!(
-                        network
-                            .iz_neurons
-                            .iter()
-                            .all(|n| n.v.is_finite() && n.u.is_finite())
-                    );
+                    assert_predictive_public_value(path, restored, value, class);
                 }
             }
         }
@@ -3636,10 +3641,63 @@ mod tests {
                 assert_predictive_rejection(
                     path,
                     &mut network,
-                    &[1.0; 4],
-                    &NeuroModulators::default(),
+                    (&[1.0; 4], &NeuroModulators::default()),
                     StepError::NonFinitePredictiveState { index: 2, class },
                 );
+            }
+        }
+    }
+
+    fn predictive_precedence_case(
+        case: usize,
+        network: &mut SpikingNetwork,
+        stimuli: &mut Vec<f32>,
+        mods: &mut NeuroModulators,
+    ) -> StepError {
+        match case {
+            0 => {
+                stimuli.pop();
+                StepError::InputLenMismatch {
+                    expected: 4,
+                    got: 3,
+                }
+            }
+            1 => {
+                stimuli[1] = f32::INFINITY;
+                StepError::NonFiniteStimulus {
+                    index: 1,
+                    class: NonFiniteClass::PosInfinity,
+                }
+            }
+            2 => {
+                mods.serotonin = f32::NEG_INFINITY;
+                StepError::NonFiniteModulator {
+                    field: ModulatorField::Serotonin,
+                    class: NonFiniteClass::NegInfinity,
+                }
+            }
+            3 => {
+                network.predictive_state.pop();
+                StepError::CheckpointShapeMismatch {
+                    field: ChannelVector::PredictiveState,
+                    expected: 4,
+                    got: 3,
+                }
+            }
+            4 => {
+                network.input_spike_times.pop();
+                StepError::CheckpointShapeMismatch {
+                    field: ChannelVector::InputSpikeTimes,
+                    expected: 4,
+                    got: 3,
+                }
+            }
+            _ => {
+                network.global_step = if case == 5 { -1 } else { i64::MAX };
+                StepError::NonFinitePredictiveState {
+                    index: 2,
+                    class: NonFiniteClass::Nan,
+                }
             }
         }
     }
@@ -3652,53 +3710,9 @@ mod tests {
                 network.predictive_state[2] = f32::NAN;
                 let mut stimuli = vec![1.0; 4];
                 let mut mods = NeuroModulators::default();
-                let expected = match case {
-                    0 => {
-                        stimuli.pop();
-                        StepError::InputLenMismatch {
-                            expected: 4,
-                            got: 3,
-                        }
-                    }
-                    1 => {
-                        stimuli[1] = f32::INFINITY;
-                        StepError::NonFiniteStimulus {
-                            index: 1,
-                            class: NonFiniteClass::PosInfinity,
-                        }
-                    }
-                    2 => {
-                        mods.serotonin = f32::NEG_INFINITY;
-                        StepError::NonFiniteModulator {
-                            field: ModulatorField::Serotonin,
-                            class: NonFiniteClass::NegInfinity,
-                        }
-                    }
-                    3 => {
-                        network.predictive_state.pop();
-                        StepError::CheckpointShapeMismatch {
-                            field: ChannelVector::PredictiveState,
-                            expected: 4,
-                            got: 3,
-                        }
-                    }
-                    4 => {
-                        network.input_spike_times.pop();
-                        StepError::CheckpointShapeMismatch {
-                            field: ChannelVector::InputSpikeTimes,
-                            expected: 4,
-                            got: 3,
-                        }
-                    }
-                    _ => {
-                        network.global_step = if case == 5 { -1 } else { i64::MAX };
-                        StepError::NonFinitePredictiveState {
-                            index: 2,
-                            class: NonFiniteClass::Nan,
-                        }
-                    }
-                };
-                assert_predictive_rejection(path, &mut network, &stimuli, &mods, expected);
+                let expected =
+                    predictive_precedence_case(case, &mut network, &mut stimuli, &mut mods);
+                assert_predictive_rejection(path, &mut network, (&stimuli, &mods), expected);
             }
         }
     }
@@ -3713,8 +3727,7 @@ mod tests {
                 let mut rng = StdRng::seed_from_u64(177);
                 path.step(
                     &mut network,
-                    &stimuli,
-                    &NeuroModulators::default(),
+                    (&stimuli, &NeuroModulators::default()),
                     &mut rng,
                 )
                 .unwrap();
@@ -3737,18 +3750,18 @@ mod tests {
                 let mut checkpoint_run = restored_with_json_edit(&uninterrupted, |_| {});
                 let mut restored_rng = StdRng::seed_from_u64(177);
                 for _ in 0..5 {
-                    path.step(&mut checkpoint_run, &[0.5; 4], &mods, &mut restored_rng)
+                    path.step(&mut checkpoint_run, (&[0.5; 4], &mods), &mut restored_rng)
                         .unwrap();
-                    path.step(&mut uninterrupted, &[0.5; 4], &mods, &mut rng)
+                    path.step(&mut uninterrupted, (&[0.5; 4], &mods), &mut rng)
                         .unwrap();
                 }
                 let mut restored: SpikingNetwork =
                     serde_json::from_str(&serde_json::to_string(&checkpoint_run).unwrap()).unwrap();
                 for _ in 0..7 {
                     assert_eq!(
-                        path.step(&mut restored, &[0.5; 4], &mods, &mut restored_rng)
+                        path.step(&mut restored, (&[0.5; 4], &mods), &mut restored_rng)
                             .unwrap(),
-                        path.step(&mut uninterrupted, &[0.5; 4], &mods, &mut rng)
+                        path.step(&mut uninterrupted, (&[0.5; 4], &mods), &mut rng)
                             .unwrap(),
                     );
                     assert_eq!(capture_network(&restored), capture_network(&uninterrupted));

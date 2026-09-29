@@ -277,7 +277,21 @@ impl IfHandoff {
     ///   non-finite, e.g. from overflow (checked before any mutation); or
     /// * a neuron reports a spike but did not hard-reset to `0`.
     pub fn step(&mut self, inputs: &[f32], t: i64) -> Result<Vec<bool>, HandoffError> {
-        // Length check before touching any neuron state.
+        // Two phases keep the step atomic: validate the whole input first
+        // (touching no state), then mutate only once every element is known
+        // finite. See each helper for details.
+        self.validate_step_inputs(inputs, t)?;
+        self.apply_step(inputs, t)
+    }
+
+    /// Phase 1: length + per-element finiteness of the input, the stimulus
+    /// `r[i] * inputs[i]`, and the projected membrane potential
+    /// (`v + stimulus`, since `decay_rate == 0`). Mutates nothing.
+    ///
+    /// Validating the projected potential here catches an overflow to `±inf`
+    /// before phase 2's `check_for_spike` could read it as a spike and reset it
+    /// to `0.0`, which would hide the non-finite value.
+    fn validate_step_inputs(&self, inputs: &[f32], t: i64) -> Result<(), HandoffError> {
         if inputs.len() != self.bank.len() {
             return Err(HandoffError::Runtime {
                 node: self.node.clone(),
@@ -290,35 +304,27 @@ impl IfHandoff {
             });
         }
 
-        // Phase 1: validate everything up front, mutating nothing.
-        //
-        // For each element check the input, the stimulus r*I, and the projected
-        // membrane potential (v + stimulus, since decay_rate == 0) for
-        // finiteness. Doing this before any mutation makes the step atomic and
-        // catches overflow that a post-mutation check would miss once
-        // `check_for_spike` reset an overflowed potential to 0.
         for (i, (&input, neuron)) in inputs.iter().zip(self.bank.iter()).enumerate() {
-            let runtime = |class| HandoffError::Runtime {
-                node: self.node.clone(),
-                index: i,
-                step: t,
-                cause: RuntimeCause::NonFinite(class),
-            };
-
-            if let Some(class) = NonFiniteClass::classify(input) {
-                return Err(runtime(class));
-            }
             let stimulus = self.r[i] * input;
-            if let Some(class) = NonFiniteClass::classify(stimulus) {
-                return Err(runtime(class));
-            }
             let projected = neuron.membrane_potential + stimulus;
-            if let Some(class) = NonFiniteClass::classify(projected) {
-                return Err(runtime(class));
+            let class = NonFiniteClass::classify(input)
+                .or_else(|| NonFiniteClass::classify(stimulus))
+                .or_else(|| NonFiniteClass::classify(projected));
+            if let Some(class) = class {
+                return Err(HandoffError::Runtime {
+                    node: self.node.clone(),
+                    index: i,
+                    step: t,
+                    cause: RuntimeCause::NonFinite(class),
+                });
             }
         }
+        Ok(())
+    }
 
-        // Phase 2: every element validated finite, so mutate the bank.
+    /// Phase 2: every input validated finite, so integrate and spike each
+    /// neuron, asserting a spiking neuron hard-reset to `0`.
+    fn apply_step(&mut self, inputs: &[f32], t: i64) -> Result<Vec<bool>, HandoffError> {
         let mut spikes = Vec::with_capacity(self.bank.len());
         for (i, neuron) in self.bank.iter_mut().enumerate() {
             neuron.integrate(self.r[i] * inputs[i]);

@@ -90,6 +90,23 @@ jobs:
           cargo run --manifest-path tests/reference/corinth_gif/Cargo.toml --locked --release --offline > "$generated"
           cmp tests/reference/corinth_gif_parity.json "$generated"
 
+      # Offline NIR -> neuromod interop smoke (issue #125). The harness is a
+      # standalone crate with its own lockfile; it reads the two vendored
+      # HF-derived .nir (HDF5) fixtures via nir-rs. On the Ubuntu runner apt is
+      # available, so install libhdf5-dev + pkg-config rather than compiling a
+      # vendored static libhdf5. No Hugging Face Hub download happens: loading is
+      # fully offline from the checked-in fixtures.
+      - name: NIR HuggingFace interop smoke
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y libhdf5-dev pkg-config
+          cargo fmt --check --manifest-path tests/reference/nir_huggingface/Cargo.toml
+          cargo clippy --manifest-path tests/reference/nir_huggingface/Cargo.toml --all-targets -- -D warnings
+          cargo test --manifest-path tests/reference/nir_huggingface/Cargo.toml --locked
+
       - name: Release test regression suite
         if: runner.os == 'Linux'
         run: cargo test --locked --release --all-features

@@ -112,9 +112,9 @@ export PATH="$(python -c 'import cmake,os;print(os.path.join(os.path.dirname(cma
 cargo test --locked --manifest-path tests/reference/nir_huggingface/Cargo.toml
 ```
 
-This CMake step is a **local** convenience only. In CI the Ubuntu runner
-installs `libhdf5-dev` and `pkg-config` via `apt-get` and then runs the plain
-command above (see the "NIR HuggingFace interop smoke" step in
+This CMake step is a **local** convenience only. In CI the Ubuntu runner uses
+its bundled CMake and installs **nothing**: the vendored static libhdf5 build
+keeps the step hermetic (see the "NIR HuggingFace interop smoke" step in
 [`.github/workflows/ci.yml`](../../../.github/workflows/ci.yml)). No Hugging Face
 Hub download happens in either case: loading is fully offline from the vendored
 fixtures, resolved from `CARGO_MANIFEST_DIR`.

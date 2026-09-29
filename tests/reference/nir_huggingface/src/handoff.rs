@@ -413,11 +413,30 @@ mod tests {
         ));
     }
 
+    /// Step `handoff` with inputs that must fail, asserting the error is a
+    /// `Runtime` and no neuron's state was touched. Returns the error for the
+    /// caller to inspect the cause.
+    fn assert_runtime_step_leaves_bank_untouched(
+        handoff: &mut IfHandoff,
+        inputs: &[f32],
+        t: i64,
+    ) -> HandoffError {
+        let err = handoff.step(inputs, t).unwrap_err();
+        assert!(
+            matches!(err, HandoffError::Runtime { .. }),
+            "expected Runtime, got {err:?}"
+        );
+        for neuron in handoff.bank() {
+            assert_eq!(neuron.membrane_potential, 0.0, "no mutation on failure");
+        }
+        err
+    }
+
     #[test]
     fn step_rejects_length_mismatch_before_mutation() {
         let node = if_node(vec![1.0, 1.0], vec![1.0, 1.0], None);
         let mut handoff = IfHandoff::from_node("if0", &node).unwrap();
-        let err = handoff.step(&[0.5], 0).unwrap_err();
+        let err = assert_runtime_step_leaves_bank_untouched(&mut handoff, &[0.5], 0);
         assert!(matches!(
             err,
             HandoffError::Runtime {
@@ -428,15 +447,13 @@ mod tests {
                 ..
             }
         ));
-        // No mutation happened.
-        assert_eq!(handoff.bank()[0].membrane_potential, 0.0);
     }
 
     #[test]
     fn step_rejects_non_finite_input() {
         let node = if_node(vec![1.0], vec![1.0], None);
         let mut handoff = IfHandoff::from_node("if0", &node).unwrap();
-        let err = handoff.step(&[f32::NAN], 3).unwrap_err();
+        let err = assert_runtime_step_leaves_bank_untouched(&mut handoff, &[f32::NAN], 3);
         assert!(matches!(
             err,
             HandoffError::Runtime {
@@ -445,7 +462,6 @@ mod tests {
                 ..
             }
         ));
-        assert_eq!(handoff.bank()[0].membrane_potential, 0.0);
     }
 
     #[test]

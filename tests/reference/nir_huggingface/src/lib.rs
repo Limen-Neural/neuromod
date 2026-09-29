@@ -10,10 +10,60 @@
 //!
 //! FEAT-001 scaffolds the crate: it vendors the fixtures with provenance and a
 //! SHA-256 checksum test, and exposes a manifest-relative fixture-path helper.
-//! The node classifier, IF -> `LapicqueNeuron` handoff, and step path are added
-//! in later features.
+//! FEAT-002 adds the adapter: [`load_fixture`] loads and structurally validates
+//! a `.nir` graph, [`classify_graph`] sorts every node into a [`NodeRole`], and
+//! [`IfHandoff`] maps `IF` neurons into a neuromod `LapicqueNeuron` bank and
+//! steps them through the real neuromod integrate / spike path.
+//!
+//! # Boundary
+//!
+//! This crate is the *only* place NIR loading, tensor reading, node
+//! classification, and the IF handoff live. The `neuromod` library gains no
+//! `nir-rs` / `hdf5` dependency and no import, tensor-math, or graph-runtime
+//! responsibility. NIR scheduling, the `Affine` / `Conv2d` / `AvgPool2d` /
+//! `Flatten` kernels, and graph wiring stay downstream of neuromod (see
+//! `docs/neuromod-boundary-matrix.md`); here they are only *classified*, never
+//! executed.
+
+mod classify;
+mod error;
+mod handoff;
+
+pub use classify::{
+    AdapterKind, NodeRecord, NodeRole, classify, classify_graph, report_covers_all_nodes,
+};
+pub use error::{HandoffError, RuntimeCause};
+pub use handoff::IfHandoff;
 
 use std::path::{Path, PathBuf};
+
+use nir_rs::NirGraph;
+
+/// Load and structurally validate a `.nir` fixture.
+///
+/// Reads the graph with [`nir_rs::io::read`], then runs
+/// [`NirGraph::validate_structure`]. Either failure is mapped to
+/// [`HandoffError::Load`] carrying the fixture `path` and the underlying
+/// [`nir_rs::NirError`] as the error source.
+///
+/// # Errors
+///
+/// [`HandoffError::Load`] if the file cannot be read/decoded, or if the loaded
+/// graph fails structural validation.
+pub fn load_fixture(path: impl AsRef<Path>) -> Result<NirGraph, HandoffError> {
+    let path = path.as_ref();
+    let graph = nir_rs::io::read(path).map_err(|source| HandoffError::Load {
+        path: path.to_path_buf(),
+        source,
+    })?;
+    graph
+        .validate_structure()
+        .map_err(|source| HandoffError::Load {
+            path: path.to_path_buf(),
+            source,
+        })?;
+    Ok(graph)
+}
 
 /// Absolute path to the vendored fixtures directory.
 ///

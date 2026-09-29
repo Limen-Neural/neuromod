@@ -108,6 +108,7 @@
 mod config;
 mod error;
 mod layer;
+mod numeric;
 mod raster;
 mod rng;
 

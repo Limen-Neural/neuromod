@@ -1,3 +1,5 @@
+use crate::NonFiniteClass;
+
 /// Errors produced when building or driving a
 /// [`SparseGifHiddenLayer`](super::SparseGifHiddenLayer).
 ///
@@ -6,6 +8,39 @@
 /// invalid), so the type cannot honestly be `Eq`.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum GifLayerError {
+    /// A shared dynamics parameter is NaN or infinite.
+    NonFiniteParam {
+        /// The `GifParams` field name.
+        field: &'static str,
+        /// NaN or the signed infinity.
+        class: NonFiniteClass,
+    },
+    /// A synaptic weight is NaN or infinite.
+    NonFiniteWeight {
+        /// Index in the flat CSR weight array returned by `weights()`.
+        index: usize,
+        /// NaN or the signed infinity.
+        class: NonFiniteClass,
+    },
+    /// A stimulus value is NaN or infinite, including an unused channel.
+    NonFiniteInput {
+        /// Input channel index.
+        index: usize,
+        /// NaN or the signed infinity.
+        class: NonFiniteClass,
+    },
+    /// Finite operands produced a non-finite GIF transition.
+    ///
+    /// The entire step is rejected before state or caller output changes.
+    NumericOverflow {
+        /// First neuron whose transition failed.
+        neuron: usize,
+        /// `drive`, `decayed_adaptation`, `integrated_membrane`, `threshold`,
+        /// `membrane` (after reset), or `adaptation` (after increment).
+        stage: &'static str,
+        /// NaN or the signed infinity produced by the transition.
+        class: NonFiniteClass,
+    },
     /// `fan_in` exceeded the number of available input channels.
     FanInExceedsInputs {
         /// Requested fan-in.
@@ -95,6 +130,22 @@ pub enum GifLayerError {
 impl core::fmt::Display for GifLayerError {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
+            Self::NonFiniteParam { field, class } => {
+                write!(f, "non-finite GIF parameter {field}: {class}")
+            }
+            Self::NonFiniteWeight { index, class } => {
+                write!(f, "non-finite CSR weight at index {index}: {class}")
+            }
+            Self::NonFiniteInput { index, class } => {
+                write!(f, "non-finite input channel {index}: {class}")
+            }
+            Self::NumericOverflow {
+                neuron,
+                stage,
+                class,
+            } => {
+                write!(f, "non-finite {stage} for neuron {neuron}: {class}")
+            }
             Self::FanInExceedsInputs { fan_in, num_inputs } => write!(
                 f,
                 "fan_in {fan_in} exceeds the {num_inputs} available input channels"

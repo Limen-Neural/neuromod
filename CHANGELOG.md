@@ -6,6 +6,16 @@ All notable changes to this project are documented in this file.
 
 ### Changed
 
+- **Sparse GIF live numeric validation** (#176 / LIM-1470): `GifLayerError`
+  gains `NonFiniteParam`, `NonFiniteWeight`, `NonFiniteInput`, and
+  `NumericOverflow`; exhaustive matches need new arms in the pending 0.7
+  migration. Constructors reject non-finite parameters/explicit weights.
+  Live stepping checks mutable parameters, weights, all stimuli, and candidate
+  transitions before any state or output-buffer mutation. Finite arithmetic
+  overflow is an error. Allocation-free stepping uses a validate/recompute
+  pair of passes with unchanged ordinary arithmetic order and checkpoint format.
+  Batch `run` retains successfully completed frames before an error.
+
 - **`StepError` gains `NonFinitePredictiveState { index, class }`** (#177).
   Exhaustive matches need a new arm or wildcard; this joins the pending 0.7
   migration. All four engine step entry points reject NaN/infinite stored

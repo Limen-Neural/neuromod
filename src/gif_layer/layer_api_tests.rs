@@ -106,6 +106,10 @@ fn as_flat_agrees_with_the_per_step_views() {
 )]
 fn assert_error_variants_exhaustive(e: &GifLayerError) {
     match e {
+        GifLayerError::NonFiniteParam { .. } => {}
+        GifLayerError::NonFiniteWeight { .. } => {}
+        GifLayerError::NonFiniteInput { .. } => {}
+        GifLayerError::NumericOverflow { .. } => {}
         GifLayerError::FanInExceedsInputs { .. } => {}
         GifLayerError::InvalidWeightRange { .. } => {}
         GifLayerError::InputLenMismatch { .. } => {}
@@ -123,8 +127,25 @@ fn assert_error_variants_exhaustive(e: &GifLayerError) {
 /// Kept honest by [`assert_error_variants_exhaustive`] and by the array's own
 /// length: a new variant fails to compile there, and widening this array
 /// without adding an entry fails to compile here.
-fn all_error_variants() -> [GifLayerError; 9] {
+fn all_error_variants() -> [GifLayerError; 13] {
     [
+        GifLayerError::NonFiniteParam {
+            field: "leak",
+            class: crate::NonFiniteClass::Nan,
+        },
+        GifLayerError::NonFiniteWeight {
+            index: 2,
+            class: crate::NonFiniteClass::PosInfinity,
+        },
+        GifLayerError::NonFiniteInput {
+            index: 3,
+            class: crate::NonFiniteClass::NegInfinity,
+        },
+        GifLayerError::NumericOverflow {
+            neuron: 1,
+            stage: "drive",
+            class: crate::NonFiniteClass::PosInfinity,
+        },
         GifLayerError::FanInExceedsInputs {
             fan_in: 5,
             num_inputs: 4,

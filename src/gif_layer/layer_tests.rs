@@ -507,3 +507,6 @@ mod golden_tests;
 
 #[path = "layer_corinth_parity_tests.rs"]
 mod corinth_parity_tests;
+
+#[path = "layer_numeric_tests.rs"]
+mod numeric_tests;

@@ -715,6 +715,13 @@ examples above, which resolve the local source.
    version = version_match.group(1)
    escaped = re.escape(version)
 
+   pins = set(
+       re.findall(
+           r'neuromod\s*=\s*(?:\{\s*version\s*=\s*)?"(\d+\.\d+\.\d+)"', readme
+       )
+   )
+   require(pins <= {version}, f"stale neuromod pins in README.md: {sorted(pins - {version})}")
+
    headings = re.findall(rf"^## \[{escaped}\].*$", changelog, re.M)
    require(len(headings) == 1, f"expected one {version} heading: {headings}")
    dated_heading = re.fullmatch(rf"## \[{escaped}\] - (\d{{4}}-\d{{2}}-\d{{2}})", headings[0])

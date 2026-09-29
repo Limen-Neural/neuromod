@@ -762,7 +762,9 @@ The badge links to Codecov's test coverage report.
 HTTP 400 for this org). The coverage workflow passes that token and sets
 `fail_ci_if_error: false`, so a missing/stale token does **not** fail CI—only the
 badge may stay `unknown` until the secret is correct. After a successful upload on
-`main`, the badge shows a coverage %.
+`main`, the badge shows a coverage %. A green Codecov job is not proof of
+delivery — upload failures log an error but still pass; confirm the hosted report
+on the dashboard for the commit SHA.
 
 Local coverage (also listed under [Development](#development)):
 

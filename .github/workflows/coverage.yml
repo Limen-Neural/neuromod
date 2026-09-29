@@ -54,15 +54,19 @@ jobs:
           cargo nextest run --all-features --profile ci
           cp target/nextest/ci/junit.xml junit.xml
 
+      # test-results-action is deprecated; codecov-action handles test results
+      # via report_type. A green step does not prove hosted delivery — check
+      # https://app.codecov.io/gh/Limen-Neural/neuromod for the commit report.
       - name: Upload test results to Codecov
         if: ${{ !cancelled() }}
-        uses: codecov/test-results-action@0fa95f0e1eeaafde2c782583b36b28ad0d8c77d3 # v1
+        uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
         with:
           files: junit.xml
-          # Codecov no longer accepts tokenless uploads for this org (HTTP 400).
-          # Prefer secrets.CODECOV_TOKEN; do not fail the job if upload is unavailable.
+          report_type: test_results
+          slug: Limen-Neural/neuromod
           token: ${{ secrets.CODECOV_TOKEN }}
           fail_ci_if_error: false
+          verbose: true
 
       - name: Upload coverage to Codecov
         if: ${{ !cancelled() }}
@@ -73,5 +77,7 @@ jobs:
           slug: Limen-Neural/neuromod
           token: ${{ secrets.CODECOV_TOKEN }}
           # Upload is observability, not a release gate; tokenless is broken.
+          # An upload failure logs an error but leaves the job green — verify
+          # hosted delivery on the Codecov dashboard, not the check status.
           fail_ci_if_error: false
           verbose: true

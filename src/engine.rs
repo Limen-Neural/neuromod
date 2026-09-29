@@ -146,7 +146,8 @@ impl fmt::Display for ChannelVector {
 /// Every variant is returned **before** the network is mutated: a failed step
 /// is atomic. Adding a variant is a source-level break for exhaustive `match`es:
 /// handle [`Self::NonFiniteStimulus`], [`Self::NonFiniteModulator`],
-/// [`Self::StepCounterExhausted`], and [`Self::CheckpointShapeMismatch`], or use
+/// [`Self::StepCounterExhausted`], [`Self::CheckpointShapeMismatch`], and
+/// [`Self::NonFinitePredictiveState`], or use
 /// a `_` wildcard.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StepError {
@@ -163,6 +164,11 @@ pub enum StepError {
         field: ModulatorField,
         class: NonFiniteClass,
     },
+    /// The first stored predictive value that is NaN or infinite.
+    ///
+    /// Checked on every step, including after public-field edits. This does not
+    /// validate other stored neuron values or establish checkpoint integrity.
+    NonFinitePredictiveState { index: usize, class: NonFiniteClass },
     /// `global_step` has reached `i64::MAX` or is negative.
     StepCounterExhausted { global_step: i64 },
     /// A stored per-channel state vector's length did not match
@@ -195,6 +201,9 @@ impl fmt::Display for StepError {
             Self::NonFiniteModulator { field, class } => {
                 write!(f, "non-finite modulator {field}: {class}")
             }
+            Self::NonFinitePredictiveState { index, class } => {
+                write!(f, "non-finite stored predictive_state[{index}]: {class}")
+            }
             Self::StepCounterExhausted { global_step } => {
                 write!(f, "step counter cannot advance from {global_step}")
             }
@@ -210,6 +219,17 @@ impl fmt::Display for StepError {
 }
 
 impl core::error::Error for StepError {}
+
+/// Validate stored predictive values before mutation; return the first invalid
+/// channel without allocating. Shape validation must run first.
+fn validate_predictive_state(values: &[f32]) -> Result<(), StepError> {
+    for (index, &value) in values.iter().enumerate() {
+        if let Some(class) = NonFiniteClass::classify(value) {
+            return Err(StepError::NonFinitePredictiveState { index, class });
+        }
+    }
+    Ok(())
+}
 
 /// Length, then every stimulus, then each modulator field. Returns on the first
 /// problem; never allocates. Callers must invoke this before any mutation or
@@ -476,6 +496,16 @@ impl SpikingNetwork {
     ///   trailing entries) are rejected before any mutation. This does **not**
     ///   police each neuron's `weights` / `eligibility` width, which the
     ///   pipeline tolerates by design.
+    /// - Stored [`Self::predictive_state`] values must be finite, else
+    ///   [`StepError::NonFinitePredictiveState`] identifies the first invalid
+    ///   channel and its [`NonFiniteClass`]. This also catches public-field edits
+    ///   after deserialization. Other stored neuron floats are not validated
+    ///   for finiteness; this is not comprehensive checkpoint validation.
+    /// - Normal stepping resizes and sanitizes eligibility traces in STDP;
+    ///   frozen stepping skips that repair and preserves learning state.
+    ///   R-STDP accessors supply effective fallback bounds/rates/tau without
+    ///   necessarily rewriting the stored configuration. Missing older fields
+    ///   retain their existing serde defaults.
     /// - [`Self::global_step`] is a discrete tick counter in **steps**, range
     ///   `0..=i64::MAX`. A call that would increment past [`i64::MAX`], or a
     ///   negative counter, returns [`StepError::StepCounterExhausted`] and
@@ -487,16 +517,21 @@ impl SpikingNetwork {
     ///   increments, before the modulator snapshot is stored, before
     ///   predictive state / membranes / traces / weights change, and before
     ///   any random-number generator (RNG) draw. A rejected step is a no-op.
-    /// - Preflight is a single linear pass over the stimulus slice plus the
-    ///   four modulator fields and two `O(1)` state-vector length checks; it
-    ///   allocates nothing.
+    /// - Error precedence: stimulus length, stimulus finiteness, modulator
+    ///   finiteness, predictive-state length, input-spike-time length,
+    ///   predictive-state finiteness, then counter exhaustion.
+    /// - Preflight has two allocation-free linear scans (stimuli and stored
+    ///   predictive values), four modulator checks, and two `O(1)` length
+    ///   checks. The additional scan is `O(num_channels)`; overall step cost
+    ///   remains `O(num_channels)` plus neuron work.
     /// - Returns the indices of **LIF** neurons that fired this step (Izhikevich
     ///   spikes are not listed in the return value).
     ///
     /// # Order of work
     ///
     /// 1. Preflight: reject a stimulus length mismatch, non-finite input, a
-    ///    per-channel state-vector shape mismatch, or an exhausted `global_step`.
+    ///    per-channel state-vector shape mismatch, non-finite stored predictive
+    ///    values, or an exhausted `global_step`.
     /// 2. Store `modulators` and derive stress / learning rates.
     /// 3. Recompute LIF targets from neuromodulators: assign `decay_rate`
     ///    directly; soft-update `threshold` toward its target (learning-rate blend).
@@ -571,6 +606,9 @@ impl SpikingNetwork {
 
     /// Advance one held-out evaluation step without retaining plasticity changes.
     ///
+    /// Uses the same preflight, error precedence, and atomic rejection contract
+    /// as [`Self::step`], including stored predictive-value validation.
+    ///
     /// This executes the same runtime pipeline as [`Self::step`], including
     /// modulator-driven effective dynamics, input-spike RNG decisions, membrane
     /// integration, inhibition, spike/timestamp updates, predictive state, and
@@ -635,7 +673,8 @@ impl SpikingNetwork {
     /// deterministic replay contract of [`Self::step_with_rng`]. For an
     /// identical starting network, input, modulators, and RNG state, it makes
     /// exactly the same Bernoulli decisions and advances the caller's stream by
-    /// exactly the same amount as normal stepping. Rejected input consumes no
+    /// exactly the same amount as normal stepping. The preflight and error
+    /// precedence of [`Self::step`] apply. Rejected input or stored state consumes no
     /// random values and leaves the network unchanged.
     ///
     /// Pass the same generator on every step of an evaluation sequence. The
@@ -649,6 +688,7 @@ impl SpikingNetwork {
         self.step_with_rng_mode(stimuli, modulators, rng, StepMode::Frozen)
     }
 
+    /// Shared preflight precedes counter mutation, frozen snapshots, and RNG draws.
     fn step_with_rng_mode<R: Rng + ?Sized>(
         &mut self,
         stimuli: &[f32],
@@ -670,6 +710,10 @@ impl SpikingNetwork {
             &self.predictive_state,
             &self.input_spike_times,
         )?;
+
+        // Checking in update_predictive_errors would be too late: the counter
+        // and neuron parameters would already have changed.
+        validate_predictive_state(&self.predictive_state)?;
 
         // Checked before any state is touched or any random-number generator is
         // drawn. A restored checkpoint can carry a counter at i64::MAX
@@ -1122,11 +1166,16 @@ mod tests {
             StepError::NonFiniteModulator { .. } => {}
             StepError::StepCounterExhausted { .. } => {}
             StepError::CheckpointShapeMismatch { .. } => {}
+            StepError::NonFinitePredictiveState { .. } => {}
         }
     }
 
-    fn all_step_error_variants() -> [StepError; 5] {
+    fn all_step_error_variants() -> [StepError; 6] {
         [
+            StepError::NonFinitePredictiveState {
+                index: 1,
+                class: NonFiniteClass::Nan,
+            },
             StepError::InputLenMismatch {
                 expected: 4,
                 got: 2,
@@ -3370,7 +3419,7 @@ mod tests {
 
     #[test]
     fn checkpoint_shape_check_precedes_counter_check() {
-        // The shape preflight sits immediately before the counter check, so a
+        // The shape preflight precedes predictive-value and counter checks, so a
         // checkpoint that is both malformed *and* has an exhausted or negative
         // counter reports the shape mismatch first. Either way the malformed
         // state is untouched and no RNG is drawn.
@@ -3440,5 +3489,303 @@ mod tests {
             .expect("valid restored network must step");
         assert!(spikes.iter().all(|&i| i < 4));
         assert_eq!(restored.global_step, 1);
+    }
+    #[test]
+    fn checkpoint_predictive_json_overflow_issue_177() {
+        let network = SpikingNetwork::with_dimensions(1, 0, 1);
+        let json = serde_json::to_string(&network)
+            .unwrap()
+            .replace("\"predictive_state\":[0.0]", "\"predictive_state\":[1e39]");
+        let mut restored: SpikingNetwork = serde_json::from_str(&json).unwrap();
+        assert!(restored.predictive_state[0].is_infinite());
+        let mods = NeuroModulators {
+            dopamine: 0.0,
+            ..Default::default()
+        };
+        assert!(restored.step(&[0.0], &mods).is_err());
+        assert!(restored.neurons[0].membrane_potential.is_finite());
+    }
+
+    #[derive(Clone, Copy, Debug)]
+    enum PredictiveStepPath {
+        Normal,
+        Frozen,
+        Seeded,
+        FrozenSeeded,
+    }
+
+    const PREDICTIVE_STEP_PATHS: [PredictiveStepPath; 4] = [
+        PredictiveStepPath::Normal,
+        PredictiveStepPath::Frozen,
+        PredictiveStepPath::Seeded,
+        PredictiveStepPath::FrozenSeeded,
+    ];
+
+    impl PredictiveStepPath {
+        fn step(
+            self,
+            network: &mut SpikingNetwork,
+            (stimuli, mods): (&[f32], &NeuroModulators),
+            rng: &mut StdRng,
+        ) -> Result<Vec<usize>, StepError> {
+            match self {
+                Self::Normal => network.step(stimuli, mods),
+                Self::Frozen => network.step_frozen(stimuli, mods),
+                Self::Seeded => network.step_with_rng(stimuli, mods, rng),
+                Self::FrozenSeeded => network.step_frozen_with_rng(stimuli, mods, rng),
+            }
+        }
+    }
+
+    fn assert_predictive_rejection(
+        path: PredictiveStepPath,
+        network: &mut SpikingNetwork,
+        inputs: (&[f32], &NeuroModulators),
+        expected: StepError,
+    ) {
+        let before = capture_network(network);
+        // JSON maps every non-finite float to null; supplement it with raw bits
+        // so changing infinity to NaN or canonicalizing a NaN cannot hide.
+        let bits = RuntimeStateBits::capture(network);
+        let mut rng = StdRng::seed_from_u64(177);
+        let mut twin = StdRng::seed_from_u64(177);
+        assert_eq!(
+            path.step(network, inputs, &mut rng),
+            Err(expected),
+            "{path:?}"
+        );
+        assert_network_unchanged(network, &before);
+        assert_eq!(RuntimeStateBits::capture(network), bits, "{path:?}");
+        if matches!(
+            path,
+            PredictiveStepPath::Seeded | PredictiveStepPath::FrozenSeeded
+        ) {
+            assert_eq!(rng.next_u64(), twin.next_u64(), "{path:?}");
+        }
+    }
+
+    fn assert_predictive_public_value(
+        path: PredictiveStepPath,
+        restored: bool,
+        value: f32,
+        class: NonFiniteClass,
+    ) {
+        let mut network = SpikingNetwork::with_dimensions(4, 1, 4);
+        if restored {
+            network = restored_with_json_edit(&network, |_| {});
+        }
+        network.predictive_state[2] = value;
+        network.predictive_state[3] = f32::INFINITY;
+        assert_predictive_rejection(
+            path,
+            &mut network,
+            (&[1.0; 4], &NeuroModulators::default()),
+            StepError::NonFinitePredictiveState { index: 2, class },
+        );
+        network.predictive_state.fill(0.0);
+        let mut rng = StdRng::seed_from_u64(177);
+        path.step(
+            &mut network,
+            (&[1.0; 4], &NeuroModulators::default()),
+            &mut rng,
+        )
+        .expect("repair permits retry");
+        assert_eq!(network.global_step, 1);
+        assert!(network.predictive_state.iter().all(|v| v.is_finite()));
+        assert!(
+            network
+                .neurons
+                .iter()
+                .all(|n| n.membrane_potential.is_finite())
+        );
+        assert!(
+            network
+                .iz_neurons
+                .iter()
+                .all(|n| n.v.is_finite() && n.u.is_finite())
+        );
+    }
+
+    #[test]
+    fn checkpoint_predictive_public_values_atomic_all_paths_and_retry() {
+        for path in PREDICTIVE_STEP_PATHS {
+            for restored in [false, true] {
+                for (value, class) in NON_FINITE_CASES
+                    .into_iter()
+                    .chain([(f32::from_bits(0x7fc0_0177), NonFiniteClass::Nan)])
+                {
+                    assert_predictive_public_value(path, restored, value, class);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn checkpoint_predictive_json_overflow_atomic_all_paths() {
+        for path in PREDICTIVE_STEP_PATHS {
+            for (number, class) in [
+                (1e39_f64, NonFiniteClass::PosInfinity),
+                (-1e39_f64, NonFiniteClass::NegInfinity),
+            ] {
+                let base = SpikingNetwork::with_dimensions(4, 1, 4);
+                let mut json = serde_json::to_value(&base).unwrap();
+                json["predictive_state"][2] = serde_json::json!(number);
+                // Exercise the JSON text consumer boundary, not an f32 fixture
+                // that would serialize infinity as null before decoding.
+                let mut network: SpikingNetwork =
+                    serde_json::from_str(&serde_json::to_string(&json).unwrap()).unwrap();
+                assert_eq!(
+                    NonFiniteClass::classify(network.predictive_state[2]),
+                    Some(class)
+                );
+                assert_predictive_rejection(
+                    path,
+                    &mut network,
+                    (&[1.0; 4], &NeuroModulators::default()),
+                    StepError::NonFinitePredictiveState { index: 2, class },
+                );
+            }
+        }
+    }
+
+    fn predictive_precedence_case(
+        case: usize,
+        network: &mut SpikingNetwork,
+        stimuli: &mut Vec<f32>,
+        mods: &mut NeuroModulators,
+    ) -> StepError {
+        match case {
+            0 => {
+                stimuli.pop();
+                StepError::InputLenMismatch {
+                    expected: 4,
+                    got: 3,
+                }
+            }
+            1 => {
+                stimuli[1] = f32::INFINITY;
+                StepError::NonFiniteStimulus {
+                    index: 1,
+                    class: NonFiniteClass::PosInfinity,
+                }
+            }
+            2 => {
+                mods.serotonin = f32::NEG_INFINITY;
+                StepError::NonFiniteModulator {
+                    field: ModulatorField::Serotonin,
+                    class: NonFiniteClass::NegInfinity,
+                }
+            }
+            _ => stored_predictive_precedence_case(case, network),
+        }
+    }
+
+    fn stored_predictive_precedence_case(case: usize, network: &mut SpikingNetwork) -> StepError {
+        match case {
+            3 | 4 => {
+                let field = if case == 3 {
+                    network.predictive_state.pop();
+                    ChannelVector::PredictiveState
+                } else {
+                    network.input_spike_times.pop();
+                    ChannelVector::InputSpikeTimes
+                };
+                StepError::CheckpointShapeMismatch {
+                    field,
+                    expected: 4,
+                    got: 3,
+                }
+            }
+            _ => {
+                network.global_step = if case == 5 { -1 } else { i64::MAX };
+                StepError::NonFinitePredictiveState {
+                    index: 2,
+                    class: NonFiniteClass::Nan,
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn checkpoint_predictive_error_precedence_all_paths() {
+        for path in PREDICTIVE_STEP_PATHS {
+            for case in 0..7 {
+                let mut network = SpikingNetwork::with_dimensions(4, 1, 4);
+                network.predictive_state[2] = f32::NAN;
+                let mut stimuli = vec![1.0; 4];
+                let mut mods = NeuroModulators::default();
+                let expected =
+                    predictive_precedence_case(case, &mut network, &mut stimuli, &mut mods);
+                assert_predictive_rejection(path, &mut network, (&stimuli, &mods), expected);
+            }
+        }
+    }
+
+    #[test]
+    fn checkpoint_predictive_finite_extremes_and_empty_are_accepted() {
+        for path in PREDICTIVE_STEP_PATHS {
+            for values in [vec![], vec![0.0, -0.0, f32::MAX, f32::MIN]] {
+                let mut network = SpikingNetwork::with_dimensions(0, 0, values.len());
+                let stimuli = vec![0.0; values.len()];
+                network.predictive_state = values;
+                let mut rng = StdRng::seed_from_u64(177);
+                path.step(
+                    &mut network,
+                    (&stimuli, &NeuroModulators::default()),
+                    &mut rng,
+                )
+                .unwrap();
+                assert_eq!(network.global_step, 1);
+                assert!(network.predictive_state.iter().all(|v| v.is_finite()));
+            }
+        }
+    }
+
+    #[test]
+    fn checkpoint_predictive_valid_continuation_preserves_weight_width_tolerance() {
+        for path in [PredictiveStepPath::Seeded, PredictiveStepPath::FrozenSeeded] {
+            for width in [2, 6] {
+                let mut uninterrupted = SpikingNetwork::with_dimensions(4, 1, 4);
+                for neuron in &mut uninterrupted.neurons {
+                    neuron.weights.resize(width, 0.1);
+                }
+                let mods = NeuroModulators::default();
+                let mut rng = StdRng::seed_from_u64(177);
+                let mut checkpoint_run = restored_with_json_edit(&uninterrupted, |_| {});
+                let mut restored_rng = StdRng::seed_from_u64(177);
+                for _ in 0..5 {
+                    path.step(&mut checkpoint_run, (&[0.5; 4], &mods), &mut restored_rng)
+                        .unwrap();
+                    path.step(&mut uninterrupted, (&[0.5; 4], &mods), &mut rng)
+                        .unwrap();
+                }
+                let mut restored: SpikingNetwork =
+                    serde_json::from_str(&serde_json::to_string(&checkpoint_run).unwrap()).unwrap();
+                for _ in 0..7 {
+                    assert_eq!(
+                        path.step(&mut restored, (&[0.5; 4], &mods), &mut restored_rng)
+                            .unwrap(),
+                        path.step(&mut uninterrupted, (&[0.5; 4], &mods), &mut rng)
+                            .unwrap(),
+                    );
+                    assert_eq!(capture_network(&restored), capture_network(&uninterrupted));
+                    assert_eq!(
+                        RuntimeStateBits::capture(&restored),
+                        RuntimeStateBits::capture(&uninterrupted)
+                    );
+                }
+                assert_eq!(rng.next_u64(), restored_rng.next_u64());
+                assert_eq!(restored.global_step, 12);
+            }
+        }
+    }
+
+    #[test]
+    fn checkpoint_predictive_error_display_identifies_field_index_and_class() {
+        for (_, class) in NON_FINITE_CASES {
+            let message = StepError::NonFinitePredictiveState { index: 2, class }.to_string();
+            assert!(message.contains("predictive_state[2]"));
+            assert!(message.contains(&class.to_string()));
+        }
     }
 }

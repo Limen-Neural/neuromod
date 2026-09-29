@@ -89,6 +89,96 @@ fn tensor_as_f32(
     }
 }
 
+/// Build an [`HandoffError::UnsupportedMapping`] for the named `IF` node.
+fn unsupported(node: &str, reason: String) -> HandoffError {
+    HandoffError::UnsupportedMapping {
+        node: node.to_owned(),
+        type_name: "IF",
+        reason,
+    }
+}
+
+/// `v_threshold`'s shape must equal `r`'s shape (`shape`).
+fn check_shapes_agree(name: &str, node: &If, shape: &[usize]) -> Result<(), HandoffError> {
+    if node.v_threshold.shape() != shape {
+        return Err(unsupported(
+            name,
+            format!(
+                "`v_threshold` shape {:?} != `r` shape {shape:?}",
+                node.v_threshold.shape()
+            ),
+        ));
+    }
+    Ok(())
+}
+
+/// An absent `v_reset` implies all-zeros; a present one must match `shape` and
+/// be entirely zero (only a hard reset to `0` is supported).
+fn check_v_reset_all_zero(name: &str, node: &If, shape: &[usize]) -> Result<(), HandoffError> {
+    let Some(v_reset_tensor) = node.v_reset.as_ref() else {
+        return Ok(());
+    };
+    if v_reset_tensor.shape() != shape {
+        return Err(unsupported(
+            name,
+            format!(
+                "`v_reset` shape {:?} != `r` shape {shape:?}",
+                v_reset_tensor.shape()
+            ),
+        ));
+    }
+    let v_reset = tensor_as_f32(name, "v_reset", v_reset_tensor)?;
+    if let Some((i, value)) = v_reset.iter().copied().enumerate().find(|&(_, v)| v != 0.0) {
+        return Err(unsupported(
+            name,
+            format!("`v_reset[{i}]` = {value} is non-zero; only hard reset to 0 is supported"),
+        ));
+    }
+    Ok(())
+}
+
+/// Every resistance value must be finite.
+fn check_r_finite(name: &str, r: &[f32]) -> Result<(), HandoffError> {
+    if let Some((i, value)) = r.iter().copied().enumerate().find(|&(_, v)| !v.is_finite()) {
+        return Err(unsupported(
+            name,
+            format!("`r[{i}]` = {value} is non-finite"),
+        ));
+    }
+    Ok(())
+}
+
+/// Every threshold must be finite and strictly positive.
+fn check_thresholds(name: &str, v_threshold: &[f32]) -> Result<(), HandoffError> {
+    for (i, &threshold) in v_threshold.iter().enumerate() {
+        if !threshold.is_finite() {
+            return Err(unsupported(
+                name,
+                format!("`v_threshold[{i}]` = {threshold} is non-finite"),
+            ));
+        }
+        if threshold <= 0.0 {
+            return Err(unsupported(
+                name,
+                format!("`v_threshold[{i}]` = {threshold} is non-positive"),
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// A single non-leaky (`decay_rate = 0`) integrate-and-fire neuron whose
+/// threshold and baseline are `threshold`, starting at `v = 0` with no weights.
+fn lapicque_if_neuron(threshold: f32) -> LapicqueNeuron {
+    let mut neuron = LapicqueNeuron::new();
+    neuron.decay_rate = 0.0;
+    neuron.threshold = threshold;
+    neuron.base_threshold = threshold;
+    neuron.membrane_potential = 0.0;
+    neuron.weights = Vec::new();
+    neuron
+}
+
 impl IfHandoff {
     /// Map a NIR `IF` node into a neuromod neuron bank.
     ///
@@ -106,67 +196,16 @@ impl IfHandoff {
 
         let r = tensor_as_f32(&name, "r", &node.r)?;
         let v_threshold = tensor_as_f32(&name, "v_threshold", &node.v_threshold)?;
-
         let shape = node.r.shape().to_vec();
-        let unsupported = |reason: String| HandoffError::UnsupportedMapping {
-            node: name.clone(),
-            type_name: "IF",
-            reason,
-        };
 
-        // Shapes must agree across r / v_threshold / v_reset.
-        if node.v_threshold.shape() != shape.as_slice() {
-            return Err(unsupported(format!(
-                "`v_threshold` shape {:?} != `r` shape {shape:?}",
-                node.v_threshold.shape()
-            )));
-        }
+        // Each check is delegated to a small helper so this constructor stays a
+        // flat, readable sequence of validations rather than nested branches.
+        check_shapes_agree(&name, node, &shape)?;
+        check_v_reset_all_zero(&name, node, &shape)?;
+        check_r_finite(&name, &r)?;
+        check_thresholds(&name, &v_threshold)?;
 
-        // v_reset: absent means all-zeros; present must match shape and be all-zero.
-        if let Some(v_reset_tensor) = node.v_reset.as_ref() {
-            if v_reset_tensor.shape() != shape.as_slice() {
-                return Err(unsupported(format!(
-                    "`v_reset` shape {:?} != `r` shape {shape:?}",
-                    v_reset_tensor.shape()
-                )));
-            }
-            let v_reset = tensor_as_f32(&name, "v_reset", v_reset_tensor)?;
-            if let Some((i, value)) = v_reset.iter().copied().enumerate().find(|&(_, v)| v != 0.0) {
-                return Err(unsupported(format!(
-                    "`v_reset[{i}]` = {value} is non-zero; only hard reset to 0 is supported"
-                )));
-            }
-        }
-
-        // Reject non-finite r and non-finite / non-positive thresholds.
-        if let Some((i, value)) = r.iter().copied().enumerate().find(|&(_, v)| !v.is_finite()) {
-            return Err(unsupported(format!("`r[{i}]` = {value} is non-finite")));
-        }
-        for (i, &threshold) in v_threshold.iter().enumerate() {
-            if !threshold.is_finite() {
-                return Err(unsupported(format!(
-                    "`v_threshold[{i}]` = {threshold} is non-finite"
-                )));
-            }
-            if threshold <= 0.0 {
-                return Err(unsupported(format!(
-                    "`v_threshold[{i}]` = {threshold} is non-positive"
-                )));
-            }
-        }
-
-        let bank = v_threshold
-            .iter()
-            .map(|&threshold| {
-                let mut neuron = LapicqueNeuron::new();
-                neuron.decay_rate = 0.0;
-                neuron.threshold = threshold;
-                neuron.base_threshold = threshold;
-                neuron.membrane_potential = 0.0;
-                neuron.weights = Vec::new();
-                neuron
-            })
-            .collect();
+        let bank = v_threshold.iter().map(|&t| lapicque_if_neuron(t)).collect();
 
         Ok(Self {
             node: name,

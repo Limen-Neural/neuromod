@@ -3676,18 +3676,16 @@ mod tests {
                     class: NonFiniteClass::NegInfinity,
                 }
             }
-            3 => {
-                network.predictive_state.pop();
+            3 | 4 => {
+                let field = if case == 3 {
+                    network.predictive_state.pop();
+                    ChannelVector::PredictiveState
+                } else {
+                    network.input_spike_times.pop();
+                    ChannelVector::InputSpikeTimes
+                };
                 StepError::CheckpointShapeMismatch {
-                    field: ChannelVector::PredictiveState,
-                    expected: 4,
-                    got: 3,
-                }
-            }
-            4 => {
-                network.input_spike_times.pop();
-                StepError::CheckpointShapeMismatch {
-                    field: ChannelVector::InputSpikeTimes,
+                    field,
                     expected: 4,
                     got: 3,
                 }

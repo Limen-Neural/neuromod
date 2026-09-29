@@ -1,0 +1,4 @@
+# Build output of the standalone NIR->neuromod interop harness. The root
+# .gitignore's `/target/` rule is anchored to the repo root, so this nested
+# target/ needs its own scoped rule to stay out of git.
+/target/

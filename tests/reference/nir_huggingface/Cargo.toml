@@ -1,0 +1,47 @@
+# Offline NIR -> neuromod interoperability smoke harness.
+#
+# This crate is intentionally ISOLATED from the neuromod crate, exactly like the
+# sibling `tests/reference/corinth_gif/` parity generator:
+#   * It declares its own EMPTY `[workspace]` table below, so a `cargo` command
+#     run anywhere inside the neuromod tree never absorbs it as a workspace
+#     member.
+#   * neuromod's own Cargo.toml additionally lists `tests/reference/nir_huggingface`
+#     in both its `[workspace] exclude` and `[package] exclude` lists, so
+#     `cargo build/test/package` in neuromod ignores it and it is never shipped
+#     in the published crate.
+#
+# It loads two vendored Hugging Face-derived `.nir` fixtures via `nir-rs` and
+# maps supported IF neuron semantics into neuromod's `LapicqueNeuron`. The
+# neuromod library itself gains NO nir-rs / hdf5 dependency and NO import,
+# tensor-math, or graph-runtime responsibility (see docs/neuromod-boundary-matrix.md).
+#
+# HDF5 note: `nir-rs` reads `.nir` (HDF5) files through the `hdf5` feature. This
+# sandbox and downstream CI may lack a system libhdf5, so we ALSO depend on
+# `hdf5-metno` with the `static` + `zlib` features. Cargo feature unification
+# then compiles a VENDORED static libhdf5 from source (via cmake), keeping the
+# harness fully offline and hermetic after the initial fetch.
+
+[package]
+name = "nir-huggingface-interop"
+version = "0.0.0"
+edition = "2024"
+rust-version = "1.98.1"
+publish = false
+license = "MIT OR Apache-2.0"
+description = "Offline NIR -> neuromod interoperability smoke. Loads vendored Hugging Face-derived .nir fixtures via nir-rs and maps IF neurons into neuromod. Not part of the neuromod crate."
+
+# Empty workspace table: makes this a workspace ROOT of its own so `cargo`
+# invoked inside neuromod never treats it as a member of neuromod's workspace.
+[workspace]
+
+[lib]
+name = "nir_huggingface_interop"
+path = "src/lib.rs"
+
+[dependencies]
+neuromod = { path = "../../.." }
+nir-rs = { version = "=0.4.4", features = ["hdf5"] }
+sha2 = "0.10"
+# Force the vendored, from-source static HDF5 build so the harness compiles
+# without a system libhdf5. Feature-unified with nir-rs's `hdf5` dependency.
+hdf5-metno = { version = "0.14.1", features = ["static", "zlib"] }

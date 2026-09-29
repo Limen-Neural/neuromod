@@ -28,6 +28,10 @@ exclude = [
     # Standalone parity-fixture generator (own empty [workspace] table). Kept
     # out of the published crate; it is a dev-only offline tool, not library code.
     "tests/reference/corinth_gif/",
+    # Dev-only, offline, boundary-isolated NIR->neuromod interop smoke harness
+    # (own empty [workspace] table). Kept out of the published crate; it depends
+    # on nir-rs/hdf5, which neuromod must never gain.
+    "tests/reference/nir_huggingface/",
 ]
 repository = "https://github.com/Limen-Neural/neuromod"
 readme = "README.md"
@@ -40,7 +44,13 @@ documentation = "https://docs.rs/neuromod"
 # Nested outsider demo resolves `neuromod` from crates.io, not this path crate.
 # The parity-fixture generator has its own empty [workspace] table too; excluding
 # it here keeps `cargo build/test` in neuromod from ever absorbing it.
-exclude = ["examples/crates-io-standalone", "tests/reference/corinth_gif"]
+exclude = [
+    "examples/crates-io-standalone",
+    "tests/reference/corinth_gif",
+    # Boundary-isolated NIR->neuromod interop smoke harness; its own workspace
+    # root. Excluded so neuromod's build/test never absorbs it or its nir-rs/hdf5 deps.
+    "tests/reference/nir_huggingface",
+]
 
 [lib]
 name = "neuromod"

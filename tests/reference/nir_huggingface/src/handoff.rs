@@ -98,18 +98,32 @@ fn unsupported(node: &str, reason: String) -> HandoffError {
     }
 }
 
-/// `v_threshold`'s shape must equal `r`'s shape (`shape`).
-fn check_shapes_agree(name: &str, node: &If, shape: &[usize]) -> Result<(), HandoffError> {
-    if node.v_threshold.shape() != shape {
+/// A parameter tensor's shape must equal `r`'s shape (`shape`).
+fn check_shape_matches(
+    name: &str,
+    field: &str,
+    tensor: &nir_rs::Tensor,
+    shape: &[usize],
+) -> Result<(), HandoffError> {
+    if tensor.shape() != shape {
         return Err(unsupported(
             name,
             format!(
-                "`v_threshold` shape {:?} != `r` shape {shape:?}",
-                node.v_threshold.shape()
+                "`{field}` shape {:?} != `r` shape {shape:?}",
+                tensor.shape()
             ),
         ));
     }
     Ok(())
+}
+
+/// The first `(index, value)` pair whose value is not finite, if any.
+fn first_non_finite(values: &[f32]) -> Option<(usize, f32)> {
+    values
+        .iter()
+        .copied()
+        .enumerate()
+        .find(|&(_, v)| !v.is_finite())
 }
 
 /// An absent `v_reset` implies all-zeros; a present one must match `shape` and
@@ -118,15 +132,7 @@ fn check_v_reset_all_zero(name: &str, node: &If, shape: &[usize]) -> Result<(), 
     let Some(v_reset_tensor) = node.v_reset.as_ref() else {
         return Ok(());
     };
-    if v_reset_tensor.shape() != shape {
-        return Err(unsupported(
-            name,
-            format!(
-                "`v_reset` shape {:?} != `r` shape {shape:?}",
-                v_reset_tensor.shape()
-            ),
-        ));
-    }
+    check_shape_matches(name, "v_reset", v_reset_tensor, shape)?;
     let v_reset = tensor_as_f32(name, "v_reset", v_reset_tensor)?;
     if let Some((i, value)) = v_reset.iter().copied().enumerate().find(|&(_, v)| v != 0.0) {
         return Err(unsupported(
@@ -139,7 +145,7 @@ fn check_v_reset_all_zero(name: &str, node: &If, shape: &[usize]) -> Result<(), 
 
 /// Every resistance value must be finite.
 fn check_r_finite(name: &str, r: &[f32]) -> Result<(), HandoffError> {
-    if let Some((i, value)) = r.iter().copied().enumerate().find(|&(_, v)| !v.is_finite()) {
+    if let Some((i, value)) = first_non_finite(r) {
         return Err(unsupported(
             name,
             format!("`r[{i}]` = {value} is non-finite"),
@@ -150,19 +156,22 @@ fn check_r_finite(name: &str, r: &[f32]) -> Result<(), HandoffError> {
 
 /// Every threshold must be finite and strictly positive.
 fn check_thresholds(name: &str, v_threshold: &[f32]) -> Result<(), HandoffError> {
-    for (i, &threshold) in v_threshold.iter().enumerate() {
-        if !threshold.is_finite() {
-            return Err(unsupported(
-                name,
-                format!("`v_threshold[{i}]` = {threshold} is non-finite"),
-            ));
-        }
-        if threshold <= 0.0 {
-            return Err(unsupported(
-                name,
-                format!("`v_threshold[{i}]` = {threshold} is non-positive"),
-            ));
-        }
+    if let Some((i, value)) = first_non_finite(v_threshold) {
+        return Err(unsupported(
+            name,
+            format!("`v_threshold[{i}]` = {value} is non-finite"),
+        ));
+    }
+    if let Some((i, value)) = v_threshold
+        .iter()
+        .copied()
+        .enumerate()
+        .find(|&(_, v)| v <= 0.0)
+    {
+        return Err(unsupported(
+            name,
+            format!("`v_threshold[{i}]` = {value} is non-positive"),
+        ));
     }
     Ok(())
 }
@@ -200,7 +209,7 @@ impl IfHandoff {
 
         // Each check is delegated to a small helper so this constructor stays a
         // flat, readable sequence of validations rather than nested branches.
-        check_shapes_agree(&name, node, &shape)?;
+        check_shape_matches(&name, "v_threshold", &node.v_threshold, &shape)?;
         check_v_reset_all_zero(&name, node, &shape)?;
         check_r_finite(&name, &r)?;
         check_thresholds(&name, &v_threshold)?;
@@ -284,6 +293,16 @@ impl IfHandoff {
         self.apply_step(inputs, t)
     }
 
+    /// Build the [`HandoffError::Runtime`] this bank reports at step `t`.
+    fn runtime_error(&self, index: usize, t: i64, cause: RuntimeCause) -> HandoffError {
+        HandoffError::Runtime {
+            node: self.node.clone(),
+            index,
+            step: t,
+            cause,
+        }
+    }
+
     /// Phase 1: length + per-element finiteness of the input, the stimulus
     /// `r[i] * inputs[i]`, and the projected membrane potential
     /// (`v + stimulus`, since `decay_rate == 0`). Mutates nothing.
@@ -293,15 +312,14 @@ impl IfHandoff {
     /// to `0.0`, which would hide the non-finite value.
     fn validate_step_inputs(&self, inputs: &[f32], t: i64) -> Result<(), HandoffError> {
         if inputs.len() != self.bank.len() {
-            return Err(HandoffError::Runtime {
-                node: self.node.clone(),
-                index: 0,
-                step: t,
-                cause: RuntimeCause::InputLenMismatch {
+            return Err(self.runtime_error(
+                0,
+                t,
+                RuntimeCause::InputLenMismatch {
                     expected: self.bank.len(),
                     got: inputs.len(),
                 },
-            });
+            ));
         }
 
         for (i, (&input, neuron)) in inputs.iter().zip(self.bank.iter()).enumerate() {
@@ -311,12 +329,7 @@ impl IfHandoff {
                 .or_else(|| NonFiniteClass::classify(stimulus))
                 .or_else(|| NonFiniteClass::classify(projected));
             if let Some(class) = class {
-                return Err(HandoffError::Runtime {
-                    node: self.node.clone(),
-                    index: i,
-                    step: t,
-                    cause: RuntimeCause::NonFinite(class),
-                });
+                return Err(self.runtime_error(i, t, RuntimeCause::NonFinite(class)));
             }
         }
         Ok(())
@@ -332,12 +345,7 @@ impl IfHandoff {
 
             let potential = neuron.membrane_potential;
             if fired && potential != 0.0 {
-                return Err(HandoffError::Runtime {
-                    node: self.node.clone(),
-                    index: i,
-                    step: t,
-                    cause: RuntimeCause::ResetViolation { potential },
-                });
+                return Err(self.runtime_error(i, t, RuntimeCause::ResetViolation { potential }));
             }
             spikes.push(fired);
         }

@@ -177,22 +177,35 @@ fn mlp_if1_steps_match_forward_euler_reference() {
     // reaches `v >= threshold` at step ceil(threshold / d) (1-indexed), i.e.
     // spike index ceil(thr / d) - 1 in the 0-indexed train.
     for &i in &[0usize, 1, 7, 42, 128, 255] {
-        let d = r[i] * currents[i];
-        let analytic_step_1indexed = (thresholds[i] / d).ceil() as usize;
-        assert!(analytic_step_1indexed >= 1);
-        let first_spike = (0..steps).find(|&t| got_spikes[t][i]);
-        if analytic_step_1indexed <= steps {
-            assert_eq!(
-                first_spike,
-                Some(analytic_step_1indexed - 1),
-                "MLP if1 element {i}: first-spike step should be ceil(thr/(r*I)) = {analytic_step_1indexed}"
-            );
-        } else {
-            assert_eq!(
-                first_spike, None,
-                "MLP if1 element {i}: should not spike within {steps} steps"
-            );
-        }
+        assert_first_spike_at_analytic_step(i, &r, &currents, &thresholds, &got_spikes);
+    }
+}
+
+/// Assert element `i`'s first spike lands on `ceil(threshold / (r * I)) - 1`,
+/// or that it never spikes when that step is beyond the recorded train.
+fn assert_first_spike_at_analytic_step(
+    i: usize,
+    r: &[f32],
+    currents: &[f32],
+    thresholds: &[f32],
+    got_spikes: &[Vec<bool>],
+) {
+    let steps = got_spikes.len();
+    let d = r[i] * currents[i];
+    let analytic_step_1indexed = (thresholds[i] / d).ceil() as usize;
+    assert!(analytic_step_1indexed >= 1);
+    let first_spike = (0..steps).find(|&t| got_spikes[t][i]);
+    if analytic_step_1indexed <= steps {
+        assert_eq!(
+            first_spike,
+            Some(analytic_step_1indexed - 1),
+            "MLP if1 element {i}: first-spike step should be ceil(thr/(r*I)) = {analytic_step_1indexed}"
+        );
+    } else {
+        assert_eq!(
+            first_spike, None,
+            "MLP if1 element {i}: should not spike within {steps} steps"
+        );
     }
 }
 

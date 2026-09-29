@@ -19,6 +19,25 @@ use nir_huggingface_interop::{HandoffError, IfHandoff, RuntimeCause, load_fixtur
 use nir_rs::Tensor;
 use nir_rs::nodes::If;
 
+/// Build an in-memory `IF` node from flat vectors sharing one shape.
+fn if_node(r: Vec<f32>, v_threshold: Vec<f32>, v_reset: Option<Vec<f32>>) -> If {
+    If {
+        r: Tensor::from_f32([r.len()], r).unwrap(),
+        v_threshold: Tensor::from_f32([v_threshold.len()], v_threshold).unwrap(),
+        v_reset: v_reset.map(|values| Tensor::from_f32([values.len()], values).unwrap()),
+        metadata: Default::default(),
+    }
+}
+
+/// Assert that mapping `node` fails as an unsupported mapping.
+fn assert_unsupported(node: &If, what: &str) {
+    let err = IfHandoff::from_node("if_bad", node).expect_err(what);
+    assert!(
+        matches!(err, HandoffError::UnsupportedMapping { .. }),
+        "expected UnsupportedMapping, got {err:?}"
+    );
+}
+
 // --- Load failures ---------------------------------------------------------
 
 #[test]
@@ -54,47 +73,26 @@ fn load_non_hdf5_file_is_load_error() {
 #[test]
 fn non_zero_v_reset_is_unsupported_mapping() {
     // Valid r / v_threshold, but v_reset is non-zero -> not a hard reset to 0.
-    let node = If {
-        r: Tensor::from_f32([2], vec![1.0, 1.0]).unwrap(),
-        v_threshold: Tensor::from_f32([2], vec![1.0, 1.0]).unwrap(),
-        v_reset: Some(Tensor::from_f32([2], vec![0.1, 0.0]).unwrap()),
-        metadata: Default::default(),
-    };
-    let err =
-        IfHandoff::from_node("if_reset", &node).expect_err("non-zero v_reset must be rejected");
-    assert!(
-        matches!(err, HandoffError::UnsupportedMapping { .. }),
-        "expected UnsupportedMapping, got {err:?}"
-    );
+    let node = if_node(vec![1.0, 1.0], vec![1.0, 1.0], Some(vec![0.1, 0.0]));
+    assert_unsupported(&node, "non-zero v_reset must be rejected");
 }
 
 #[test]
 fn shape_mismatch_is_unsupported_mapping() {
     // r shape [2] but v_threshold shape [3] -> shapes disagree.
-    let node = If {
-        r: Tensor::from_f32([2], vec![1.0, 1.0]).unwrap(),
-        v_threshold: Tensor::from_f32([3], vec![1.0, 1.0, 1.0]).unwrap(),
-        v_reset: None,
-        metadata: Default::default(),
-    };
-    let err = IfHandoff::from_node("if_shape", &node).expect_err("shape mismatch must be rejected");
-    assert!(
-        matches!(err, HandoffError::UnsupportedMapping { .. }),
-        "expected UnsupportedMapping, got {err:?}"
-    );
+    let node = if_node(vec![1.0, 1.0], vec![1.0, 1.0, 1.0], None);
+    assert_unsupported(&node, "shape mismatch must be rejected");
 }
 
 // --- Runtime failures ------------------------------------------------------
 
-/// A valid, small two-element IF handoff for runtime tests.
-fn small_handoff() -> IfHandoff {
-    let node = If {
-        r: Tensor::from_f32([2], vec![1.0, 1.0]).unwrap(),
-        v_threshold: Tensor::from_f32([2], vec![1.0, 1.0]).unwrap(),
-        v_reset: None,
-        metadata: Default::default(),
-    };
-    IfHandoff::from_node("if_runtime", &node).expect("valid IF maps")
+/// A valid, small two-element IF handoff, advanced one sub-threshold step so
+/// "unchanged after failure" is a meaningful, non-zero assertion.
+fn warmed_handoff() -> IfHandoff {
+    let node = if_node(vec![1.0, 1.0], vec![1.0, 1.0], None);
+    let mut handoff = IfHandoff::from_node("if_runtime", &node).expect("valid IF maps");
+    handoff.step(&[0.3, 0.4], 0).expect("valid warm-up step");
+    handoff
 }
 
 /// The membrane potentials of a bank, in order.
@@ -113,11 +111,7 @@ fn non_finite_inputs_are_runtime_errors_without_mutation() {
         (f32::INFINITY, NonFiniteClass::PosInfinity),
         (f32::NEG_INFINITY, NonFiniteClass::NegInfinity),
     ] {
-        let mut handoff = small_handoff();
-
-        // Advance state with one valid, sub-threshold step so "unchanged" is
-        // a meaningful, non-zero assertion.
-        handoff.step(&[0.3, 0.4], 0).expect("valid warm-up step");
+        let mut handoff = warmed_handoff();
         let before = potentials(&handoff);
 
         // Put the bad value in the second element to prove the scan runs over
@@ -147,8 +141,7 @@ fn non_finite_inputs_are_runtime_errors_without_mutation() {
 
 #[test]
 fn wrong_length_input_is_runtime_error_without_mutation() {
-    let mut handoff = small_handoff();
-    handoff.step(&[0.3, 0.4], 0).expect("valid warm-up step");
+    let mut handoff = warmed_handoff();
     let before = potentials(&handoff);
 
     let err = handoff

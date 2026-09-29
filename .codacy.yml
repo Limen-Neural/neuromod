@@ -1,6 +1,8 @@
 ---
 exclude_paths:
   - "Cargo.lock"
+  # Generated lockfile of the standalone, workspace-excluded interop harness.
+  - "tests/reference/nir_huggingface/Cargo.lock"
   - ".cubic/wiki/**"
   - ".cubic/**"
   # Standalone, workspace/package-excluded parity-fixture generator. It vendors a

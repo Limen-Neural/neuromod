@@ -12,8 +12,8 @@
 use std::collections::HashMap;
 
 use nir_huggingface_interop::{
-    AdapterKind, CNN_FIXTURE, MLP_FIXTURE, NodeRole, classify_graph, fixture_path, load_fixture,
-    report_covers_all_nodes,
+    AdapterKind, CNN_FIXTURE, MLP_FIXTURE, NodeRecord, NodeRole, classify_graph, fixture_path,
+    load_fixture, report_covers_all_nodes,
 };
 
 /// Count nodes by their wire `type` string.
@@ -66,6 +66,26 @@ fn cnn_fixture_loads_with_expected_structure() {
     assert_eq!(counts.get("Output").copied().unwrap_or(0), 1, "CNN Output");
 }
 
+/// A non-IF `AdapterConcern` node's kind matches its wire type.
+fn assert_adapter_kind(fixture: &str, record: &NodeRecord, kind: AdapterKind, is_if: bool) {
+    assert!(
+        !is_if,
+        "{fixture}: IF node `{}` must not be an AdapterConcern",
+        record.name
+    );
+    let expected = match record.wire_type {
+        "Affine" | "Conv2d" => AdapterKind::TensorKernel,
+        "AvgPool2d" => AdapterKind::Pooling,
+        "Flatten" => AdapterKind::Reshape,
+        other => panic!("{fixture}: unexpected AdapterConcern wire type {other}"),
+    };
+    assert_eq!(
+        kind, expected,
+        "{fixture}: node `{}` ({}) adapter kind",
+        record.name, record.wire_type
+    );
+}
+
 /// Every node is classified; only IF nodes are `SupportedNeuron`, every other
 /// node gets a non-supported role, and no node is `Unsupported`.
 fn assert_classification(fixture: &str) {
@@ -92,22 +112,7 @@ fn assert_classification(fixture: &str) {
                 record.wire_type
             ),
             NodeRole::AdapterConcern { kind } => {
-                assert!(
-                    !is_if,
-                    "{fixture}: IF node `{}` must not be an AdapterConcern",
-                    record.name
-                );
-                let expected = match record.wire_type {
-                    "Affine" | "Conv2d" => AdapterKind::TensorKernel,
-                    "AvgPool2d" => AdapterKind::Pooling,
-                    "Flatten" => AdapterKind::Reshape,
-                    other => panic!("{fixture}: unexpected AdapterConcern wire type {other}"),
-                };
-                assert_eq!(
-                    *kind, expected,
-                    "{fixture}: node `{}` ({}) adapter kind",
-                    record.name, record.wire_type
-                );
+                assert_adapter_kind(fixture, record, *kind, is_if);
             }
             NodeRole::Unsupported(type_name) => panic!(
                 "{fixture}: node `{}` ({}) classified Unsupported; every node in these fixtures must map to a known role",

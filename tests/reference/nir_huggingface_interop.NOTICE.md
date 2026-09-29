@@ -47,7 +47,7 @@ revisions; graph topology follows the NeuroCUDA hub architectures.
 The harness asserts these in `vendored_fixtures_match_expected_sha256`
 (paths resolved from `CARGO_MANIFEST_DIR`):
 
-```
+```text
 fc0b1a1e0c4caeb9d1f7be8700de0212a76ec5f441cae13038887411fd9a1ef0  neurocuda_mlp_mnist.nir
 972b45984094606b83b5b19173a653524550a5aa416f8a46398baa4250c34f2f  neurocuda_cnn_nmnist.nir
 ```

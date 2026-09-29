@@ -74,6 +74,21 @@ println!("{:?}", raster.per_neuron_counts());
 
 The layer takes no `NeuroModulators`: a GIF hidden layer is a pure integrate-and-fire structure with no reward signal. Callers that want modulation apply it themselves between steps — `weights_mut()` for synaptic strength, `params_mut()` for the shared dynamics (`base_threshold` and friends). `apply_neuromodulation` is **not** usable here: it expects a per-neuron `&mut [f32]` threshold slice, whereas this layer holds one shared `GifParams` for the whole bank rather than a threshold per neuron.
 
+Constructors require finite `GifParams` fields and weights. Each live step also
+checks parameters, all stimuli (including unused channels), and all weights, so
+invalid edits through `params_mut()` / `weights_mut()` are caught before use.
+Finite arithmetic that produces a non-finite drive, integrated state, threshold,
+or post-spike state returns `GifLayerError::NumericOverflow`. Every rejected
+`step` / `step_into` preserves layer state and the caller's spike buffer exactly;
+correct the inputs or mutable edits before retrying. `run` preserves successful
+frames before a failure, so atomicity is per frame, not per batch.
+
+`step_into` remains allocation-free. It validates a complete candidate step,
+then recomputes and commits it with the same CSR traversal and shared GIF
+arithmetic. This costs a second dynamics pass plus linear ingress scans,
+remaining O(inputs + synapses + neurons) with O(1) extra space. Checkpoint shape,
+serialization, and bit-exact golden/Corinth behavior are unchanged.
+
 This module is an upstream port of the equivalent layer from the author's `corinth-canal` repository (issue #101). Internal goldens pin this implementation's generator and traversal behavior, and cross-repository bit-parity vectors are now committed under `tests/reference/`, captured from `corinth-canal` at the pinned source commit and replayed offline by a zero-tolerance parity test (issue #144). See `cargo run --example sparse_gif_layer`.
 
 ## Requirements
@@ -341,6 +356,23 @@ the real trace and weight numbers. Rationale for wiring the types in rather than
 them: [ADR 002](https://github.com/Limen-Neural/neuromod/blob/main/docs/adr/002-wire-eligibility-traces.md).
 
 ## Migration Notes
+
+### 0.7 — finite sparse GIF construction and stepping
+
+`GifLayerError` gains four variants: `NonFiniteParam { field, class }`,
+`NonFiniteWeight { index, class }`, `NonFiniteInput { index, class }`, and
+`NumericOverflow { neuron, stage, class }`. `class` reuses `NonFiniteClass`;
+weight indices address the flat CSR array, input indices name channels, and
+`field` / `stage` identify the parameter or failed transition stage.
+**Exhaustive matches need four new arms** (or a wildcard).
+
+All constructor parameters and explicit weights must be finite. Stepping
+rechecks mutable parameters and weights and rejects non-finite stimuli or
+transitions atomically. Finite signed values remain allowed; finiteness alone
+does not guarantee their arithmetic will avoid overflow. No silent clamping or
+repair is added. Decode-time GIF checkpoint validation and its existing error
+details remain unchanged; these new guards cover constructors and live APIs.
+The single-neuron `GifNeuron` and raw `GifParams` arithmetic APIs are unchanged.
 
 ### 0.7 — reject non-finite stored predictive values
 

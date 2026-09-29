@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::gif::GifParams;
 
+use super::numeric::{Transition, first_non_finite, invalid_parameter, validate_params};
 use super::rng::SplitMix64;
 use super::{GifLayerError, MAX_INPUTS, SparseGifLayerConfig, SpikeRaster};
 
@@ -145,32 +146,7 @@ impl SparseGifHiddenLayerRepr {
             return Err(malformed("adaptation contains a non-finite value"));
         }
 
-        let params = [
-            (self.params.leak, "params.leak is non-finite"),
-            (self.params.drive_scale, "params.drive_scale is non-finite"),
-            (
-                self.params.base_threshold,
-                "params.base_threshold is non-finite",
-            ),
-            (
-                self.params.adaptation_scale,
-                "params.adaptation_scale is non-finite",
-            ),
-            (
-                self.params.adaptation_decay,
-                "params.adaptation_decay is non-finite",
-            ),
-            (
-                self.params.adaptation_coupling,
-                "params.adaptation_coupling is non-finite",
-            ),
-            (
-                self.params.adaptation_increment,
-                "params.adaptation_increment is non-finite",
-            ),
-            (self.params.reset_ratio, "params.reset_ratio is non-finite"),
-        ];
-        if let Some((_, detail)) = params.iter().find(|(value, _)| !value.is_finite()) {
+        if let Some((_, detail, _)) = invalid_parameter(&self.params) {
             return Err(malformed(detail));
         }
 
@@ -247,7 +223,8 @@ impl SparseGifHiddenLayer {
     ///
     /// [`GifLayerError::FanInExceedsInputs`] if `fan_in > num_inputs`, and
     /// [`GifLayerError::InvalidWeightRange`] if the weight range is reversed or
-    /// non-finite.
+    /// non-finite. [`GifLayerError::NonFiniteParam`] identifies the first
+    /// non-finite shared parameter. Finite signed parameters remain supported.
     pub fn new(config: &SparseGifLayerConfig) -> Result<Self, GifLayerError> {
         let SparseGifLayerConfig {
             num_inputs,
@@ -273,6 +250,8 @@ impl SparseGifHiddenLayer {
                 max: w_max,
             });
         }
+
+        validate_params(&params)?;
 
         let (fan_in_offsets, fan_in_sources, weights) =
             Self::generate_topology(num_inputs, num_neurons, fan_in, seed, w_min, w_max);
@@ -414,7 +393,9 @@ impl SparseGifHiddenLayer {
     ///
     /// [`GifLayerError::SourceOutOfRange`] if any source is `>= num_inputs`,
     /// and [`GifLayerError::TooManyInputs`] if `num_inputs` exceeds what a
-    /// `u32` CSR source can address.
+    /// `u32` CSR source can address. [`GifLayerError::NonFiniteParam`] rejects
+    /// non-finite dynamics, and [`GifLayerError::NonFiniteWeight`] identifies
+    /// a non-finite weight by its flat CSR index (rows concatenated in order).
     pub fn from_topology(
         num_inputs: usize,
         params: GifParams,
@@ -431,6 +412,8 @@ impl SparseGifHiddenLayer {
             });
         }
 
+        validate_params(&params)?;
+
         let num_neurons = rows.len();
         let nnz: usize = rows.iter().map(Vec::len).sum();
         let mut fan_in_offsets = Vec::with_capacity(num_neurons + 1);
@@ -445,6 +428,12 @@ impl SparseGifHiddenLayer {
                         neuron,
                         source,
                         num_inputs,
+                    });
+                }
+                if let Some(class) = crate::NonFiniteClass::classify(weight) {
+                    return Err(GifLayerError::NonFiniteWeight {
+                        index: weights.len(),
+                        class,
                     });
                 }
                 fan_in_sources.push(source as u32);
@@ -499,7 +488,8 @@ impl SparseGifHiddenLayer {
     }
 
     /// Mutable access to the shared dynamics — the hook for external threshold
-    /// or leak modulation.
+    /// or leak modulation. All fields must be finite before the next step;
+    /// invalid edits are rejected by stepping, not silently repaired.
     pub fn params_mut(&mut self) -> &mut GifParams {
         &mut self.params
     }
@@ -520,6 +510,9 @@ impl SparseGifHiddenLayer {
     }
 
     /// Mutable weights in CSR order — the hook for external plasticity.
+    ///
+    /// Values must be finite before the next step. A rejected step preserves
+    /// invalid edits for inspection; the caller must correct them before retry.
     pub fn weights_mut(&mut self) -> &mut [f32] {
         &mut self.weights
     }
@@ -552,7 +545,8 @@ impl SparseGifHiddenLayer {
     ///
     /// # Errors
     ///
-    /// [`GifLayerError::InputLenMismatch`] if `stimuli.len() != num_inputs()`.
+    /// The length, numeric, and counter errors documented by [`Self::step_into`].
+    /// Every rejection leaves the layer unchanged.
     pub fn step(&mut self, stimuli: &[f32]) -> Result<Vec<usize>, GifLayerError> {
         let mut spikes = vec![false; self.num_neurons];
         self.step_into(stimuli, &mut spikes)?;
@@ -565,12 +559,40 @@ impl SparseGifHiddenLayer {
 
     /// Advance one time step, writing spike flags into a caller-owned buffer.
     ///
-    /// This is the allocation-free entry point used by [`Self::run`].
+    /// This allocation-free entry point first checks every candidate transition,
+    /// then recomputes and commits it in the same fixed arithmetic order. There
+    /// is no heap scratch state or checkpoint-format change. The second pass
+    /// adds computation; total complexity remains O(inputs + synapses + neurons).
     ///
     /// # Errors
     ///
-    /// [`GifLayerError::InputLenMismatch`] if `stimuli.len() != num_inputs()`,
-    /// or [`GifLayerError::OutputLenMismatch`] if `spikes.len() != num_neurons()`.
+    /// Validation order is input length, output length, counter exhaustion,
+    /// parameters (GifParams declaration order), all input channels, then
+    /// candidate transitions in neuron order. A non-finite drive first reports
+    /// an invalid weight in that row, if any, before arithmetic overflow. Non-finite
+    /// parameters, weights, and stimuli produce [`GifLayerError::NonFiniteParam`],
+    /// [`GifLayerError::NonFiniteWeight`], and [`GifLayerError::NonFiniteInput`].
+    /// Finite values are not clamped or restricted to physiological ranges.
+    ///
+    /// [`GifLayerError::NumericOverflow`] rejects any non-finite drive, decayed
+    /// adaptation, integrated membrane, effective threshold, or post-spike state.
+    /// This includes overflow from finite operands. **Every error preserves all
+    /// layer fields and the entire caller output buffer**, even if a later neuron
+    /// fails. Correct invalid inputs/edits before retrying; no repair is implicit.
+    ///
+    /// ```rust
+    /// use neuromod::{GifLayerError, GifParams, NonFiniteClass, SparseGifHiddenLayer};
+    /// let mut layer = SparseGifHiddenLayer::from_topology(
+    ///     1, GifParams::default(), &[vec![(0, 1.0)]],
+    /// ).unwrap();
+    /// let before = layer.clone();
+    /// let mut output = [true];
+    /// assert_eq!(layer.step_into(&[f32::NAN], &mut output),
+    ///     Err(GifLayerError::NonFiniteInput { index: 0, class: NonFiniteClass::Nan }));
+    /// assert_eq!(layer, before);
+    /// assert_eq!(output, [true]);
+    /// layer.step_into(&[1.0], &mut output).unwrap();
+    /// ```
     pub fn step_into(&mut self, stimuli: &[f32], spikes: &mut [bool]) -> Result<(), GifLayerError> {
         if stimuli.len() != self.num_inputs {
             return Err(GifLayerError::InputLenMismatch {
@@ -597,37 +619,70 @@ impl SparseGifHiddenLayer {
                     step_count: self.step_count,
                 })?;
 
-        // Copied out of `self` so the shared parameter block can be read while
-        // the state arrays are mutably borrowed.
-        let params = self.params;
-        let now = self.step_count;
+        self.validate_numeric_inputs(stimuli)?;
+        for neuron in 0..self.num_neurons {
+            self.validate_transition(neuron, stimuli)?;
+        }
 
+        // No cross-neuron dependencies or mutable hooks exist inside a step.
+        // Recomputing each validated candidate is therefore bit-identical and
+        // needs neither scratch allocation nor extra checkpoint/cache fields.
         for (neuron, spike) in spikes.iter_mut().enumerate() {
-            let lo = self.fan_in_offsets[neuron];
-            let hi = self.fan_in_offsets[neuron + 1];
-            // Sequential, fixed-order accumulation: floating-point addition is
-            // not associative, so the traversal order is part of the contract.
-            let drive: f32 = self.fan_in_sources[lo..hi]
-                .iter()
-                .zip(&self.weights[lo..hi])
-                .map(|(&source, &weight)| weight * stimuli[source as usize])
-                .sum();
-
-            params.integrate(
-                &mut self.membrane[neuron],
-                &mut self.adaptation[neuron],
-                drive,
-            );
-            let fired =
-                params.check_for_spike(&mut self.membrane[neuron], &mut self.adaptation[neuron]);
-            *spike = fired;
-            if fired {
-                self.last_spike_time[neuron] = now;
+            let next = self.transition(neuron, stimuli);
+            self.membrane[neuron] = next.membrane;
+            self.adaptation[neuron] = next.adaptation;
+            *spike = next.fired;
+            if next.fired {
+                self.last_spike_time[neuron] = self.step_count;
             }
         }
 
         self.step_count = next_step_count;
         Ok(())
+    }
+
+    /// Check all mutable ingress, even stimuli not referenced by the topology.
+    fn validate_numeric_inputs(&self, stimuli: &[f32]) -> Result<(), GifLayerError> {
+        validate_params(&self.params)?;
+        if let Some((index, class)) = first_non_finite(stimuli) {
+            return Err(GifLayerError::NonFiniteInput { index, class });
+        }
+        Ok(())
+    }
+
+    /// Non-finite weights necessarily poison the drive with finite stimuli
+    /// (including inf * 0 -> NaN). Diagnose their CSR index only on failure,
+    /// avoiding a third full synapse traversal on the successful path.
+    fn validate_transition(&self, neuron: usize, stimuli: &[f32]) -> Result<(), GifLayerError> {
+        let next = self.transition(neuron, stimuli);
+        if !next.drive_is_finite() {
+            let lo = self.fan_in_offsets[neuron];
+            let hi = self.fan_in_offsets[neuron + 1];
+            if let Some((index, class)) = first_non_finite(&self.weights[lo..hi]) {
+                return Err(GifLayerError::NonFiniteWeight {
+                    index: lo + index,
+                    class,
+                });
+            }
+        }
+        next.validate(neuron)
+    }
+
+    /// Fixed-order CSR accumulation and shared GIF dynamics, without mutation.
+    fn transition(&self, neuron: usize, stimuli: &[f32]) -> Transition {
+        let lo = self.fan_in_offsets[neuron];
+        let hi = self.fan_in_offsets[neuron + 1];
+        let drive: f32 = self.fan_in_sources[lo..hi]
+            .iter()
+            .zip(&self.weights[lo..hi])
+            .map(|(&source, &weight)| weight * stimuli[source as usize])
+            .sum();
+        Transition::compute(
+            &self.params,
+            self.membrane[neuron],
+            self.adaptation[neuron],
+            drive,
+        )
     }
 
     /// Run a batch of spike-train frames and collect the output raster.
@@ -640,9 +695,11 @@ impl SparseGifHiddenLayer {
     ///
     /// # Errors
     ///
-    /// [`GifLayerError::InputLenMismatch`] on the first frame whose width does
-    /// not match. Frames before it have already been applied — `run` is not
-    /// transactional; validate up front or `reset` after an error.
+    /// Propagates any [`Self::step_into`] error on the first invalid frame.
+    /// That frame leaves state unchanged; preceding frames remain applied.
+    /// The whole batch is not transactional. An empty batch does not step or
+    /// validate mutable parameters/weights. `reset` clears dynamics but does not
+    /// repair parameters or weights; correct those edits before retrying.
     pub fn run<S: AsRef<[f32]>>(
         &mut self,
         spike_train: &[S],

@@ -433,7 +433,8 @@ mod tests {
     }
 
     #[test]
-    fn step_rejects_length_mismatch_before_mutation() {
+    fn step_rejects_bad_input_before_mutation() {
+        // Wrong-length input: Runtime InputLenMismatch, bank untouched.
         let node = if_node(vec![1.0, 1.0], vec![1.0, 1.0], None);
         let mut handoff = IfHandoff::from_node("if0", &node).unwrap();
         let err = assert_runtime_step_leaves_bank_untouched(&mut handoff, &[0.5], 0);
@@ -447,13 +448,9 @@ mod tests {
                 ..
             }
         ));
-    }
 
-    #[test]
-    fn step_rejects_non_finite_input() {
-        let node = if_node(vec![1.0], vec![1.0], None);
-        let mut handoff = IfHandoff::from_node("if0", &node).unwrap();
-        let err = assert_runtime_step_leaves_bank_untouched(&mut handoff, &[f32::NAN], 3);
+        // Non-finite input: Runtime NonFinite(Nan) at the offending step.
+        let err = assert_runtime_step_leaves_bank_untouched(&mut handoff, &[f32::NAN, 0.0], 3);
         assert!(matches!(
             err,
             HandoffError::Runtime {

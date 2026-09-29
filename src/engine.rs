@@ -3676,6 +3676,12 @@ mod tests {
                     class: NonFiniteClass::NegInfinity,
                 }
             }
+            _ => stored_predictive_precedence_case(case, network),
+        }
+    }
+
+    fn stored_predictive_precedence_case(case: usize, network: &mut SpikingNetwork) -> StepError {
+        match case {
             3 | 4 => {
                 let field = if case == 3 {
                     network.predictive_state.pop();

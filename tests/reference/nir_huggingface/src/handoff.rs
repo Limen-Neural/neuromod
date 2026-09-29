@@ -47,8 +47,13 @@ pub struct IfHandoff {
 
 /// Read a tensor payload as a flat row-major `Vec<f32>`.
 ///
-/// Fixtures are `f32`, but `f64` payloads are accepted and cast to `f32`.
-/// Integer / boolean payloads are rejected as an unsupported mapping.
+/// Only `f32` payloads are accepted: `LapicqueNeuron` is `f32`-only, and
+/// narrowing an arbitrary `f64` NIR parameter to `f32` is lossy. A tiny nonzero
+/// `f64` `v_reset` could round to `0.0` and slip past the reset check, and a
+/// large `f64` threshold could round enough to shift the spike step. Rather
+/// than silently narrow and claim faithful support, `f64` (and integer /
+/// boolean) payloads are rejected as an unsupported mapping. The vendored HF
+/// fixtures are `f32`, so this rejects only genuinely out-of-scope inputs.
 fn tensor_as_f32(
     node: &str,
     field: &str,
@@ -70,12 +75,17 @@ fn tensor_as_f32(
     }
     match data {
         TensorData::F32(values) => Ok(values.clone()),
-        TensorData::F64(values) => Ok(values.iter().map(|&v| v as f32).collect()),
-        TensorData::I64(_) | TensorData::Bool(_) => Err(HandoffError::UnsupportedMapping {
-            node: node.to_owned(),
-            type_name: "IF",
-            reason: format!("`{field}` has non-float dtype {:?}", tensor.dtype()),
-        }),
+        TensorData::F64(_) | TensorData::I64(_) | TensorData::Bool(_) => {
+            Err(HandoffError::UnsupportedMapping {
+                node: node.to_owned(),
+                type_name: "IF",
+                reason: format!(
+                    "`{field}` has dtype {:?}; only f32 is faithfully supported \
+                     (f64 -> f32 narrowing is lossy)",
+                    tensor.dtype()
+                ),
+            })
+        }
     }
 }
 
@@ -208,13 +218,24 @@ impl IfHandoff {
     /// For each element `i`: `integrate(r[i] * inputs[i])`, then
     /// `check_for_spike(t)`. See the module-level Assumption 5 notes.
     ///
+    /// The step is **two-phase and atomic**: every stimulus (`r[i] * inputs[i]`)
+    /// and the resulting projected membrane potential are computed and
+    /// validated for *all* elements before any neuron is mutated. If any
+    /// element would fail, the whole step returns an error with the bank left
+    /// untouched. This also closes an overflow gap: a finite `r[i] * inputs[i]`
+    /// (or projected `v`) that overflows to `±inf` is caught here, before
+    /// `check_for_spike` could interpret `+inf` as a spike and hard-reset it to
+    /// `0.0`, which would otherwise hide the non-finite value from a
+    /// post-mutation check.
+    ///
     /// # Errors
     ///
     /// [`HandoffError::Runtime`] if:
     /// * `inputs.len()` does not equal the bank size (checked before any
     ///   mutation);
     /// * an input sample is non-finite (checked before any mutation);
-    /// * after a step, a membrane potential is non-finite; or
+    /// * a stimulus `r[i] * inputs[i]` or the projected membrane potential is
+    ///   non-finite, e.g. from overflow (checked before any mutation); or
     /// * a neuron reports a spike but did not hard-reset to `0`.
     pub fn step(&mut self, inputs: &[f32], t: i64) -> Result<Vec<bool>, HandoffError> {
         // Length check before touching any neuron state.
@@ -230,32 +251,41 @@ impl IfHandoff {
             });
         }
 
-        // Scan for non-finite inputs before mutating any neuron state.
-        for (i, &input) in inputs.iter().enumerate() {
+        // Phase 1: validate everything up front, mutating nothing.
+        //
+        // For each element check the input, the stimulus r*I, and the projected
+        // membrane potential (v + stimulus, since decay_rate == 0) for
+        // finiteness. Doing this before any mutation makes the step atomic and
+        // catches overflow that a post-mutation check would miss once
+        // `check_for_spike` reset an overflowed potential to 0.
+        for (i, (&input, neuron)) in inputs.iter().zip(self.bank.iter()).enumerate() {
+            let runtime = |class| HandoffError::Runtime {
+                node: self.node.clone(),
+                index: i,
+                step: t,
+                cause: RuntimeCause::NonFinite(class),
+            };
+
             if let Some(class) = NonFiniteClass::classify(input) {
-                return Err(HandoffError::Runtime {
-                    node: self.node.clone(),
-                    index: i,
-                    step: t,
-                    cause: RuntimeCause::NonFinite(class),
-                });
+                return Err(runtime(class));
+            }
+            let stimulus = self.r[i] * input;
+            if let Some(class) = NonFiniteClass::classify(stimulus) {
+                return Err(runtime(class));
+            }
+            let projected = neuron.membrane_potential + stimulus;
+            if let Some(class) = NonFiniteClass::classify(projected) {
+                return Err(runtime(class));
             }
         }
 
+        // Phase 2: every element validated finite, so mutate the bank.
         let mut spikes = Vec::with_capacity(self.bank.len());
         for (i, neuron) in self.bank.iter_mut().enumerate() {
             neuron.integrate(self.r[i] * inputs[i]);
             let fired = neuron.check_for_spike(t);
 
             let potential = neuron.membrane_potential;
-            if let Some(class) = NonFiniteClass::classify(potential) {
-                return Err(HandoffError::Runtime {
-                    node: self.node.clone(),
-                    index: i,
-                    step: t,
-                    cause: RuntimeCause::NonFinite(class),
-                });
-            }
             if fired && potential != 0.0 {
                 return Err(HandoffError::Runtime {
                     node: self.node.clone(),
@@ -363,5 +393,64 @@ mod tests {
             }
         ));
         assert_eq!(handoff.bank()[0].membrane_potential, 0.0);
+    }
+
+    #[test]
+    fn rejects_f64_dtype_as_unsupported() {
+        // f64 -> f32 narrowing is lossy, so an f64 IF node is not faithfully
+        // supported and must be rejected rather than silently cast.
+        let node = If {
+            r: Tensor::from_f64(vec![1], vec![1.0]).unwrap(),
+            v_threshold: Tensor::from_f64(vec![1], vec![1.0]).unwrap(),
+            v_reset: None,
+            metadata: Default::default(),
+        };
+        assert!(matches!(
+            IfHandoff::from_node("if_f64", &node),
+            Err(HandoffError::UnsupportedMapping { .. })
+        ));
+    }
+
+    #[test]
+    fn step_detects_finite_input_overflow_without_false_spike() {
+        // A finite resistance times a finite input can overflow to +inf. The
+        // two-phase step must catch this as a NonFinite runtime error rather
+        // than let check_for_spike see +inf, "spike", and reset to 0.
+        let node = if_node(vec![1e30], vec![1.0], None);
+        let mut handoff = IfHandoff::from_node("if_of", &node).unwrap();
+        let err = handoff.step(&[1e30], 5).unwrap_err();
+        assert!(
+            matches!(
+                err,
+                HandoffError::Runtime {
+                    cause: RuntimeCause::NonFinite(NonFiniteClass::PosInfinity),
+                    step: 5,
+                    ..
+                }
+            ),
+            "expected +inf overflow to be a runtime error, got {err:?}"
+        );
+        // No mutation: the neuron did not "spike" and reset.
+        assert_eq!(handoff.bank()[0].membrane_potential, 0.0);
+    }
+
+    #[test]
+    fn step_is_atomic_across_the_bank() {
+        // Element 0 is valid; element 1 overflows. The whole step must fail and
+        // leave element 0 unmutated (no partial application).
+        let node = if_node(vec![1.0, 1e30], vec![1.0, 1.0], None);
+        let mut handoff = IfHandoff::from_node("if_atomic", &node).unwrap();
+        let err = handoff.step(&[0.5, 1e30], 0).unwrap_err();
+        assert!(matches!(
+            err,
+            HandoffError::Runtime {
+                index: 1,
+                cause: RuntimeCause::NonFinite(NonFiniteClass::PosInfinity),
+                ..
+            }
+        ));
+        // Element 0 must be untouched despite being validated before element 1.
+        assert_eq!(handoff.bank()[0].membrane_potential, 0.0);
+        assert_eq!(handoff.bank()[1].membrane_potential, 0.0);
     }
 }

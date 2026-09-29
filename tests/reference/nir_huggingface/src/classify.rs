@@ -97,16 +97,93 @@ pub fn classify_graph(graph: &NirGraph) -> Vec<NodeRecord> {
 
 /// Whether `report` covers every node in `graph` exactly once.
 ///
-/// Every node name in `graph.nodes` must appear in `report`, and `report` must
-/// carry no extra names, so the counts match and the name sets are equal.
+/// Every node name in `graph.nodes` must appear in `report` exactly once with a
+/// matching wire type, and `report` must carry no extra or duplicate names. A
+/// length match alone is insufficient: a report that repeats one node while
+/// omitting another (e.g. `[a, a]` for a graph `{a, b}`) also has the right
+/// length and each record resolves, so duplicates are rejected explicitly by
+/// tracking seen names and requiring the deduplicated set to cover every node.
 #[must_use]
 pub fn report_covers_all_nodes(graph: &NirGraph, report: &[NodeRecord]) -> bool {
     if report.len() != graph.nodes.len() {
         return false;
     }
-    report.iter().all(|record| {
-        graph
+    let mut seen = std::collections::HashSet::with_capacity(report.len());
+    for record in report {
+        // Reject a name that does not exist or whose wire type disagrees.
+        let matches = graph
             .get(&record.name)
-            .is_some_and(|node| node.type_name() == record.wire_type)
-    })
+            .is_some_and(|node| node.type_name() == record.wire_type);
+        if !matches {
+            return false;
+        }
+        // Reject duplicates: each node may be reported only once.
+        if !seen.insert(record.name.as_str()) {
+            return false;
+        }
+    }
+    // With no duplicates and matching length, every graph node is covered once.
+    seen.len() == graph.nodes.len()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use nir_rs::nodes::Input;
+
+    fn two_node_graph() -> NirGraph {
+        let mut g = NirGraph::new();
+        g.insert_node(
+            "a",
+            NirNode::Input(Input {
+                shape: vec![1],
+                metadata: Default::default(),
+            }),
+        )
+        .unwrap();
+        g.insert_node(
+            "b",
+            NirNode::Output(nir_rs::nodes::Output {
+                shape: vec![1],
+                metadata: Default::default(),
+            }),
+        )
+        .unwrap();
+        g
+    }
+
+    #[test]
+    fn classify_graph_covers_all_nodes() {
+        let g = two_node_graph();
+        let report = classify_graph(&g);
+        assert!(report_covers_all_nodes(&g, &report));
+    }
+
+    #[test]
+    fn duplicate_record_omitting_a_node_is_rejected() {
+        // `[a, a]` has the right length (2) and each record resolves to a real
+        // node, but it omits `b`. The "exactly once" contract must reject it.
+        let g = two_node_graph();
+        let a = NodeRecord {
+            name: "a".to_owned(),
+            wire_type: "Input",
+            role: NodeRole::GraphBoundary,
+        };
+        let duplicated = vec![a.clone(), a];
+        assert!(
+            !report_covers_all_nodes(&g, &duplicated),
+            "a report that repeats one node and omits another must not pass"
+        );
+    }
+
+    #[test]
+    fn wrong_length_report_is_rejected() {
+        let g = two_node_graph();
+        let report = vec![NodeRecord {
+            name: "a".to_owned(),
+            wire_type: "Input",
+            role: NodeRole::GraphBoundary,
+        }];
+        assert!(!report_covers_all_nodes(&g, &report));
+    }
 }

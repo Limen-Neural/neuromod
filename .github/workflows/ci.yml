@@ -92,17 +92,19 @@ jobs:
 
       # Offline NIR -> neuromod interop smoke (issue #125). The harness is a
       # standalone crate with its own lockfile; it reads the two vendored
-      # HF-derived .nir (HDF5) fixtures via nir-rs. On the Ubuntu runner apt is
-      # available, so install libhdf5-dev + pkg-config rather than compiling a
-      # vendored static libhdf5. No Hugging Face Hub download happens: loading is
-      # fully offline from the checked-in fixtures.
+      # HF-derived .nir (HDF5) fixtures via nir-rs. The harness pins
+      # `hdf5-metno` with the `static` + `zlib` features, so nir-rs's `hdf5`
+      # dependency compiles a VENDORED static libhdf5 from source (via cmake) and
+      # needs no system libhdf5. Installing `libhdf5-dev` here would be dead
+      # weight: feature unification still selects the vendored build, so the apt
+      # package is never linked. Keep the harness hermetic and install nothing.
+      # No Hugging Face Hub download happens: loading is fully offline from the
+      # checked-in fixtures.
       - name: NIR HuggingFace interop smoke
         if: runner.os == 'Linux'
         shell: bash
         run: |
           set -euo pipefail
-          sudo apt-get update
-          sudo apt-get install -y libhdf5-dev pkg-config
           cargo fmt --check --manifest-path tests/reference/nir_huggingface/Cargo.toml
           cargo clippy --manifest-path tests/reference/nir_huggingface/Cargo.toml --all-targets -- -D warnings
           cargo test --manifest-path tests/reference/nir_huggingface/Cargo.toml --locked

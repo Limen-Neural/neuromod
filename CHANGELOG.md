@@ -4,6 +4,17 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+### Changed
+
+- **`StepError` gains `NonFinitePredictiveState { index, class }`** (#177).
+  Exhaustive matches need a new arm or wildcard; this joins the pending 0.7
+  migration. All four engine step entry points reject NaN/infinite stored
+  predictive values before mutation or encoding RNG consumption, including
+  public-field edits and JSON f32 overflow. Checkpoint format, decode for
+  inspection, weight-width tolerance, and existing trace repair are unchanged.
+  Other stored neuron floats are not comprehensively validated. Preflight adds
+  one allocation-free linear scan over predictive values.
+
 ### Added
 
 - **Provenance-pinned cross-repository Corinth parity fixtures for `SparseGifHiddenLayer`**

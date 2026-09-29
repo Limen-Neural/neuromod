@@ -339,6 +339,46 @@ them: [ADR 002](https://github.com/Limen-Neural/neuromod/blob/main/docs/adr/002-
 
 ## Migration Notes
 
+### 0.7 — reject non-finite stored predictive values
+
+`StepError` gains `NonFinitePredictiveState { index, class }`, reusing
+`NonFiniteClass` to identify the first NaN or infinite stored predictive value.
+**Exhaustive matches need this additional arm** (or a wildcard). All four step
+entry points check on every call, including after public-field edits. A failed
+step leaves state unchanged and consumes no encoding RNG values (#177).
+
+The checkpoint format and decode-for-inspection behavior are unchanged. A JSON
+number such as `1e39` can decode to an infinite `f32`; decoding still succeeds,
+but stepping rejects it. Correcting the predictive value permits a retry.
+Negative and exhausted counters also remain inspectable after decoding.
+
+Stored-state policy is deliberately limited:
+
+- **Validated before mutation:** caller stimulus length and finiteness, modulator
+  finiteness, `predictive_state` length, `input_spike_times` length,
+  `predictive_state` finiteness, then counter exhaustion, in that precedence order.
+- **Tolerated or unvalidated:** neuron weight-width mismatch retains its existing
+  bounded processing. Other stored neuron floats (including LIF membrane,
+  threshold, decay, weights, and Izhikevich state/parameters) are not checked for
+  finiteness at engine preflight. Callers remain responsible for their integrity;
+  this check does not certify a checkpoint or guarantee finite arithmetic for
+  arbitrary stored neuron values.
+- **Existing repairs and fallbacks:** normal stepping resizes eligibility to the
+  weight width and clears non-finite trace values before reward conversion.
+  Frozen stepping skips STDP and preserves learning state, including traces.
+  R-STDP accessors use default effective bounds, reward rate, or tau when invalid;
+  reading a fallback does not rewrite the stored configuration. Serde still fills
+  missing supported older fields with their existing defaults. The separate GIF
+  layer's decode-time validation policy is unchanged.
+
+Preflight adds one allocation-free `O(num_channels)` predictive-value scan to
+its existing stimulus scan, four modulator checks, and two `O(1)` vector-length
+checks. Overall step complexity remains `O(num_channels)` plus neuron work;
+this is a complexity assessment, not a measured claim of negligible overhead.
+Validation belongs before mutation: `update_predictive_errors` runs after the
+counter and neuron parameters have changed, so checking there would violate
+rejection atomicity.
+
 ### 0.7 — `StepError::CheckpointShapeMismatch` for malformed channel vectors
 
 **Exhaustive matches on `StepError` need a new arm.** `SpikingNetwork::step`
@@ -356,9 +396,9 @@ it can be inspected, exactly like an exhausted or negative `global_step`. The
 step then rejects it atomically: a short vector would panic on a channel index
 and a long one would silently drop trailing entries, so both are caught before
 `global_step` advances, before the modulator snapshot is stored, and before any
-RNG draw. The preflight sits immediately before the counter check, so a
-checkpoint that is both malformed and exhausted reports the shape mismatch
-first.
+RNG draw. Shape checks precede predictive-value finiteness and the counter
+check, so a checkpoint that is both malformed and exhausted reports the shape
+mismatch first.
 
 **Neuron weight-width mismatch is tolerated, not policed.** The shape check is
 deliberately limited to the two per-channel network vectors. A `LifNeuron` may

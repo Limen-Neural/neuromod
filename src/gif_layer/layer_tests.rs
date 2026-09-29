@@ -504,3 +504,6 @@ mod serde_tests;
 
 #[path = "layer_golden_tests.rs"]
 mod golden_tests;
+
+#[path = "layer_corinth_parity_tests.rs"]
+mod corinth_parity_tests;

@@ -14,15 +14,42 @@
 //! split-bank bridging) is deliberately **out of scope** and stays downstream —
 //! see [`docs/neuromod-boundary-matrix.md`](https://github.com/Limen-Neural/neuromod/blob/main/docs/neuromod-boundary-matrix.md).
 //!
-//! ### Parity-fixture caveat
+//! ### Parity fixtures
 //!
-//! The reference implementation was not available while this port was written,
-//! so the regression fixtures in this module are **internal goldens**: values
-//! produced by this implementation and pinned so that any future change to the
-//! dynamics, the topology generator, or the traversal order is caught. They are
-//! *not* cross-repo bit-parity fixtures. True parity vectors captured from
-//! `corinth-canal` must be added in a follow-up once that repository is
-//! available for side-by-side comparison (issue #101 follow-up).
+//! Two independent layers of regression coverage guard this port:
+//!
+//! - **Internal goldens** pin *this crate's* behavior end to end: the seeded
+//!   SplitMix64 topology generator, the CSR fan-in it produces, the traversal
+//!   order, and the resulting spike raster and final SoA state. Any change to
+//!   the dynamics, the topology generator, or the traversal order is caught.
+//! - **Cross-repository bit-parity vectors** are now committed. They were
+//!   captured from `rmems/corinth-canal` (`src/funnel.rs`,
+//!   `SparseGifHiddenLayer`) at the pinned source commit
+//!   `8e54e234ac005dd84e4ad2bedbf9f5bceb082355`, stored at
+//!   `tests/reference/corinth_gif_parity.json` with attribution and the
+//!   regeneration recipe in `tests/reference/corinth_gif_parity.NOTICE.md`, and
+//!   replayed offline by the test in `layer_corinth_parity_tests.rs` with zero
+//!   tolerance on the spike IDs and the final membrane / adaptation f32 bits.
+//!
+//! **Comparison scope.** The parity vectors cover the *shared GIF dynamics*
+//! under a matched explicit topology and dense 0/1 frame conversion: identical
+//! GIF parameters, the same fan-in edges in the same edge order, and inputs of
+//! exactly `0.0` or `1.0`. Within that scope the two implementations agree bit
+//! for bit on every spike ID and on each neuron's final membrane and adaptation
+//! value.
+//!
+//! **Topology-generator distinction.** The parity test does *not* match the two
+//! crates' topology generators, because they differ by design. It reconstructs
+//! Corinth's explicit fan-in through
+//! [`SparseGifHiddenLayer::from_topology`](crate::SparseGifHiddenLayer::from_topology),
+//! preserving Corinth's exact edge order (which matters because `f32` addition
+//! is not associative), rather than replaying this crate's SplitMix64
+//! generator. This crate's generator and CSR traversal stay covered by the
+//! internal goldens above.
+//!
+//! Attribution: upstream `rmems/corinth-canal`
+//! (<https://github.com/rmems/corinth-canal>), Limen-Neural/neuromod issue #144
+//! (the parity-fixture verification) building on the original port issue #101.
 //!
 //! ## Design
 //!

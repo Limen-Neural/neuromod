@@ -74,7 +74,7 @@ println!("{:?}", raster.per_neuron_counts());
 
 The layer takes no `NeuroModulators`: a GIF hidden layer is a pure integrate-and-fire structure with no reward signal. Callers that want modulation apply it themselves between steps — `weights_mut()` for synaptic strength, `params_mut()` for the shared dynamics (`base_threshold` and friends). `apply_neuromodulation` is **not** usable here: it expects a per-neuron `&mut [f32]` threshold slice, whereas this layer holds one shared `GifParams` for the whole bank rather than a threshold per neuron.
 
-This module is an upstream port of the equivalent layer from the author's `corinth-canal` repository (issue #101). Its regression fixtures are internal goldens produced by this implementation, not independent cross-repository bit-parity vectors. Committed cross-repository parity fixtures remain a follow-up in the existing v0.7 issue #144. See `cargo run --example sparse_gif_layer`.
+This module is an upstream port of the equivalent layer from the author's `corinth-canal` repository (issue #101). Internal goldens pin this implementation's generator and traversal behavior, and cross-repository bit-parity vectors are now committed under `tests/reference/`, captured from `corinth-canal` at the pinned source commit and replayed offline by a zero-tolerance parity test (issue #144). See `cargo run --example sparse_gif_layer`.
 
 ## Requirements
 

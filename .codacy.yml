@@ -3,3 +3,9 @@ exclude_paths:
   - "Cargo.lock"
   - ".cubic/wiki/**"
   - ".cubic/**"
+  # Standalone, workspace/package-excluded parity-fixture generator. It vendors a
+  # deliberately byte-identical copy of the pinned upstream corinth-canal
+  # funnel.rs (funnel_vendored.rs); that byte identity backs the provenance/SHA
+  # guarantee and MUST NOT be restructured, so its complexity/clone findings are
+  # inherent to the verbatim vendoring, not first-class neuromod source to lint.
+  - "tests/reference/corinth_gif/**"

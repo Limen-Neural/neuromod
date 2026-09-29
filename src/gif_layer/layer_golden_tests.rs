@@ -2,10 +2,17 @@ use super::*;
 
 // --- golden regression fixtures --------------------------------------
 //
-// These are INTERNAL goldens produced by this implementation, not
-// cross-repo parity vectors from `corinth-canal` (see the module docs).
-// They pin the topology generator, the CSR traversal order, and the GIF
-// arithmetic together: any of the three drifting will fail here.
+// These are INTERNAL goldens produced by this implementation. They pin
+// three things together (the SplitMix64 topology generator, the CSR
+// traversal order, and the GIF arithmetic) so that any one of them
+// drifting fails here. Their values were derived from (or independently
+// against) this crate itself, not captured from another repository.
+//
+// They are deliberately NOT the cross-repository parity check: bit-parity
+// with the upstream `corinth-canal` GIF dynamics is established separately
+// in `layer_corinth_parity_tests.rs`, which replays vectors captured from
+// that crate under an explicit reconstructed topology and excludes the
+// topology generator (whose fan-in formula differs there by design).
 
 /// Pins the weight draw for a NON-default range.
 ///

@@ -11,8 +11,10 @@ version=$(awk '
   $0 == "[package]" { in_package = 1; next }
   in_package && /^\[/ { exit }
   in_package && $1 == "version" && $2 == "=" {
-    gsub(/^"/, "", $3)
-    gsub(/"$/, "", $3)
+    quote = substr($3, 1, 1)
+    if (quote == "\"" || quote == sprintf("%c", 39)) {
+      $3 = substr($3, 2, length($3) - 2)
+    }
     print $3
     exit
   }

@@ -41,7 +41,7 @@ jobs:
         run: cargo package --locked --all-features
 
       - name: Publish dry run
-        run: cargo publish --locked --all-features --dry-run
+        run: cargo publish --locked --all-features --dry-run # zizmor: ignore[use-trusted-publishing] verification job has no OIDC permission or registry token
 
   publish:
     needs: verify

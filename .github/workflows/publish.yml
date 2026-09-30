@@ -28,25 +28,7 @@ jobs:
       - name: Verify release tag matches package version
         env:
           RELEASE_TAG: ${{ github.ref_name }}
-        run: |
-          python3 - <<'PY'
-          import os
-          import re
-          import tomllib
-          from pathlib import Path
-
-          tag = os.environ["RELEASE_TAG"]
-          if re.fullmatch(r"v\d+\.\d+\.\d+", tag) is None:
-              raise SystemExit(f"expected a stable vX.Y.Z tag, got {tag!r}")
-
-          manifest = tomllib.loads(Path("Cargo.toml").read_text())
-          version = manifest["package"]["version"]
-          expected = f"v{version}"
-          if tag != expected:
-              raise SystemExit(f"tag {tag!r} does not match package version {expected!r}")
-
-          print(f"Publishing neuromod {version} from tag {tag}")
-          PY
+        run: scripts/verify-release-tag.sh
 
       - name: Verify release commit is tested on main
         env:
@@ -64,6 +46,7 @@ jobs:
     needs: verify
     if: github.repository == 'Limen-Neural/neuromod' && startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
+    environment: crates-io
     permissions:
       contents: read
       id-token: write

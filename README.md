@@ -744,8 +744,10 @@ examples above, which resolve the local source.
    The workflow uses `rust-lang/crates-io-auth-action` and requires no long-lived registry token.
 3. Obtain separate explicit authorization before creating a release tag. Push the `vX.Y.Z`
    tag only after the matching changelog date and clean exact-SHA release gates are complete.
-   The workflow rejects tags that are not stable `vX.Y.Z` versions matching Cargo.toml, then
-   verifies the package, runs `cargo publish --dry-run`, and publishes with a temporary token.
+   The workflow requires the tag's commit to be on `main` with successful CI and rejects tags
+   that are not stable `vX.Y.Z` versions matching Cargo.toml. It packages and runs
+   `cargo publish --dry-run` in a job without OIDC permission, then publishes the verified
+   source with a temporary token in a separate job without running project build scripts.
 4. After the authorized tag and publication, verify the registry version and archive metadata
    directly before describing that version as published.
 

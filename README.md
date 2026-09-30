@@ -739,8 +739,9 @@ examples above, which resolve the local source.
    ```
 
 2. Configure crates.io Trusted Publishing for GitHub owner `Limen-Neural`, repository
-   `neuromod`, and workflow file `.github/workflows/publish.yml`; leave the optional GitHub
-   environment unset unless a matching environment is deliberately configured on both sides.
+   `neuromod`, and workflow filename `publish.yml` (enter the filename, not the path under
+   `.github/workflows/`). Leave the optional GitHub environment unset unless a matching
+   environment is deliberately configured on both sides.
    The workflow uses `rust-lang/crates-io-auth-action` and requires no long-lived registry token.
 3. Obtain separate explicit authorization before creating a release tag. Push the `vX.Y.Z`
    tag only after the matching changelog date and clean exact-SHA release gates are complete.

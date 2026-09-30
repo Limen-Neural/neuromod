@@ -15,13 +15,14 @@ fi
 runs=$(gh run list \
   --repo "$GITHUB_REPOSITORY" \
   --workflow ci.yml \
+  --event push \
   --commit "$GITHUB_SHA" \
   --limit 100 \
   --json status,conclusion)
 
 if ! jq -e 'any(.[]; .status == "completed" and .conclusion == "success")' <<<"$runs" >/dev/null; then
-  echo "no successful CI run is recorded for release commit $GITHUB_SHA" >&2
+  echo "no successful main push CI run is recorded for release commit $GITHUB_SHA" >&2
   exit 1
 fi
 
-echo "release commit $GITHUB_SHA is on main and has a successful CI run"
+echo "release commit $GITHUB_SHA is on main and has a successful main push CI run"

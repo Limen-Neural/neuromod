@@ -25,10 +25,24 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
+      - name: Find previous release tag
+        id: release_base
+        if: github.event_name == 'push'
+        shell: bash
+        run: |
+          while IFS= read -r tag; do
+            [[ "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || continue
+            [[ "$tag" != "$GITHUB_REF_NAME" ]] || continue
+            echo "base_ref=$tag" >> "$GITHUB_OUTPUT"
+            exit 0
+          done < <(git tag --merged HEAD --list 'v[0-9]*' --sort=-version:refname)
+          echo "No previous stable release tag is reachable from $GITHUB_REF_NAME" >&2
+          exit 1
+
       - uses: linear/linear-release-action@d4af10092984f9bc6d5efa075b242bdf01333463 # v0
         with:
           access_key: ${{ secrets.LINEAR_ACCESS_KEY }}
           command: sync
           version: ${{ github.event_name == 'push' && github.ref_name || '' }}
-          base_ref: ${{ inputs.base_ref || '' }}
+          base_ref: ${{ steps.release_base.outputs.base_ref || inputs.base_ref || '' }}
           dry_run: ${{ github.event_name == 'workflow_dispatch' }}

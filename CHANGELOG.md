@@ -4,26 +4,7 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
-### Changed
-
-- **Sparse GIF live numeric validation** (#176 / LIM-1470): `GifLayerError`
-  gains `NonFiniteParam`, `NonFiniteWeight`, `NonFiniteInput`, and
-  `NumericOverflow`; exhaustive matches need new arms in the pending 0.7
-  migration. Constructors reject non-finite parameters/explicit weights.
-  Live stepping checks mutable parameters, weights, all stimuli, and candidate
-  transitions before any state or output-buffer mutation. Finite arithmetic
-  overflow is an error. Allocation-free stepping uses a validate/recompute
-  pair of passes with unchanged ordinary arithmetic order and checkpoint format.
-  Batch `run` retains successfully completed frames before an error.
-
-- **`StepError` gains `NonFinitePredictiveState { index, class }`** (#177).
-  Exhaustive matches need a new arm or wildcard; this joins the pending 0.7
-  migration. All four engine step entry points reject NaN/infinite stored
-  predictive values before mutation or encoding RNG consumption, including
-  public-field edits and JSON f32 overflow. Checkpoint format, decode for
-  inspection, weight-width tolerance, and existing trace repair are unchanged.
-  Other stored neuron floats are not comprehensively validated. Preflight adds
-  one allocation-free linear scan over predictive values.
+## [0.7.0] - 2026-09-27
 
 ### Added
 
@@ -42,9 +23,26 @@ All notable changes to this project are documented in this file.
   `tests/reference/corinth_gif/` is excluded from the crate's build, test, and package graph. This
   documents the port's parity guarantee (issue #101) without changing public API or GIF arithmetic.
 
-## [0.7.0] - 2026-09-27
-
 ### Changed
+
+- **Sparse GIF live numeric validation** (#176 / LIM-1470): `GifLayerError`
+  gains `NonFiniteParam`, `NonFiniteWeight`, `NonFiniteInput`, and
+  `NumericOverflow`; exhaustive matches need new arms in the 0.7.0
+  migration. Constructors reject non-finite parameters/explicit weights.
+  Live stepping checks mutable parameters, weights, all stimuli, and candidate
+  transitions before any state or output-buffer mutation. Finite arithmetic
+  overflow is an error. Allocation-free stepping uses a validate/recompute
+  pair of passes with unchanged ordinary arithmetic order and checkpoint format.
+  Batch `run` retains successfully completed frames before an error.
+
+- **`StepError` gains `NonFinitePredictiveState { index, class }`** (#177).
+  Exhaustive matches need a new arm or wildcard in the 0.7.0 migration. All
+  four engine step entry points reject NaN/infinite stored
+  predictive values before mutation or encoding RNG consumption, including
+  public-field edits and JSON f32 overflow. Checkpoint format, decode for
+  inspection, weight-width tolerance, and existing trace repair are unchanged.
+  Other stored neuron floats are not comprehensively validated. Preflight adds
+  one allocation-free linear scan over predictive values.
 
 - **`StepError` gained `CheckpointShapeMismatch`** and the crate re-exports the new
   `ChannelVector` field-identity enum. `StepError` is **not** `#[non_exhaustive]`, so this is a

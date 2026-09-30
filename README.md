@@ -106,16 +106,16 @@ CI installs the same toolchain on each OS. Keep `Cargo.toml` `rust-version`, `ru
 
 ```toml
 [dependencies]
-neuromod = "0.6.0"
+neuromod = "0.7.0"
 ```
 
 Browser, Web Worker, and other supported JavaScript-hosted
 `wasm32-unknown-unknown` consumers opt into the upstream getrandom backend with
-`neuromod = { version = "0.6.0", features = ["wasm-js"] }`. Non-Web WASM
+`neuromod = { version = "0.7.0", features = ["wasm-js"] }`. Non-Web WASM
 consumers should leave this feature disabled and choose the entropy backend for
 their final application. See [the RNG guide](https://github.com/Limen-Neural/neuromod/blob/main/docs/rng.md#webassembly-entropy-backends).
 
-> This README describes the in-repository `0.6.0` candidate. Check
+> This README describes the in-repository `0.7.0` candidate. Check
 > [crates.io](https://crates.io/crates/neuromod) for registry availability; before maintainer
 > publication, the in-repository examples use the local source.
 
@@ -674,14 +674,15 @@ neuromod = "0.5"
 ```
 
 `neuromod = "0.5"` intentionally resolves the published 0.5.x line. This registry-only demo
-does not validate this repository's 0.6.0 APIs (wired R-STDP and `SparseGifHiddenLayer`); check
+does not validate this repository's 0.7.0 APIs (checkpoint channel-vector validation and live
+`SparseGifHiddenLayer` numeric checks); check
 crates.io for later registry availability. Before maintainer publication, use the in-repository
 examples above, which resolve the local source.
 
 ## Maintainer release sequence
 
 1. After every correctness fix and documentation change is merged, set the intended release date
-   in the 0.6.0 changelog heading and commit it. The date records release intent; it does not
+   in the changelog heading matching the `Cargo.toml` package version and commit it. The date records release intent; it does not
    claim registry publication. Then start from that clean, exact final SHA and run the final-gate
    checklist, including `cargo package --locked`, `cargo publish --locked --dry-run`, the
    independent unpacked archive-consumer checks, archive checksum capture, and exact-SHA CI
@@ -695,6 +696,7 @@ examples above, which resolve the local source.
 
    readme = Path("README.md").read_text()
    changelog = Path("CHANGELOG.md").read_text()
+   manifest = Path("Cargo.toml").read_text()
 
    def require(condition, message):
        if not condition:
@@ -706,22 +708,40 @@ examples above, which resolve the local source.
            f"conflict marker in {name}",
        )
 
-   headings = re.findall(r"^## \[0\.6\.0\].*$", changelog, re.M)
-   require(len(headings) == 1, f"expected one 0.6.0 heading: {headings}")
-   dated_heading = re.fullmatch(r"## \[0\.6\.0\] - (\d{4}-\d{2}-\d{2})", headings[0])
-   require(dated_heading is not None, f"invalid 0.6.0 heading: {headings[0]}")
+   version_match = re.search(
+       r'(?ms)^\[package\].*?^version = "(\d+\.\d+\.\d+)"', manifest
+   )
+   require(version_match is not None, "no [package] version in Cargo.toml")
+   version = version_match.group(1)
+   escaped = re.escape(version)
+
+   # Intentional abbreviated pin for the registry-only demo; never the release version.
+   registry_demo_pins = {"0.5"}
+   pins = set(
+       re.findall(
+           r'neuromod\s*=\s*(?:\{\s*version\s*=\s*)?"([^"]+)"', readme
+       )
+   )
+   require(pins, "no neuromod dependency pins found in README.md")
+   stale = pins - {version} - registry_demo_pins
+   require(not stale, f"stale neuromod pins in README.md: {sorted(stale)}")
+
+   headings = re.findall(rf"^## \[{escaped}\].*$", changelog, re.M)
+   require(len(headings) == 1, f"expected one {version} heading: {headings}")
+   dated_heading = re.fullmatch(rf"## \[{escaped}\] - (\d{{4}}-\d{{2}}-\d{{2}})", headings[0])
+   require(dated_heading is not None, f"invalid {version} heading: {headings[0]}")
    try:
        release_date = date.fromisoformat(dated_heading.group(1))
    except ValueError as error:
-       raise SystemExit(f"invalid 0.6.0 date: {error}") from error
-   print(f"ok: release documents have no conflict markers and one dated 0.6.0 heading ({release_date})")
+       raise SystemExit(f"invalid {version} date: {error}") from error
+   print(f"ok: release documents have no conflict markers and one dated {version} heading ({release_date})")
    PY
    ```
 
 2. Obtain separate explicit authorization before creating a release tag or running
    `cargo publish --locked`. A tag alone does not publish the crate.
 3. After the authorized tag and publication, verify the registry version and archive metadata
-   directly before describing 0.6.0 as published.
+   directly before describing that version as published.
 
 ## Development
 

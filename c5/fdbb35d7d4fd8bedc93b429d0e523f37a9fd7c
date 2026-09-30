@@ -1,0 +1,21 @@
+scripts/verify-release-commit.sh
+  s_c0e0978c148e93::t_9881c6b2e1ba4d 18,24,28
+.github/workflows/publish.yml
+  s_c0e0978c148e93::t_9881c6b2e1ba4d 22
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "c5fdbb35d7d4fd8bedc93b429d0e523f37a9fd7c",
+  "prompts": {},
+  "sessions": {
+    "s_c0e0978c148e93": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a0ed4b-b297-7fb1-8931-d4d0b4be75e3",
+        "model": "gpt-6-luna"
+      },
+      "human_author": "Raul Cardenas Montoya <montoyaraul34@gmail.com>"
+    }
+  }
+}

@@ -25,6 +25,8 @@ exclude = [
     "REVIEW.md",
     "benches/README.md",
     "examples/crates-io-standalone/",
+    # Repository-only release and package-boundary checks.
+    "scripts/",
     # Standalone parity-fixture generator (own empty [workspace] table). Kept
     # out of the published crate; it is a dev-only offline tool, not library code.
     "tests/reference/corinth_gif/",

@@ -1,0 +1,64 @@
+# Third-party Actions are pinned to immutable commit SHAs (Aikido supply-chain policy).
+name: Publish to crates.io
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions: {}
+
+jobs:
+  publish:
+    if: github.repository == 'Limen-Neural/neuromod' && startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install Rust 1.98.1
+        uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # pinned action
+        with:
+          toolchain: 1.98.1
+
+      - name: Verify release tag matches package version
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          python3 - <<'PY'
+          import os
+          import re
+          import tomllib
+          from pathlib import Path
+
+          tag = os.environ["RELEASE_TAG"]
+          if re.fullmatch(r"v\d+\.\d+\.\d+", tag) is None:
+              raise SystemExit(f"expected a stable vX.Y.Z tag, got {tag!r}")
+
+          manifest = tomllib.loads(Path("Cargo.toml").read_text())
+          version = manifest["package"]["version"]
+          expected = f"v{version}"
+          if tag != expected:
+              raise SystemExit(f"tag {tag!r} does not match package version {expected!r}")
+
+          print(f"Publishing neuromod {version} from tag {tag}")
+          PY
+
+      - name: Verify package
+        run: cargo package --locked --all-features
+
+      - name: Publish dry run
+        run: cargo publish --locked --all-features --dry-run
+
+      - name: Authenticate with crates.io Trusted Publishing
+        id: auth
+        uses: rust-lang/crates-io-auth-action@c6f97d42243bad5fab37ca0427f495c86d5b1a18 # v1.0.5
+
+      - name: Publish crate
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
+        run: cargo publish --locked --all-features

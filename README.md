@@ -738,9 +738,15 @@ examples above, which resolve the local source.
    PY
    ```
 
-2. Obtain separate explicit authorization before creating a release tag or running
-   `cargo publish --locked`. A tag alone does not publish the crate.
-3. After the authorized tag and publication, verify the registry version and archive metadata
+2. Configure crates.io Trusted Publishing for GitHub owner `Limen-Neural`, repository
+   `neuromod`, and workflow file `.github/workflows/publish.yml`; leave the optional GitHub
+   environment unset unless a matching environment is deliberately configured on both sides.
+   The workflow uses `rust-lang/crates-io-auth-action` and requires no long-lived registry token.
+3. Obtain separate explicit authorization before creating a release tag. Push the `vX.Y.Z`
+   tag only after the matching changelog date and clean exact-SHA release gates are complete.
+   The workflow rejects tags that are not stable `vX.Y.Z` versions matching Cargo.toml, then
+   verifies the package, runs `cargo publish --dry-run`, and publishes with a temporary token.
+4. After the authorized tag and publication, verify the registry version and archive metadata
    directly before describing that version as published.
 
 ## Development

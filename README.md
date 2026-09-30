@@ -715,12 +715,16 @@ examples above, which resolve the local source.
    version = version_match.group(1)
    escaped = re.escape(version)
 
+   # Intentional abbreviated pin for the registry-only demo; never the release version.
+   registry_demo_pins = {"0.5"}
    pins = set(
        re.findall(
-           r'neuromod\s*=\s*(?:\{\s*version\s*=\s*)?"(\d+\.\d+\.\d+)"', readme
+           r'neuromod\s*=\s*(?:\{\s*version\s*=\s*)?"([^"]+)"', readme
        )
    )
-   require(pins <= {version}, f"stale neuromod pins in README.md: {sorted(pins - {version})}")
+   require(pins, "no neuromod dependency pins found in README.md")
+   stale = pins - {version} - registry_demo_pins
+   require(not stale, f"stale neuromod pins in README.md: {sorted(stale)}")
 
    headings = re.findall(rf"^## \[{escaped}\].*$", changelog, re.M)
    require(len(headings) == 1, f"expected one {version} heading: {headings}")

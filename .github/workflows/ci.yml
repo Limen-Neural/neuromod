@@ -207,6 +207,10 @@ jobs:
         if: runner.os == 'Linux'
         run: cargo package --locked
 
+      - name: Check Cargo package boundary
+        if: runner.os == 'Linux'
+        run: bash scripts/check-package-boundary.sh
+
       # GH#82 / LIM-953: outsider demo must build with crates.io neuromod only.
       - name: Standalone crates.io demo
         if: runner.os == 'Linux'

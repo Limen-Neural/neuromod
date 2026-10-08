@@ -1,0 +1,4 @@
+{
+  "name": "neuromod",
+  "install": "bash .cursor/install.sh"
+}

@@ -27,7 +27,10 @@ examples/crates-io-standalone/target/
 .vscode/
 *.swp
 *~
-.cursor/
+.cursor/*
+# Cursor Cloud Agent environment: committed on purpose.
+!.cursor/environment.json
+!.cursor/install.sh
 .cursorignore
 .zed/
 

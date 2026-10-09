@@ -1,6 +1,7 @@
-use criterion::{BatchSize, Criterion, criterion_group, criterion_main};
+use criterion::{BatchSize, BenchmarkId, Criterion, criterion_group, criterion_main};
 use neuromod::{
     FitzHughNagumoNeuron, HodgkinHuxleyNeuron, IzhikevichNeuron, LapicqueNeuron, LifNeuron,
+    SparseGifHiddenLayer, SparseGifLayerConfig,
 }; // Import neuron types
 use std::hint::black_box;
 
@@ -130,6 +131,47 @@ fn bench_neuron_comparison(c: &mut Criterion) {
     group.finish(); // Finish benchmark group
 }
 
+fn bench_sparse_gif_layer(c: &mut Criterion) {
+    let stimuli: Vec<f32> = (0..64).map(|channel| (channel % 2) as f32).collect();
+    let mut group = c.benchmark_group("sparse_gif_layer");
+    for neurons in [8, 64, 256] {
+        let layer = SparseGifHiddenLayer::new(&SparseGifLayerConfig {
+            num_inputs: stimuli.len(),
+            num_neurons: neurons,
+            fan_in: 16,
+            seed: 192,
+            ..Default::default()
+        })
+        .unwrap();
+
+        group.bench_with_input(
+            BenchmarkId::new("step_into", neurons),
+            &layer,
+            |b, layer| {
+                let mut layer = layer.clone();
+                let mut spikes = vec![false; neurons];
+                for _ in 0..200 {
+                    layer.step_into(&stimuli, &mut spikes).unwrap();
+                }
+                b.iter(|| {
+                    layer
+                        .step_into(black_box(&stimuli), black_box(&mut spikes))
+                        .unwrap();
+                    black_box(&spikes);
+                });
+            },
+        );
+        group.bench_with_input(BenchmarkId::new("step", neurons), &layer, |b, layer| {
+            let mut layer = layer.clone();
+            for _ in 0..200 {
+                layer.step(&stimuli).unwrap();
+            }
+            b.iter(|| black_box(layer.step(black_box(&stimuli)).unwrap()));
+        });
+    }
+    group.finish();
+}
+
 // Criterion benchmark group
 criterion_group!(
     benches,
@@ -140,6 +182,7 @@ criterion_group!(
     bench_lapicque_step,
     bench_hodgkin_huxley_step,
     bench_fitzhugh_nagumo_step,
-    bench_neuron_comparison
+    bench_neuron_comparison,
+    bench_sparse_gif_layer
 );
 criterion_main!(benches);

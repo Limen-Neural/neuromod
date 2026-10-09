@@ -1,10 +1,11 @@
-use criterion::{BatchSize, BenchmarkId, Criterion, criterion_group, criterion_main};
+use criterion::{BatchSize, BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 use neuromod::rm_stdp::{
     EligibilityTrace, RM_STDP_A_MINUS, RM_STDP_A_PLUS, RM_STDP_TAU_MINUS, RM_STDP_TAU_PLUS,
     RmStdpConfig,
 };
 use neuromod::{
-    HebbianIzhikevichNetwork, NeuroModulators, SpikingNetwork, StdpParams, apply_classical_stdp,
+    HebbianIzhikevichNetwork, NeuroModulators, SeedableRng, SpikingNetwork, StdRng, StdpParams,
+    apply_classical_stdp,
 };
 use std::hint::black_box;
 
@@ -147,6 +148,63 @@ fn bench_engine_step_with_traces(c: &mut Criterion) {
     group.finish();
 }
 
+/// Fixed seeded batches make before/after runs process identical spike and
+/// learning workloads. Checkpoint restoration and RNG construction are untimed.
+fn bench_engine_channel_drive(c: &mut Criterion) {
+    const STEPS: usize = 32;
+    let stimuli: Vec<Vec<f32>> = (0..STEPS)
+        .map(|step| {
+            (0..64)
+                .map(|ch| [0.009, -0.25, 0.5, 1.5][(ch + step) % 4])
+                .collect()
+        })
+        .collect();
+    let mut group = c.benchmark_group("engine_channel_drive");
+    group.throughput(Throughput::Elements(STEPS as u64));
+
+    for (label, dopamine) in [("unrewarded", 0.0_f32), ("rewarded", 0.9)] {
+        let mut network = SpikingNetwork::with_dimensions(64, 5, 64);
+        for neuron in &mut network.neurons {
+            neuron.weights.fill(2.0 / 64.0);
+        }
+        let modulators = NeuroModulators {
+            dopamine,
+            ..Default::default()
+        };
+        let mut rng = StdRng::seed_from_u64(191);
+        for step in 0..200 {
+            network
+                .step_with_rng(&stimuli[step % STEPS], &modulators, &mut rng)
+                .unwrap();
+        }
+        let checkpoint = serde_json::to_string(&network).unwrap();
+
+        group.bench_function(label, |b| {
+            b.iter_batched_ref(
+                || {
+                    (
+                        serde_json::from_str::<SpikingNetwork>(&checkpoint).unwrap(),
+                        StdRng::seed_from_u64(192),
+                    )
+                },
+                |(network, rng)| {
+                    for input in &stimuli {
+                        black_box(
+                            network
+                                .step_with_rng(black_box(input), black_box(&modulators), rng)
+                                .unwrap(),
+                        );
+                    }
+                    black_box(&*network);
+                },
+                BatchSize::PerIteration,
+            );
+        });
+    }
+
+    group.finish();
+}
+
 fn bench_stdp_weight_update(c: &mut Criterion) {
     let params = StdpParams::default();
 
@@ -225,6 +283,7 @@ criterion_group!(
     bench_eligibility_trace_accumulate,
     bench_reward_conversion,
     bench_engine_step_with_traces,
+    bench_engine_channel_drive,
     bench_stdp_weight_update,
     bench_hebbian_network_update,
     bench_stdp_delta_t_calculation,

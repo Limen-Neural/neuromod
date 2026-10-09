@@ -147,6 +147,46 @@ fn bench_engine_step_with_traces(c: &mut Criterion) {
     group.finish();
 }
 
+/// Deterministic banked-credit workload: every trace stays nonzero, without
+/// spike-timing kernels obscuring the cost of decay. Restore values outside
+/// the timed step so long measurements cannot underflow into the zero fast path.
+fn bench_engine_banked_trace_decay(c: &mut Criterion) {
+    let mut group = c.benchmark_group("engine_banked_trace_decay");
+    for size in [64, 512] {
+        for (label, dopamine) in [("unrewarded", 0.0_f32), ("rewarded", 0.9)] {
+            group.bench_with_input(BenchmarkId::new(label, size), &size, |b, &size| {
+                let mut network = SpikingNetwork::with_dimensions(size, 5, size);
+                for neuron in &mut network.neurons {
+                    neuron.weights.fill(2.0 / size as f32);
+                }
+                let stimuli = vec![0.0; size];
+                let modulators = NeuroModulators {
+                    dopamine,
+                    ..Default::default()
+                };
+                b.iter_custom(|iterations| {
+                    let mut elapsed = std::time::Duration::ZERO;
+                    for _ in 0..iterations {
+                        for neuron in &mut network.neurons {
+                            for (channel, trace) in neuron.eligibility.iter_mut().enumerate() {
+                                trace.value = if channel % 2 == 0 { 0.5 } else { -0.25 };
+                            }
+                        }
+                        let start = std::time::Instant::now();
+                        black_box(network.step(black_box(&stimuli), black_box(&modulators)))
+                            .expect("finite inputs with matching dimensions");
+                        // Observe decay writes before the next iteration resets them.
+                        black_box(&network.neurons);
+                        elapsed += start.elapsed();
+                    }
+                    elapsed
+                });
+            });
+        }
+    }
+    group.finish();
+}
+
 fn bench_stdp_weight_update(c: &mut Criterion) {
     let params = StdpParams::default();
 
@@ -225,6 +265,7 @@ criterion_group!(
     bench_eligibility_trace_accumulate,
     bench_reward_conversion,
     bench_engine_step_with_traces,
+    bench_engine_banked_trace_decay,
     bench_stdp_weight_update,
     bench_hebbian_network_update,
     bench_stdp_delta_t_calculation,

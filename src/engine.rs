@@ -905,6 +905,8 @@ impl SpikingNetwork {
         let config = self.stdp_config;
         let (w_min, w_max) = config.weight_bounds();
         let reward_lr = config.effective_reward_lr();
+        let decay_tau = config.effective_tau_eligibility();
+        let decay_factor = (-1.0 / decay_tau).exp();
         let rewarding = dopamine_lr >= 1e-6;
         let input_times = &self.input_spike_times;
 
@@ -912,10 +914,9 @@ impl SpikingNetwork {
             // Pre-0.6 deserialized state carries no traces, and a caller may have
             // resized `weights` by hand; keep the two vectors index-compatible.
             if neuron.eligibility.len() != neuron.weights.len() {
-                neuron.eligibility.resize(
-                    neuron.weights.len(),
-                    EligibilityTrace::new(config.effective_tau_eligibility()),
-                );
+                neuron
+                    .eligibility
+                    .resize(neuron.weights.len(), EligibilityTrace::new(decay_tau));
             }
 
             let post_time = neuron.last_spike_time;
@@ -932,10 +933,9 @@ impl SpikingNetwork {
                 if !trace.value.is_finite() {
                     trace.reset();
                 } else if trace.value != 0.0 {
-                    // An untouched trace decays to itself; skip the `exp` so a
-                    // blank or unrewarded network stays cheap at large channel
-                    // counts.
-                    trace.decay();
+                    // Uniform traces share one exp per step. Leave untouched
+                    // traces alone and retain per-trace tau overrides.
+                    trace.decay_with_cached_factor(decay_tau, decay_factor);
                 }
 
                 if pre_time >= 0
@@ -981,7 +981,7 @@ impl SpikingNetwork {
                 if !trace.value.is_finite() {
                     trace.reset();
                 } else if trace.value != 0.0 {
-                    trace.decay();
+                    trace.decay_with_cached_factor(decay_tau, decay_factor);
                 }
             }
         }
@@ -1826,6 +1826,75 @@ mod tests {
             orphan > 0.0 && orphan < 0.5,
             "a trace past the last channel should decay toward zero, got {orphan}"
         );
+    }
+
+    #[test]
+    fn test_trace_decay_preserves_individual_taus_across_config_changes() {
+        let mut network = SpikingNetwork::with_dimensions(1, 0, 3);
+        network.neurons[0].weights = vec![0.0; 6];
+        network.set_rm_stdp_config(RmStdpConfig {
+            tau_eligibility: 80.0,
+            ..RmStdpConfig::default()
+        });
+        network.neurons[0].eligibility = vec![
+            EligibilityTrace {
+                value: 0.5,
+                tau: 80.0,
+            },
+            EligibilityTrace {
+                value: -0.25,
+                tau: 20.0,
+            },
+            EligibilityTrace {
+                value: 0.75,
+                tau: f32::NAN,
+            },
+            EligibilityTrace {
+                value: -0.5,
+                tau: 80.0,
+            },
+            EligibilityTrace {
+                value: 0.25,
+                tau: 0.0,
+            },
+            EligibilityTrace {
+                value: 1.0,
+                tau: f32::MIN_POSITIVE,
+            },
+        ];
+        // Direct config assignment must not retau existing traces. The last
+        // three traces are beyond the channel bank and still need decay.
+        network.stdp_config.tau_eligibility = 50.0;
+        let no_reward = NeuroModulators::default();
+        network.step(&[0.0; 3], &no_reward).unwrap();
+        for (trace, expected) in network.neurons[0].eligibility.iter().zip([
+            0.4937889,
+            -0.23780736,
+            0.735149,
+            -0.4937889,
+            0.24504967,
+            0.0,
+        ]) {
+            assert!((trace.value - expected).abs() < 1e-7, "{trace:?}");
+        }
+
+        // A setter takes effect on the very next step, including the orphans.
+        network.set_rm_stdp_config(RmStdpConfig {
+            tau_eligibility: 10.0,
+            ..RmStdpConfig::default()
+        });
+        network.step(&[0.0; 3], &no_reward).unwrap();
+        for (trace, expected) in network.neurons[0].eligibility.iter().zip([
+            0.44679868,
+            -0.215177,
+            0.66519034,
+            -0.44679868,
+            0.22173011,
+            0.0,
+        ]) {
+            assert!((trace.value - expected).abs() < 1e-7, "{trace:?}");
+            assert_eq!(trace.tau, 10.0);
+        }
     }
 
     #[test]

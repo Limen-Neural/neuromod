@@ -158,7 +158,7 @@ than as one alternation, so dropping either one fails the guard.
 ```bash
 grep -q 'pub eligibility: Vec<EligibilityTrace>' src/lif.rs \
   && grep -q 'pub stdp_config: RmStdpConfig' src/engine.rs \
-  && grep -q 'trace.decay()' src/engine.rs \
+  && grep -Eq 'trace\.decay(_with_cached_factor)?\(' src/engine.rs \
   && grep -q 'trace.accumulate(' src/engine.rs \
   && grep -q 'pub fn set_rm_stdp_config' src/engine.rs \
   && echo "ok: R-STDP still wired into the engine"

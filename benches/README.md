@@ -62,6 +62,7 @@ Benchmarks synaptic plasticity operations:
 - `eligibility_trace_accumulate_ltd` - Same for post-before-pre (depression)
 - `rm_stdp_trace_to_weight` - One synapse's decay -> accumulate -> dopamine-gated conversion
 - `engine_step/unrewarded` / `engine_step/rewarded` - Full `SpikingNetwork::step` (64 LIF over 64 channels) carrying trace bookkeeping, with the dopamine gate shut and open
+- `engine_banked_trace_decay/{unrewarded,rewarded}/{64,512}` - Full step with nonzero banked traces, no input spikes, and trace values restored outside each timed step; isolates decay from spike-timing kernels and avoids underflow into the zero-trace fast path
 - `stdp_weight_update` - Complete weight update cycle
 - `hebbian_network_update` - Hebbian network weight update
 - `stdp_delta_t_calculation` - Spike timing difference calculation
@@ -172,6 +173,52 @@ fully connected):
 10 → 50 neurons (5x) costs ~23x; 50 → 100 (2x) costs ~3.5x; 100 → 200 (2x) costs ~3.9x —
 close enough to O(n²) to call the fully-connected update quadratic in neuron count, as the
 loop structure implies.
+
+### Eligibility decay caching comparison (2026-10-08, GH#189)
+
+Measured before and after caching the configured decay factor once per engine step.
+Baseline: [e357311](https://github.com/Limen-Neural/neuromod/commit/e357311d5f3fe1669d8583bebaa6e5272b9105e1),
+with the new banked-trace benchmark applied but no production changes. Both runs used
+rustc 1.98.1, `--all-features`, the existing release/LTO bench profile, and the same
+2-vCPU Intel Xeon @ 2.60 GHz Linux orb. No other builds ran during these measurements.
+This is a shared cloud VM, not an isolated performance rig; do not compare its absolute
+times to the September table above or assume these gains apply to every workload.
+
+```bash
+# Before the production fix, with the same benchmark harness:
+cargo clean --release -p neuromod
+cargo bench --locked --all-features --bench stdp_bench -- engine \
+  --warm-up-time 2 --measurement-time 5 --sample-size 50 \
+  --save-baseline issue189-before
+# After the fix, retaining target/criterion from the baseline run:
+cargo clean --release -p neuromod
+cargo bench --locked --all-features --bench stdp_bench -- engine \
+  --warm-up-time 2 --measurement-time 5 --sample-size 50 \
+  --baseline issue189-before
+```
+
+Package-scoped cleaning keeps the Criterion baseline and prevents stale crate binaries
+when comparing worktrees that share a Cargo target directory.
+
+Times are Criterion slope point estimates; reductions are computed from those estimates,
+not Criterion's separate statistical change estimate. Each workload has 5 Izhikevich
+neurons. The banked-credit workload uses zero stimuli and alternating trace values
+`0.5` / `-0.25`, restored before every step outside the timer. It includes integration,
+decay, reward conversion where enabled, and normalization, but no coincidence kernels.
+Its per-step timer overhead is included identically in both runs.
+
+| Benchmark | Before | After | Time reduction |
+| --- | ---: | ---: | ---: |
+| `engine_step/unrewarded` | 90.818 µs | 64.137 µs | 29.4% |
+| `engine_step/rewarded` | 92.635 µs | 73.810 µs | 20.3% |
+| `engine_banked_trace_decay/unrewarded/64` | 39.598 µs | 23.541 µs | 40.5% |
+| `engine_banked_trace_decay/rewarded/64` | 46.702 µs | 28.465 µs | 39.0% |
+| `engine_banked_trace_decay/unrewarded/512` | 2.6589 ms | 1.5295 ms | 42.5% |
+| `engine_banked_trace_decay/rewarded/512` | 3.0369 ms | 1.8137 ms | 40.3% |
+
+Standalone `EligibilityTrace::decay()` is unchanged. The engine reuses the factor only
+for matching taus; public per-trace overrides and invalid taus retain standalone decay
+semantics. No persistent cache, layout change, or allocation optimization is involved.
 
 ### Memory (`memory_bench.rs`)
 

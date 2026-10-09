@@ -308,6 +308,17 @@ impl EligibilityTrace {
         self.value *= (-1.0 / tau).exp();
     }
 
+    /// Reuse the engine's factor only when this trace has the same tau.
+    /// Public edits and checkpoints may contain heterogeneous or invalid taus;
+    /// those retain the standalone decay semantics, including its fallback.
+    pub(crate) fn decay_with_cached_factor(&mut self, tau: f32, factor: f32) {
+        if self.tau == tau {
+            self.value *= factor;
+        } else {
+            self.decay();
+        }
+    }
+
     /// Clear the accumulated value, keeping [`Self::tau`].
     pub fn reset(&mut self) {
         self.value = 0.0;

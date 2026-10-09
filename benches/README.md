@@ -62,6 +62,7 @@ Benchmarks synaptic plasticity operations:
 - `eligibility_trace_accumulate_ltd` - Same for post-before-pre (depression)
 - `rm_stdp_trace_to_weight` - One synapse's decay -> accumulate -> dopamine-gated conversion
 - `engine_step/unrewarded` / `engine_step/rewarded` - Full `SpikingNetwork::step` (64 LIF over 64 channels) carrying trace bookkeeping, with the dopamine gate shut and open
+- `engine_channel_drive/unrewarded` / `engine_channel_drive/rewarded` - Fixed seeded 32-step batches from a warmed checkpoint (64 LIF over 64 mixed channels); setup is untimed, throughput counts steps
 - `stdp_weight_update` - Complete weight update cycle
 - `hebbian_network_update` - Hebbian network weight update
 - `stdp_delta_t_calculation` - Spike timing difference calculation
@@ -253,3 +254,53 @@ improvements. Criterion's `--save-baseline` output lives under the git-ignored
 `target/criterion/`, so it never lands in this repo — the *Measured Baseline* table
 above is the durable, reviewable record; regenerate it (and update the commit/date
 above) whenever a change to `src/` is expected to move these numbers materially.
+
+## Channel-drive hoisting (#191, 2026-10-08)
+
+Comparison against commit `e357311`, with the same new
+`engine_channel_drive` benchmark copied onto that baseline. Each timed batch
+executes 32 full engine steps (64 LIF neurons, 5 Izhikevich neurons, 64 channels)
+from an identical warmed checkpoint and seeded RNG. Stimuli rotate through
+`0.009`, `-0.25`, `0.5`, and `1.5`. The checkpoint is warmed for 200 steps with
+seed 191; each measured batch starts with seed 192. Checkpoint restoration,
+RNG construction, and network destruction are outside timing.
+This isolates channel-drive hoisting; it does not include the other
+optimizations from the combined audit probe.
+
+- Machine: 2-vCPU Intel Xeon @ 2.60 GHz Linux orb, shared virtualized environment.
+- Toolchain: rustc 1.98.1; default bench profile (opt-level 3, LTO,
+  one codegen unit), all features enabled, no custom `RUSTFLAGS`.
+- Criterion: 100 samples, 3-second warm-up, 10-second measurement target per
+  case (automatically extended to approximately 13–15 seconds).
+- Times below are point estimates with 95% confidence intervals, not medians.
+
+| Seeded benchmark (32-step batch) | Before (ms) | After (ms) | Point-estimate reduction |
+| --- | --- | --- | --- |
+| `engine_channel_drive/unrewarded` | 2.2506 [2.2318, 2.2708] | 2.1341 [2.1199, 2.1503] | 5.18% |
+| `engine_channel_drive/rewarded` | 2.5408 [2.5182, 2.5659] | 2.4323 [2.3986, 2.4728] | 4.27% |
+
+Criterion reported an improvement in both seeded cases (`p < 0.05`), with
+comparison intervals of −5.69% to −4.10% unrewarded and −5.38% to −2.80% rewarded.
+These are single-orb measurements, not a performance SLA or evidence of the
+combined audit's 20–27% win. Stimulus clamping and surprise arithmetic now
+execute once per channel rather than once per neuron-channel pair.
+
+For completeness, the unchanged stochastic `engine_step` benchmark measured
+73.886 → 68.855 µs unrewarded and 77.598 → 82.525 µs rewarded on the final
+implementation, with Criterion reporting improvement and regression,
+respectively. An earlier run showed no clear improvement in either case.
+Those benchmarks use thread-local input encoding and evolve through different
+random workloads; the fixed seeded batches above provide the controlled
+comparison rather than attributing those inconsistent results to this fix.
+
+Reproduce on the baseline commit and then the hoisted implementation, respectively:
+
+```bash
+# Copy benches/stdp_bench.rs from this change onto the baseline first.
+# Use separate build directories and a shared absolute CRITERION_HOME when
+# comparing worktrees to avoid reusing a binary built from the other source.
+cargo bench --all-features --bench stdp_bench -- engine_channel_drive \
+  --save-baseline gh191-seeded-before --sample-size 100 --warm-up-time 3 --measurement-time 10
+cargo bench --all-features --bench stdp_bench -- engine_channel_drive \
+  --baseline gh191-seeded-before --sample-size 100 --warm-up-time 3 --measurement-time 10
+```

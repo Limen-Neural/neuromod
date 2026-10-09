@@ -62,6 +62,7 @@ Benchmarks synaptic plasticity operations:
 - `eligibility_trace_accumulate_ltd` - Same for post-before-pre (depression)
 - `rm_stdp_trace_to_weight` - One synapse's decay -> accumulate -> dopamine-gated conversion
 - `engine_step/unrewarded` / `engine_step/rewarded` - Full `SpikingNetwork::step` (64 LIF over 64 channels) carrying trace bookkeeping, with the dopamine gate shut and open
+- `engine_step_allocations/{normal,frozen}/{16,64,512}` - Seeded full steps with dense firing, 200 warm-up steps, and bank/channel size scaling; wall-clock timings, not allocation counts
 - `stdp_weight_update` - Complete weight update cycle
 - `hebbian_network_update` - Hebbian network weight update
 - `stdp_delta_t_calculation` - Spike timing difference calculation
@@ -236,6 +237,60 @@ Modulator primitive operations (not full network steps):
 | `modulator_boost_focus` | 1.86 ns |
 | `modulator_add_norepinephrine` | 2.16 ns |
 | `modulator_decay` | 36.4 ns |
+
+## Engine allocation reduction (GH#190)
+
+Measured on 2026-10-08 (America/Chicago), comparing the engine at
+[`e357311`](https://github.com/Limen-Neural/neuromod/commit/e357311d5f3fe1669d8583bebaa6e5272b9105e1)
+with this change using the same benchmark harness. Rust 1.98.1, release/LTO bench
+profile, Linux x86_64 orb, two vCPUs on an Intel Xeon @ 2.60 GHz. This is a shared
+cloud machine, not an isolated performance rig; timings vary between runs.
+
+```bash
+# With the benchmark harness present, before changing the engine:
+cargo bench --bench stdp_bench -- engine_step --warm-up-time 1 \
+  --measurement-time 3 --sample-size 30 --save-baseline gh190-before
+# After changing the engine:
+cargo bench --bench stdp_bench -- engine_step --warm-up-time 1 \
+  --measurement-time 3 --sample-size 30 --baseline gh190-before
+# Allocation gate (thread-local counter, separate from Criterion timing):
+cargo test --test engine_allocations -- --nocapture
+```
+
+The baseline was repeated by running its already-built Criterion executable with
+the same arguments, without concurrent compilation/tests; the table uses that
+last baseline. Times are Criterion's middle point estimates, not medians; the
+percent column is the arithmetic change between those estimates, not Criterion's
+separate statistical change estimate.
+
+| Benchmark | Before | After | Point-estimate change |
+| --- | ---: | ---: | ---: |
+| `engine_step/unrewarded` (64×64, stimulus 0.5) | 54.559 µs | 51.749 µs | −5.1% |
+| `engine_step/rewarded` (64×64, stimulus 0.5) | 58.882 µs | 56.488 µs | −4.1% (no statistically detectable change) |
+| `engine_step_allocations/normal/16` | 3.1531 µs | 3.0212 µs | −4.2% (no statistically detectable change) |
+| `engine_step_allocations/frozen/16` | 477.76 ns | 289.18 ns | −39.5% |
+| `engine_step_allocations/normal/64` | 54.861 µs | 49.965 µs | −8.9% |
+| `engine_step_allocations/frozen/64` | 4.7396 µs | 1.8271 µs | −61.5% |
+| `engine_step_allocations/normal/512` | 3.5101 ms | 3.3265 ms | −5.2% |
+| `engine_step_allocations/frozen/512` | 216.95 µs | 142.26 µs | −34.4% |
+
+The dense-firing allocation gate measures 100 steps at each size, with all LIF
+neurons firing on every step (stimulus 1.0, weight budget 2.0, default modulators,
+`StdRng` seed 190). Both normal and frozen modes include five Izhikevich neurons.
+
+| LIF neurons × channels | Normal allocations/step, before → after | Frozen allocations/step, before → after |
+| --- | ---: | ---: |
+| 16×16 | 5 → 2 | 6 → 3 |
+| 64×64 | 7 → 2 | 8 → 3 |
+| 512×512 | 10 → 2 | 11 → 3 |
+
+This is allocation reduction, **not a zero-allocation API**. The channel-drive
+buffer and owned returned spike vector still allocate; frozen mode additionally
+allocates its existing plasticity snapshot. Reusable scratch fields are the
+optional follow-up identified in GH#190 and are not added here, preserving the
+public struct and checkpoint shape. Reserving spike output for the full LIF bank
+avoids reallocations but reserves more output memory for sparse/silent firing
+than an initially empty vector. STDP math and eligibility decay are unchanged.
 
 ## Continuous Benchmarking
 

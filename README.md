@@ -410,7 +410,7 @@ Preflight adds one allocation-free `O(num_channels)` predictive-value scan to
 its existing stimulus scan, four modulator checks, and two `O(1)` vector-length
 checks. Overall step complexity remains `O(num_channels)` plus neuron work;
 this is a complexity assessment, not a measured claim of negligible overhead.
-Validation belongs before mutation: `update_predictive_errors` runs after the
+Validation belongs before mutation: `update_predictive_drive` runs after the
 counter and neuron parameters have changed, so checking there would violate
 rejection atomicity.
 

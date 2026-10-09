@@ -105,7 +105,8 @@ The capacity checks cover persistent allocations only. For `SpikingNetwork`
 these are both neuron banks, input spike times, predictive state, and every LIF
 neuron's weights and eligibility traces. For `SparseGifHiddenLayer` they are the
 CSR offsets, sources, and weights plus membrane, adaptation, and spike-time
-banks. Temporary per-step outputs are deliberately excluded.
+banks and the transition scratch buffer. Temporary per-step outputs are
+deliberately excluded.
 
 On Linux, `NEUROMOD_SOAK_RSS=1 cargo test soak -- --ignored --nocapture` prints
 best-effort `/proc/self/status` RSS samples. RSS is diagnostic only and is never

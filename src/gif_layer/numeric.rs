@@ -64,8 +64,9 @@ pub(super) fn first_non_finite(values: &[f32]) -> Option<(usize, NonFiniteClass)
         .find_map(|(index, &value)| NonFiniteClass::classify(value).map(|class| (index, class)))
 }
 
-/// Stack-only candidate: inspect pre-reset values too, so a threshold/reset
-/// cannot conceal overflow. Both passes use the shared GifParams arithmetic.
+/// Candidate transition: inspect pre-reset values too, so a threshold/reset
+/// cannot conceal overflow. Uses the shared GifParams arithmetic.
+#[derive(Debug, PartialEq)]
 pub(super) struct Transition {
     drive: f32,
     decayed_adaptation: f32,

@@ -83,11 +83,14 @@ or post-spike state returns `GifLayerError::NumericOverflow`. Every rejected
 correct the inputs or mutable edits before retrying. `run` preserves successful
 frames before a failure, so atomicity is per frame, not per batch.
 
-`step_into` remains allocation-free. It validates a complete candidate step,
-then recomputes and commits it with the same CSR traversal and shared GIF
-arithmetic. This costs a second dynamics pass plus linear ingress scans,
-remaining O(inputs + synapses + neurons) with O(1) extra space. Checkpoint shape,
-serialization, and bit-exact golden/Corinth behavior are unchanged.
+Use `step_into` with a reused spike buffer in hot loops: stepping is
+allocation-free, including the first call after construction, cloning, or
+checkpoint restoration. It computes and validates each transition once into
+preallocated scratch, then commits only after all neurons pass. Complexity is
+O(inputs + synapses + neurons) with O(neurons) extra scratch space. Scratch is
+not serialized; checkpoint shape and bit-exact golden/Corinth behavior are
+unchanged. `step` is a convenience API that allocates a spike buffer and
+collects fired indices into a returned `Vec`.
 
 This module is an upstream port of the equivalent layer from the author's `corinth-canal` repository (issue #101). Internal goldens pin this implementation's generator and traversal behavior, and cross-repository bit-parity vectors are now committed under `tests/reference/`, captured from `corinth-canal` at the pinned source commit and replayed offline by a zero-tolerance parity test (issue #144). See `cargo run --example sparse_gif_layer`.
 

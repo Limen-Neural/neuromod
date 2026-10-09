@@ -28,7 +28,7 @@ use super::{GifLayerError, MAX_INPUTS, SparseGifLayerConfig, SpikeRaster};
 /// let fired = layer.step(&[1.0; 8]).unwrap();
 /// assert!(fired.len() <= 4);
 /// ```
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, PartialEq, Serialize, Deserialize)]
 #[serde(try_from = "SparseGifHiddenLayerRepr")]
 pub struct SparseGifHiddenLayer {
     num_inputs: usize,
@@ -47,6 +47,31 @@ pub struct SparseGifHiddenLayer {
     last_spike_time: Vec<i64>,
 
     step_count: i64,
+
+    // Empty between calls, including errors, so scratch never affects equality.
+    #[serde(skip)]
+    transitions: Vec<Transition>,
+}
+
+impl Clone for SparseGifHiddenLayer {
+    fn clone(&self) -> Self {
+        Self {
+            num_inputs: self.num_inputs,
+            num_neurons: self.num_neurons,
+            seed: self.seed,
+            params: self.params,
+            fan_in_offsets: self.fan_in_offsets.clone(),
+            fan_in_sources: self.fan_in_sources.clone(),
+            weights: self.weights.clone(),
+            membrane: self.membrane.clone(),
+            adaptation: self.adaptation.clone(),
+            last_spike_time: self.last_spike_time.clone(),
+            step_count: self.step_count,
+            // Cloning an empty Vec would discard its reserved capacity and
+            // make the clone's first step allocate.
+            transitions: Vec::with_capacity(self.num_neurons),
+        }
+    }
 }
 
 /// Deserialization mirror of [`SparseGifHiddenLayer`].
@@ -207,6 +232,7 @@ impl TryFrom<SparseGifHiddenLayerRepr> for SparseGifHiddenLayer {
             adaptation: repr.adaptation,
             last_spike_time: repr.last_spike_time,
             step_count: repr.step_count,
+            transitions: Vec::with_capacity(repr.num_neurons),
         })
     }
 }
@@ -268,6 +294,7 @@ impl SparseGifHiddenLayer {
             adaptation: vec![0.0; num_neurons],
             last_spike_time: vec![-1; num_neurons],
             step_count: 0,
+            transitions: Vec::with_capacity(num_neurons),
         })
     }
 
@@ -454,6 +481,7 @@ impl SparseGifHiddenLayer {
             adaptation: vec![0.0; num_neurons],
             last_spike_time: vec![-1; num_neurons],
             step_count: 0,
+            transitions: Vec::with_capacity(num_neurons),
         })
     }
 
@@ -543,6 +571,9 @@ impl SparseGifHiddenLayer {
 
     /// Advance one time step and return the indices of the neurons that fired.
     ///
+    /// This convenience API allocates a spike buffer and the returned indices.
+    /// Prefer [`Self::step_into`] with a reused output buffer in hot loops.
+    ///
     /// # Errors
     ///
     /// The length, numeric, and counter errors documented by [`Self::step_into`].
@@ -559,10 +590,12 @@ impl SparseGifHiddenLayer {
 
     /// Advance one time step, writing spike flags into a caller-owned buffer.
     ///
-    /// This allocation-free entry point first checks every candidate transition,
-    /// then recomputes and commits it in the same fixed arithmetic order. There
-    /// is no heap scratch state or checkpoint-format change. The second pass
-    /// adds computation; total complexity remains O(inputs + synapses + neurons).
+    /// Preferred hot-loop entry point: reuse the output buffer for allocation-free
+    /// stepping, including the first call after construction, cloning, or decoding.
+    /// Each candidate transition is computed and validated once in fixed arithmetic
+    /// order, then committed only after every neuron passes. Scratch storage is
+    /// reserved outside stepping and omitted from checkpoints. Complexity remains
+    /// O(inputs + synapses + neurons), with O(neurons) extra scratch space.
     ///
     /// # Errors
     ///
@@ -621,14 +654,21 @@ impl SparseGifHiddenLayer {
 
         self.validate_numeric_inputs(stimuli)?;
         for neuron in 0..self.num_neurons {
-            self.validate_transition(neuron, stimuli)?;
+            match self.validate_transition(neuron, stimuli) {
+                Ok(next) => self.transitions.push(next),
+                Err(error) => {
+                    self.transitions.clear();
+                    return Err(error);
+                }
+            }
         }
 
-        // No cross-neuron dependencies or mutable hooks exist inside a step.
-        // Recomputing each validated candidate is therefore bit-identical and
-        // needs neither scratch allocation nor extra checkpoint/cache fields.
-        for (neuron, spike) in spikes.iter_mut().enumerate() {
-            let next = self.transition(neuron, stimuli);
+        // Draining retains capacity and restores empty scratch before returning.
+        for (neuron, (spike, next)) in spikes
+            .iter_mut()
+            .zip(self.transitions.drain(..))
+            .enumerate()
+        {
             self.membrane[neuron] = next.membrane;
             self.adaptation[neuron] = next.adaptation;
             *spike = next.fired;
@@ -652,8 +692,12 @@ impl SparseGifHiddenLayer {
 
     /// Non-finite weights necessarily poison the drive with finite stimuli
     /// (including inf * 0 -> NaN). Diagnose their CSR index only on failure,
-    /// avoiding a third full synapse traversal on the successful path.
-    fn validate_transition(&self, neuron: usize, stimuli: &[f32]) -> Result<(), GifLayerError> {
+    /// avoiding an extra synapse traversal on the successful path.
+    fn validate_transition(
+        &self,
+        neuron: usize,
+        stimuli: &[f32],
+    ) -> Result<Transition, GifLayerError> {
         let next = self.transition(neuron, stimuli);
         if !next.drive_is_finite() {
             let lo = self.fan_in_offsets[neuron];
@@ -665,7 +709,8 @@ impl SparseGifHiddenLayer {
                 });
             }
         }
-        next.validate(neuron)
+        next.validate(neuron)?;
+        Ok(next)
     }
 
     /// Fixed-order CSR accumulation and shared GIF dynamics, without mutation.

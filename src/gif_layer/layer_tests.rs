@@ -30,6 +30,7 @@ struct LayerCapacities {
     membrane: usize,
     adaptation: usize,
     last_spike_time: usize,
+    transitions: usize,
 }
 
 impl LayerCapacities {
@@ -41,6 +42,7 @@ impl LayerCapacities {
             membrane: layer.membrane.capacity(),
             adaptation: layer.adaptation.capacity(),
             last_spike_time: layer.last_spike_time.capacity(),
+            transitions: layer.transitions.capacity(),
         }
     }
 }

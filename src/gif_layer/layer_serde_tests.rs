@@ -7,6 +7,29 @@ fn layer_round_trips_through_json() {
     let mut layer = SparseGifHiddenLayer::new(&config(16, 6, 4, 21)).unwrap();
     layer.run(&ramp_train(15, 16)).unwrap();
     let json = serde_json::to_string(&layer).unwrap();
+    let checkpoint: serde_json::Value = serde_json::from_str(&json).unwrap();
+    assert_eq!(
+        checkpoint
+            .as_object()
+            .unwrap()
+            .keys()
+            .map(String::as_str)
+            .collect::<Vec<_>>(),
+        [
+            "adaptation",
+            "fan_in_offsets",
+            "fan_in_sources",
+            "last_spike_time",
+            "membrane",
+            "num_inputs",
+            "num_neurons",
+            "params",
+            "seed",
+            "step_count",
+            "weights",
+        ],
+        "checkpoint fields must remain compatible with pre-scratch layers",
+    );
     let restored: SparseGifHiddenLayer = serde_json::from_str(&json).unwrap();
     assert_eq!(layer, restored);
 

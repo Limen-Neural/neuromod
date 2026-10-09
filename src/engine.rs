@@ -121,7 +121,7 @@ impl fmt::Display for ModulatorField {
 /// [`SpikingNetwork::num_channels`] in [`StepError::CheckpointShapeMismatch`].
 ///
 /// These are the two serde-visible vectors the step pipeline indexes directly
-/// by channel (`predictive_state` in `update_predictive_errors`,
+/// by channel (`predictive_state` in `update_predictive_drive`,
 /// `input_spike_times` in `encode_input_spikes`). The scan reports them in that
 /// order.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -701,7 +701,7 @@ impl SpikingNetwork {
         // A malformed self-describing checkpoint (or a hand-edited public field)
         // can leave `predictive_state` or `input_spike_times` a different length
         // than `num_channels`. Both are indexed by channel below
-        // (`update_predictive_errors`, `encode_input_spikes`), so a short vector
+        // (`update_predictive_drive`, `encode_input_spikes`), so a short vector
         // would panic and a long one would silently drop trailing entries —
         // after `global_step` had already advanced. Reject the shape here, still
         // before any mutation or RNG draw, so the step stays atomic.
@@ -711,7 +711,7 @@ impl SpikingNetwork {
             &self.input_spike_times,
         )?;
 
-        // Checking in update_predictive_errors would be too late: the counter
+        // Checking in update_predictive_drive would be too late: the counter
         // and neuron parameters would already have changed.
         validate_predictive_state(&self.predictive_state)?;
 
@@ -743,9 +743,9 @@ impl SpikingNetwork {
         let learning_rate = 0.5 * self.modulators.dopamine;
 
         self.retune_lif_from_modulators(learning_rate);
-        let pred_errors = self.update_predictive_errors(stimuli);
+        let drive = self.update_predictive_drive(stimuli);
         self.encode_input_spikes(stimuli, rng);
-        self.integrate_lif_bank(stimuli, &pred_errors, stress_multiplier);
+        self.integrate_lif_bank(&drive, stress_multiplier);
         let spike_ids = self.fire_lif_and_inhibit();
         if matches!(mode, StepMode::Normal) {
             self.apply_stdp(learning_rate);
@@ -776,16 +776,17 @@ impl SpikingNetwork {
         }
     }
 
-    /// Per-channel EMA of `|stimuli|` and the surprise (`pred_errors`) it implies.
-    fn update_predictive_errors(&mut self, stimuli: &[f32]) -> Vec<f32> {
-        let mut pred_errors = vec![0.0_f32; self.num_channels];
-        for ch in 0..self.num_channels {
-            let s = stimuli[ch].abs().clamp(0.0, 1.0);
-            pred_errors[ch] = (s - self.predictive_state[ch]).abs();
-            self.predictive_state[ch] =
-                PRED_ALPHA * s + (1.0 - PRED_ALPHA) * self.predictive_state[ch];
+    /// Update the per-channel EMA and combine stimulus + surprise once, rather
+    /// than recomputing the same unweighted drive for every LIF neuron.
+    fn update_predictive_drive(&mut self, stimuli: &[f32]) -> Vec<f32> {
+        let mut drive = Vec::with_capacity(self.num_channels);
+        for (&stimulus, prediction) in stimuli.iter().zip(&mut self.predictive_state) {
+            let s = stimulus.abs().clamp(0.0, 1.0);
+            let pred_error = (s - *prediction).abs();
+            drive.push(s + PRED_ERR_WEIGHT * pred_error);
+            *prediction = PRED_ALPHA * s + (1.0 - PRED_ALPHA) * *prediction;
         }
-        pred_errors
+        drive
     }
 
     /// Bernoulli-encode `stimuli` into `input_spike_times` from `rng`.
@@ -802,16 +803,11 @@ impl SpikingNetwork {
     }
 
     /// Integrate each LIF neuron from weighted stimuli plus surprise.
-    fn integrate_lif_bank(&mut self, stimuli: &[f32], pred_errors: &[f32], stress_multiplier: f32) {
+    fn integrate_lif_bank(&mut self, drive: &[f32], stress_multiplier: f32) {
         for neuron in &mut self.neurons {
             let mut total_current = 0.0;
-            for ch in 0..self.num_channels {
-                if ch >= neuron.weights.len() {
-                    continue;
-                }
-                let stim = stimuli[ch].abs().clamp(0.0, 1.0);
-                let surprise = PRED_ERR_WEIGHT * pred_errors[ch];
-                total_current += neuron.weights[ch] * (stim + surprise);
+            for (&weight, &channel_drive) in neuron.weights.iter().zip(drive) {
+                total_current += weight * channel_drive;
             }
             total_current *= 0.45 * stress_multiplier;
             neuron.integrate(total_current);
@@ -820,25 +816,23 @@ impl SpikingNetwork {
 
     /// Fire LIF neurons, then laterally inhibit the ones that did not spike.
     ///
-    /// Membership is an O(1) `fired` mask so this stays linear in neuron count
-    /// even when `with_dimensions` builds a large bank.
+    /// The current step's `last_spike` flags provide O(1) membership without a
+    /// duplicate mask. Reserving the bank size avoids output reallocations.
     fn fire_lif_and_inhibit(&mut self) -> Vec<usize> {
-        let mut spike_ids = Vec::new();
-        let mut fired = vec![false; self.neurons.len()];
+        let mut spike_ids = Vec::with_capacity(self.neurons.len());
         for (i, neuron) in self.neurons.iter_mut().enumerate() {
             if let Some(_peak_v) = neuron.check_fire() {
                 neuron.last_spike = true;
                 neuron.last_spike_time = self.global_step;
                 spike_ids.push(i);
-                fired[i] = true;
             } else {
                 neuron.last_spike = false;
             }
         }
 
         if !spike_ids.is_empty() {
-            for (i, neuron) in self.neurons.iter_mut().enumerate() {
-                if !fired[i] {
+            for neuron in &mut self.neurons {
+                if !neuron.last_spike {
                     neuron.membrane_potential =
                         (neuron.membrane_potential - INHIBITION_STRENGTH).max(0.0);
                 }

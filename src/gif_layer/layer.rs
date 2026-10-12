@@ -653,17 +653,30 @@ impl SparseGifHiddenLayer {
                 })?;
 
         self.validate_numeric_inputs(stimuli)?;
-        for neuron in 0..self.num_neurons {
-            match self.validate_transition(neuron, stimuli) {
-                Ok(next) => self.transitions.push(next),
-                Err(error) => {
-                    self.transitions.clear();
-                    return Err(error);
-                }
-            }
-        }
+        self.stage_transitions(stimuli)?;
+        self.commit_transitions(spikes);
+        self.step_count = next_step_count;
+        Ok(())
+    }
 
-        // Draining retains capacity and restores empty scratch before returning.
+    /// Compute and validate every candidate once, in neuron order, caching it
+    /// in scratch. Any rejection empties the scratch, so no state is touched.
+    fn stage_transitions(&mut self, stimuli: &[f32]) -> Result<(), GifLayerError> {
+        self.push_transitions(stimuli)
+            .inspect_err(|_| self.transitions.clear())
+    }
+
+    fn push_transitions(&mut self, stimuli: &[f32]) -> Result<(), GifLayerError> {
+        for neuron in 0..self.num_neurons {
+            let next = self.validate_transition(neuron, stimuli)?;
+            self.transitions.push(next);
+        }
+        Ok(())
+    }
+
+    /// Commit the staged candidates. Draining retains capacity and restores
+    /// empty scratch before returning.
+    fn commit_transitions(&mut self, spikes: &mut [bool]) {
         for (neuron, (spike, next)) in spikes
             .iter_mut()
             .zip(self.transitions.drain(..))
@@ -676,9 +689,6 @@ impl SparseGifHiddenLayer {
                 self.last_spike_time[neuron] = self.step_count;
             }
         }
-
-        self.step_count = next_step_count;
-        Ok(())
     }
 
     /// Check all mutable ingress, even stimuli not referenced by the topology.

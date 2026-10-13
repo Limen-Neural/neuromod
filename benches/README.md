@@ -49,6 +49,9 @@ Benchmarks individual neuron model performance:
 - `hodgkin_huxley_step` - Hodgkin-Huxley neuron step
 - `fitzhugh_nagumo_step` - FitzHugh-Nagumo neuron step
 - `neuron_types` - Comparison across all neuron types
+- `sparse_gif_layer/step_into` / `sparse_gif_layer/step` - Sparse GIF layer stepping
+  (8, 64, 256 neurons; 64 input channels; fan-in 16), with reusable flags versus
+  allocating fired indices
 
 ### 2. STDP Benchmarks (`stdp_bench.rs`)
 
@@ -136,6 +139,44 @@ On this run the ranking is LIF < Izhikevich < FitzHugh-Nagumo < Hodgkin-Huxley, 
 with their relative model complexity: LIF integrates a single membrane-potential state,
 Izhikevich and FitzHugh-Nagumo each track two coupled state variables, and Hodgkin-Huxley
 tracks four (membrane potential plus three gating variables `m`, `h`, `n`).
+
+### Sparse GIF transition scratch (issue #192)
+
+Measured 2026-10-08 on an x86_64 Linux orb with 2 vCPUs, Intel Xeon @ 2.60GHz,
+`rustc 1.98.1`, and the repository's release/LTO bench profile. Before is
+[e357311](https://github.com/Limen-Neural/neuromod/commit/e357311d5f3fe1669d8583bebaa6e5272b9105e1); after is the #192 transition-scratch
+implementation. Both use the same `neuron_bench` fixture: 64 channels alternating
+0/1, fan-in 16, seed 192, default GIF parameters, and 200 untimed warm-up steps.
+Construction, cloning, and output-buffer setup are outside the timed loop.
+`step` includes its per-call output allocation and disposal; `step_into` reuses
+the same output buffer. Each run uses 50 samples, 1 s warm-up, and 3 s measurement.
+
+| API / neurons | Before | After | Time reduction |
+| --- | ---: | ---: | ---: |
+| `step_into` / 8 | 317.86 ns | 229.75 ns | 27.7% |
+| `step` / 8 | 404.82 ns | 284.98 ns | 29.6% |
+| `step_into` / 64 | 1.9052 µs | 1.2442 µs | 34.7% |
+| `step` / 64 | 2.3250 µs | 1.5408 µs | 33.7% |
+| `step_into` / 256 | 7.8770 µs | 4.8951 µs | 37.9% |
+| `step` / 256 | 8.2273 µs | 5.6698 µs | 31.1% |
+
+Values are Criterion point estimates; reductions are calculated from those
+estimates, not Criterion's separate change-distribution estimate. All six
+comparisons reported a statistically significant improvement (p < 0.05).
+These are single-orb measurements with outliers, not a performance guarantee.
+The single-transition path trades O(neurons) persistent scratch space for less
+arithmetic; ingress validation and scratch writes still cost time, so eliminating
+the duplicate transition does not halve total latency. `step_into` is the
+allocation-free hot-loop API; `step` remains an allocating convenience API.
+
+```bash
+# Before changing the library, with the benchmark fixture already added:
+cargo bench --bench neuron_bench -- sparse_gif_layer --warm-up-time 1 \
+  --measurement-time 3 --sample-size 50 --save-baseline gh192-before
+# After changing the library:
+cargo bench --bench neuron_bench -- sparse_gif_layer --warm-up-time 1 \
+  --measurement-time 3 --sample-size 50 --baseline gh192-before
+```
 
 ### STDP / plasticity (`stdp_bench.rs`)
 

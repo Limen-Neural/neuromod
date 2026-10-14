@@ -148,17 +148,21 @@ fn bench_engine_step_with_traces(c: &mut Criterion) {
     group.finish();
 }
 
-/// Fixed seeded batches make before/after runs process identical spike and
-/// learning workloads. Checkpoint restoration and RNG construction are untimed.
-fn bench_engine_channel_drive(c: &mut Criterion) {
-    const STEPS: usize = 32;
-    let stimuli: Vec<Vec<f32>> = (0..STEPS)
+fn channel_drive_stimuli(steps: usize) -> Vec<Vec<f32>> {
+    (0..steps)
         .map(|step| {
             (0..64)
                 .map(|ch| [0.009, -0.25, 0.5, 1.5][(ch + step) % 4])
                 .collect()
         })
-        .collect();
+        .collect()
+}
+
+/// Fixed seeded batches make before/after runs process identical spike and
+/// learning workloads. Checkpoint restoration and RNG construction are untimed.
+fn bench_engine_channel_drive(c: &mut Criterion) {
+    const STEPS: usize = 32;
+    let stimuli = channel_drive_stimuli(STEPS);
     let mut group = c.benchmark_group("engine_channel_drive");
     group.throughput(Throughput::Elements(STEPS as u64));
 

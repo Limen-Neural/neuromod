@@ -121,7 +121,7 @@ impl fmt::Display for ModulatorField {
 /// [`SpikingNetwork::num_channels`] in [`StepError::CheckpointShapeMismatch`].
 ///
 /// These are the two serde-visible vectors the step pipeline indexes directly
-/// by channel (`predictive_state` in `update_predictive_errors`,
+/// by channel (`predictive_state` in `update_predictive_drive`,
 /// `input_spike_times` in `encode_input_spikes`). The scan reports them in that
 /// order.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -398,7 +398,7 @@ impl PlasticitySnapshot {
 impl SpikingNetwork {
     /// Create the default network (16 LIF, 5 Izhikevich, 16 channels).
     pub fn new() -> Self {
-        Self::with_dimensions(16, 5, crate::NUM_INPUT_CHANNELS)
+        Self::default()
     }
 
     /// Create a dynamically sized network.
@@ -535,7 +535,7 @@ impl SpikingNetwork {
     /// 2. Store `modulators` and derive stress / learning rates.
     /// 3. Recompute LIF targets from neuromodulators: assign `decay_rate`
     ///    directly; soft-update `threshold` toward its target (learning-rate blend).
-    /// 4. Update per-channel predictive EMA and surprise (`pred_errors`).
+    /// 4. Update per-channel predictive EMA and precompute stimuli + surprise drive.
     /// 5. For each channel with `|stimuli| > 0.01`, run a Bernoulli trial
     ///    with probability `clamp(|stimuli|, 0.0, 1.0)` and stamp
     ///    `input_spike_times` on success. This convenience wrapper draws from
@@ -701,7 +701,7 @@ impl SpikingNetwork {
         // A malformed self-describing checkpoint (or a hand-edited public field)
         // can leave `predictive_state` or `input_spike_times` a different length
         // than `num_channels`. Both are indexed by channel below
-        // (`update_predictive_errors`, `encode_input_spikes`), so a short vector
+        // (`update_predictive_drive`, `encode_input_spikes`), so a short vector
         // would panic and a long one would silently drop trailing entries —
         // after `global_step` had already advanced. Reject the shape here, still
         // before any mutation or RNG draw, so the step stays atomic.
@@ -711,7 +711,7 @@ impl SpikingNetwork {
             &self.input_spike_times,
         )?;
 
-        // Checking in update_predictive_errors would be too late: the counter
+        // Checking in update_predictive_drive would be too late: the counter
         // and neuron parameters would already have changed.
         validate_predictive_state(&self.predictive_state)?;
 
@@ -743,9 +743,9 @@ impl SpikingNetwork {
         let learning_rate = 0.5 * self.modulators.dopamine;
 
         self.retune_lif_from_modulators(learning_rate);
-        let pred_errors = self.update_predictive_errors(stimuli);
+        let drive = self.update_predictive_drive(stimuli);
         self.encode_input_spikes(stimuli, rng);
-        self.integrate_lif_bank(stimuli, &pred_errors, stress_multiplier);
+        self.integrate_lif_bank(&drive, stress_multiplier);
         let spike_ids = self.fire_lif_and_inhibit();
         if matches!(mode, StepMode::Normal) {
             self.apply_stdp(learning_rate);
@@ -776,16 +776,17 @@ impl SpikingNetwork {
         }
     }
 
-    /// Per-channel EMA of `|stimuli|` and the surprise (`pred_errors`) it implies.
-    fn update_predictive_errors(&mut self, stimuli: &[f32]) -> Vec<f32> {
-        let mut pred_errors = vec![0.0_f32; self.num_channels];
+    /// Update the per-channel EMA and return stimuli + surprise drive for all LIF neurons.
+    fn update_predictive_drive(&mut self, stimuli: &[f32]) -> Vec<f32> {
+        let mut drive = vec![0.0_f32; self.num_channels];
         for ch in 0..self.num_channels {
             let s = stimuli[ch].abs().clamp(0.0, 1.0);
-            pred_errors[ch] = (s - self.predictive_state[ch]).abs();
+            let err = (s - self.predictive_state[ch]).abs();
+            drive[ch] = s + PRED_ERR_WEIGHT * err;
             self.predictive_state[ch] =
                 PRED_ALPHA * s + (1.0 - PRED_ALPHA) * self.predictive_state[ch];
         }
-        pred_errors
+        drive
     }
 
     /// Bernoulli-encode `stimuli` into `input_spike_times` from `rng`.
@@ -802,16 +803,11 @@ impl SpikingNetwork {
     }
 
     /// Integrate each LIF neuron from weighted stimuli plus surprise.
-    fn integrate_lif_bank(&mut self, stimuli: &[f32], pred_errors: &[f32], stress_multiplier: f32) {
+    fn integrate_lif_bank(&mut self, drive: &[f32], stress_multiplier: f32) {
         for neuron in &mut self.neurons {
             let mut total_current = 0.0;
-            for ch in 0..self.num_channels {
-                if ch >= neuron.weights.len() {
-                    continue;
-                }
-                let stim = stimuli[ch].abs().clamp(0.0, 1.0);
-                let surprise = PRED_ERR_WEIGHT * pred_errors[ch];
-                total_current += neuron.weights[ch] * (stim + surprise);
+            for (&weight, &channel_drive) in neuron.weights.iter().zip(drive) {
+                total_current += weight * channel_drive;
             }
             total_current *= 0.45 * stress_multiplier;
             neuron.integrate(total_current);
@@ -1033,7 +1029,35 @@ impl SpikingNetwork {
 
 impl Default for SpikingNetwork {
     fn default() -> Self {
-        Self::new()
+        // Inlined: a call that returns `Self` here is RS-A1008, including
+        // `with_dimensions`. Keep this matched to `with_dimensions(16, 5, NUM_INPUT_CHANNELS)`.
+        let num_lif = 16;
+        let num_izh = 5;
+        let num_channels = crate::NUM_INPUT_CHANNELS;
+        let stdp_config = RmStdpConfig::default();
+        let neurons: Vec<LifNeuron> = (0..num_lif)
+            .map(|_| {
+                let mut n = LifNeuron::new();
+                n.weights = vec![0.0; num_channels];
+                n.eligibility = vec![
+                    EligibilityTrace::new(stdp_config.effective_tau_eligibility());
+                    num_channels
+                ];
+                n.last_spike_time = -1;
+                n
+            })
+            .collect();
+
+        Self {
+            neurons,
+            iz_neurons: vec![IzhikevichNeuron::new_regular_spiking(); num_izh],
+            modulators: NeuroModulators::default(),
+            global_step: 0,
+            num_channels,
+            input_spike_times: vec![-1; num_channels],
+            predictive_state: vec![0.0; num_channels],
+            stdp_config,
+        }
     }
 }
 
@@ -1046,7 +1070,8 @@ mod tests {
 
     #[test]
     fn test_network_creation_defaults() {
-        let network = SpikingNetwork::new();
+        // This test locks the zero-arg constructor, not only `Default`.
+        let network = SpikingNetwork::new(); // skipcq: RS-W1079
         assert_eq!(network.neurons.len(), 16);
         assert_eq!(network.iz_neurons.len(), 5);
         assert_eq!(network.num_channels, 16);
@@ -1072,16 +1097,16 @@ mod tests {
 
     #[test]
     fn test_default_matches_new() {
-        let a = SpikingNetwork::new();
-        let b = SpikingNetwork::default();
-        assert_eq!(a.neurons.len(), b.neurons.len());
-        assert_eq!(a.iz_neurons.len(), b.iz_neurons.len());
-        assert_eq!(a.num_channels, b.num_channels);
+        let via_new = SpikingNetwork::new(); // skipcq: RS-W1079
+        let via_default = SpikingNetwork::default();
+        let via_dimensions = SpikingNetwork::with_dimensions(16, 5, crate::NUM_INPUT_CHANNELS);
+        assert_eq!(capture_network(&via_new), capture_network(&via_default));
+        assert_eq!(capture_network(&via_new), capture_network(&via_dimensions));
     }
 
     #[test]
     fn test_network_step() {
-        let mut network = SpikingNetwork::new();
+        let mut network = SpikingNetwork::default();
         let stimuli = vec![0.5; network.num_channels];
         let modulators = NeuroModulators::default();
 
@@ -1134,7 +1159,7 @@ mod tests {
 
     #[test]
     fn test_step_input_mismatch_returns_error_and_preserves_state() {
-        let mut network = SpikingNetwork::new();
+        let mut network = SpikingNetwork::default();
         let modulators = NeuroModulators::default();
         let wrong = vec![0.5; network.num_channels - 1];
         let before = capture_network(&network);
@@ -1507,7 +1532,7 @@ mod tests {
 
     #[test]
     fn test_membrane_potentials() {
-        let network = SpikingNetwork::new();
+        let network = SpikingNetwork::default();
         let potentials = network.get_membrane_potentials();
         assert_eq!(potentials.len(), 16);
         for &p in &potentials {

@@ -1028,11 +1028,36 @@ impl SpikingNetwork {
 }
 
 impl Default for SpikingNetwork {
-    // Sized construction does not call `default`, so this is not recursive.
-    // skipcq: RS-A1008
     fn default() -> Self {
-        // skipcq: RS-A1008
-        Self::with_dimensions(16, 5, crate::NUM_INPUT_CHANNELS)
+        // Inlined: a call that returns `Self` here is RS-A1008, including
+        // `with_dimensions`. Keep this matched to `with_dimensions(16, 5, NUM_INPUT_CHANNELS)`.
+        let num_lif = 16;
+        let num_izh = 5;
+        let num_channels = crate::NUM_INPUT_CHANNELS;
+        let stdp_config = RmStdpConfig::default();
+        let neurons: Vec<LifNeuron> = (0..num_lif)
+            .map(|_| {
+                let mut n = LifNeuron::new();
+                n.weights = vec![0.0; num_channels];
+                n.eligibility = vec![
+                    EligibilityTrace::new(stdp_config.effective_tau_eligibility());
+                    num_channels
+                ];
+                n.last_spike_time = -1;
+                n
+            })
+            .collect();
+
+        Self {
+            neurons,
+            iz_neurons: vec![IzhikevichNeuron::new_regular_spiking(); num_izh],
+            modulators: NeuroModulators::default(),
+            global_step: 0,
+            num_channels,
+            input_spike_times: vec![-1; num_channels],
+            predictive_state: vec![0.0; num_channels],
+            stdp_config,
+        }
     }
 }
 
@@ -1072,11 +1097,11 @@ mod tests {
 
     #[test]
     fn test_default_matches_new() {
-        let a = SpikingNetwork::new(); // skipcq: RS-W1079
-        let b = SpikingNetwork::default();
-        assert_eq!(a.neurons.len(), b.neurons.len());
-        assert_eq!(a.iz_neurons.len(), b.iz_neurons.len());
-        assert_eq!(a.num_channels, b.num_channels);
+        let via_new = SpikingNetwork::new(); // skipcq: RS-W1079
+        let via_default = SpikingNetwork::default();
+        let via_dimensions = SpikingNetwork::with_dimensions(16, 5, crate::NUM_INPUT_CHANNELS);
+        assert_eq!(capture_network(&via_new), capture_network(&via_default));
+        assert_eq!(capture_network(&via_new), capture_network(&via_dimensions));
     }
 
     #[test]

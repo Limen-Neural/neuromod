@@ -395,14 +395,13 @@ impl PlasticitySnapshot {
     }
 }
 
-impl SpikingNetwork {
-    /// Create the default network (16 LIF, 5 Izhikevich, 16 channels).
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    /// Create a dynamically sized network.
-    pub fn with_dimensions(num_lif: usize, num_izh: usize, num_channels: usize) -> Self {
+/// Shared bank construction. A function call here would be a `Self`-returning
+/// call inside `Default::default`, which DeepSource flags as a recursion hazard.
+macro_rules! spiking_network_with_dimensions {
+    ($num_lif:expr, $num_izh:expr, $num_channels:expr) => {{
+        let num_lif = $num_lif;
+        let num_izh = $num_izh;
+        let num_channels = $num_channels;
         let stdp_config = RmStdpConfig::default();
         let neurons: Vec<LifNeuron> = (0..num_lif)
             .map(|_| {
@@ -427,6 +426,18 @@ impl SpikingNetwork {
             predictive_state: vec![0.0; num_channels],
             stdp_config,
         }
+    }};
+}
+
+impl SpikingNetwork {
+    /// Create the default network (16 LIF, 5 Izhikevich, 16 channels).
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Create a dynamically sized network.
+    pub fn with_dimensions(num_lif: usize, num_izh: usize, num_channels: usize) -> Self {
+        spiking_network_with_dimensions!(num_lif, num_izh, num_channels)
     }
 
     /// Replace the R-STDP hyperparameters, re-`tau`-ing every existing
@@ -1026,10 +1037,8 @@ impl SpikingNetwork {
 }
 
 impl Default for SpikingNetwork {
-    // `with_dimensions` does not call `default`, so this is not a recursive cycle.
-    // skipcq: RS-A1008
     fn default() -> Self {
-        Self::with_dimensions(16, 5, crate::NUM_INPUT_CHANNELS) // skipcq: RS-A1008
+        spiking_network_with_dimensions!(16, 5, crate::NUM_INPUT_CHANNELS)
     }
 }
 

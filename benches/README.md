@@ -264,8 +264,7 @@ from an identical warmed checkpoint and seeded RNG. Stimuli rotate through
 `0.009`, `-0.25`, `0.5`, and `1.5`. The checkpoint is warmed for 200 steps with
 seed 191; each measured batch starts with seed 192. Checkpoint restoration,
 RNG construction, and network destruction are outside timing.
-This isolates channel-drive hoisting; it does not include the other
-optimizations from the combined audit probe.
+This isolates channel-drive hoisting.
 
 - Machine: 2-vCPU Intel Xeon @ 2.60 GHz Linux orb, shared virtualized environment.
 - Toolchain: rustc 1.98.1; default bench profile (opt-level 3, LTO,
@@ -281,9 +280,9 @@ optimizations from the combined audit probe.
 
 Criterion reported an improvement in both seeded cases (`p < 0.05`), with
 comparison intervals of −5.69% to −4.10% unrewarded and −5.38% to −2.80% rewarded.
-These are single-orb measurements, not a performance SLA or evidence of the
-combined audit's 20–27% win. Stimulus clamping and surprise arithmetic now
-execute once per channel rather than once per neuron-channel pair.
+These are single-orb measurements, not a performance SLA. Stimulus clamping
+and surprise arithmetic now execute once per channel rather than once per
+neuron-channel pair.
 
 For completeness, the unchanged stochastic `engine_step` benchmark measured
 73.886 → 68.855 µs unrewarded and 77.598 → 82.525 µs rewarded on the final

@@ -26,12 +26,20 @@ fn steady_state_within_budget(size: usize, frozen: bool) -> bool {
     let stimuli = vec![1.0; size];
     let modulators = NeuroModulators::default();
     let mut rng = StdRng::seed_from_u64(190);
+    let step = |network: &mut SpikingNetwork, rng: &mut StdRng| {
+        if frozen {
+            network.step_frozen_with_rng(&stimuli, &modulators, rng)
+        } else {
+            network.step_with_rng(&stimuli, &modulators, rng)
+        }
+        .unwrap()
+    };
     // Initialize all runtime paths before counting steady-state work.
-    step(&mut network, frozen, &stimuli, &modulators, &mut rng);
+    step(&mut network, &mut rng);
 
     let allocations = allocation_counter::measure(|| {
         for _ in 0..100 {
-            let spikes = step(&mut network, frozen, &stimuli, &modulators, &mut rng);
+            let spikes = step(&mut network, &mut rng);
             assert_eq!(spikes.len(), size);
             assert!(spikes.iter().copied().eq(0..size));
         }
@@ -43,20 +51,4 @@ fn steady_state_within_budget(size: usize, frozen: bool) -> bool {
     );
     assert_eq!(allocations.count_current, 0, "step buffers must be freed");
     allocations.count_total <= budget
-}
-
-/// One seeded step in the requested mode.
-fn step(
-    network: &mut SpikingNetwork,
-    frozen: bool,
-    stimuli: &[f32],
-    modulators: &NeuroModulators,
-    rng: &mut StdRng,
-) -> Vec<usize> {
-    if frozen {
-        network.step_frozen_with_rng(stimuli, modulators, rng)
-    } else {
-        network.step_with_rng(stimuli, modulators, rng)
-    }
-    .unwrap()
 }

@@ -395,13 +395,14 @@ impl PlasticitySnapshot {
     }
 }
 
-/// Shared bank construction. A function call here would be a `Self`-returning
-/// call inside `Default::default`, which DeepSource flags as a recursion hazard.
-macro_rules! spiking_network_with_dimensions {
-    ($num_lif:expr, $num_izh:expr, $num_channels:expr) => {{
-        let num_lif = $num_lif;
-        let num_izh = $num_izh;
-        let num_channels = $num_channels;
+impl SpikingNetwork {
+    /// Create the default network (16 LIF, 5 Izhikevich, 16 channels).
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Create a dynamically sized network.
+    pub fn with_dimensions(num_lif: usize, num_izh: usize, num_channels: usize) -> Self {
         let stdp_config = RmStdpConfig::default();
         let neurons: Vec<LifNeuron> = (0..num_lif)
             .map(|_| {
@@ -426,18 +427,6 @@ macro_rules! spiking_network_with_dimensions {
             predictive_state: vec![0.0; num_channels],
             stdp_config,
         }
-    }};
-}
-
-impl SpikingNetwork {
-    /// Create the default network (16 LIF, 5 Izhikevich, 16 channels).
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    /// Create a dynamically sized network.
-    pub fn with_dimensions(num_lif: usize, num_izh: usize, num_channels: usize) -> Self {
-        spiking_network_with_dimensions!(num_lif, num_izh, num_channels)
     }
 
     /// Replace the R-STDP hyperparameters, re-`tau`-ing every existing
@@ -546,7 +535,7 @@ impl SpikingNetwork {
     /// 2. Store `modulators` and derive stress / learning rates.
     /// 3. Recompute LIF targets from neuromodulators: assign `decay_rate`
     ///    directly; soft-update `threshold` toward its target (learning-rate blend).
-    /// 4. Update per-channel predictive EMA and surprise (`pred_errors`).
+    /// 4. Update per-channel predictive EMA and precompute stimuli + surprise drive.
     /// 5. For each channel with `|stimuli| > 0.01`, run a Bernoulli trial
     ///    with probability `clamp(|stimuli|, 0.0, 1.0)` and stamp
     ///    `input_spike_times` on success. This convenience wrapper draws from
@@ -787,15 +776,15 @@ impl SpikingNetwork {
         }
     }
 
-    /// Update the per-channel EMA and combine stimulus + surprise once, rather
-    /// than recomputing the same unweighted drive for every LIF neuron.
+    /// Update the per-channel EMA and return stimuli + surprise drive for all LIF neurons.
     fn update_predictive_drive(&mut self, stimuli: &[f32]) -> Vec<f32> {
-        let mut drive = Vec::with_capacity(self.num_channels);
-        for (&stimulus, prediction) in stimuli.iter().zip(&mut self.predictive_state) {
-            let s = stimulus.abs().clamp(0.0, 1.0);
-            let pred_error = (s - *prediction).abs();
-            drive.push(s + PRED_ERR_WEIGHT * pred_error);
-            *prediction = PRED_ALPHA * s + (1.0 - PRED_ALPHA) * *prediction;
+        let mut drive = vec![0.0_f32; self.num_channels];
+        for ch in 0..self.num_channels {
+            let s = stimuli[ch].abs().clamp(0.0, 1.0);
+            let err = (s - self.predictive_state[ch]).abs();
+            drive[ch] = s + PRED_ERR_WEIGHT * err;
+            self.predictive_state[ch] =
+                PRED_ALPHA * s + (1.0 - PRED_ALPHA) * self.predictive_state[ch];
         }
         drive
     }
@@ -1038,7 +1027,35 @@ impl SpikingNetwork {
 
 impl Default for SpikingNetwork {
     fn default() -> Self {
-        spiking_network_with_dimensions!(16, 5, crate::NUM_INPUT_CHANNELS)
+        // Inlined: a call that returns `Self` here is RS-A1008, including
+        // `with_dimensions`. Keep this matched to `with_dimensions(16, 5, NUM_INPUT_CHANNELS)`.
+        let num_lif = 16;
+        let num_izh = 5;
+        let num_channels = crate::NUM_INPUT_CHANNELS;
+        let stdp_config = RmStdpConfig::default();
+        let neurons: Vec<LifNeuron> = (0..num_lif)
+            .map(|_| {
+                let mut n = LifNeuron::new();
+                n.weights = vec![0.0; num_channels];
+                n.eligibility = vec![
+                    EligibilityTrace::new(stdp_config.effective_tau_eligibility());
+                    num_channels
+                ];
+                n.last_spike_time = -1;
+                n
+            })
+            .collect();
+
+        Self {
+            neurons,
+            iz_neurons: vec![IzhikevichNeuron::new_regular_spiking(); num_izh],
+            modulators: NeuroModulators::default(),
+            global_step: 0,
+            num_channels,
+            input_spike_times: vec![-1; num_channels],
+            predictive_state: vec![0.0; num_channels],
+            stdp_config,
+        }
     }
 }
 
@@ -1051,7 +1068,8 @@ mod tests {
 
     #[test]
     fn test_network_creation_defaults() {
-        let network = SpikingNetwork::default();
+        // This test locks the zero-arg constructor, not only `Default`.
+        let network = SpikingNetwork::new(); // skipcq: RS-W1079
         assert_eq!(network.neurons.len(), 16);
         assert_eq!(network.iz_neurons.len(), 5);
         assert_eq!(network.num_channels, 16);
@@ -1077,11 +1095,11 @@ mod tests {
 
     #[test]
     fn test_default_matches_new() {
-        let a = SpikingNetwork::new(); // skipcq: RS-W1079
-        let b = SpikingNetwork::default();
-        assert_eq!(a.neurons.len(), b.neurons.len());
-        assert_eq!(a.iz_neurons.len(), b.iz_neurons.len());
-        assert_eq!(a.num_channels, b.num_channels);
+        let via_new = SpikingNetwork::new(); // skipcq: RS-W1079
+        let via_default = SpikingNetwork::default();
+        let via_dimensions = SpikingNetwork::with_dimensions(16, 5, crate::NUM_INPUT_CHANNELS);
+        assert_eq!(capture_network(&via_new), capture_network(&via_default));
+        assert_eq!(capture_network(&via_new), capture_network(&via_dimensions));
     }
 
     #[test]

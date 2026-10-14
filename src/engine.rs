@@ -1029,7 +1029,8 @@ impl SpikingNetwork {
 
 impl Default for SpikingNetwork {
     fn default() -> Self {
-        Self::new()
+        // `new` calls `with_dimensions` and does not call `default`.
+        Self::new() // skipcq: RS-A1008
     }
 }
 
@@ -1042,7 +1043,8 @@ mod tests {
 
     #[test]
     fn test_network_creation_defaults() {
-        let network = SpikingNetwork::new();
+        // This test locks the zero-arg constructor, not only `Default`.
+        let network = SpikingNetwork::new(); // skipcq: RS-W1079
         assert_eq!(network.neurons.len(), 16);
         assert_eq!(network.iz_neurons.len(), 5);
         assert_eq!(network.num_channels, 16);
@@ -1068,7 +1070,7 @@ mod tests {
 
     #[test]
     fn test_default_matches_new() {
-        let a = SpikingNetwork::new();
+        let a = SpikingNetwork::new(); // skipcq: RS-W1079
         let b = SpikingNetwork::default();
         assert_eq!(a.neurons.len(), b.neurons.len());
         assert_eq!(a.iz_neurons.len(), b.iz_neurons.len());
@@ -1077,7 +1079,7 @@ mod tests {
 
     #[test]
     fn test_network_step() {
-        let mut network = SpikingNetwork::new();
+        let mut network = SpikingNetwork::default();
         let stimuli = vec![0.5; network.num_channels];
         let modulators = NeuroModulators::default();
 
@@ -1130,7 +1132,7 @@ mod tests {
 
     #[test]
     fn test_step_input_mismatch_returns_error_and_preserves_state() {
-        let mut network = SpikingNetwork::new();
+        let mut network = SpikingNetwork::default();
         let modulators = NeuroModulators::default();
         let wrong = vec![0.5; network.num_channels - 1];
         let before = capture_network(&network);
@@ -1503,7 +1505,7 @@ mod tests {
 
     #[test]
     fn test_membrane_potentials() {
-        let network = SpikingNetwork::new();
+        let network = SpikingNetwork::default();
         let potentials = network.get_membrane_potentials();
         assert_eq!(potentials.len(), 16);
         for &p in &potentials {

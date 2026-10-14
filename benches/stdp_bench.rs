@@ -148,6 +148,43 @@ fn bench_engine_step_with_traces(c: &mut Criterion) {
     group.finish();
 }
 
+/// Seeded, steady-state normal/frozen steps across bank sizes. Binary stimuli
+/// and nonzero weights exercise dense spike output rather than empty lists.
+fn bench_engine_step_allocations(c: &mut Criterion) {
+    let mut group = c.benchmark_group("engine_step_allocations");
+    for size in [16, 64, 512] {
+        for frozen in [false, true] {
+            let label = if frozen { "frozen" } else { "normal" };
+            group.bench_with_input(BenchmarkId::new(label, size), &size, |b, &size| {
+                let mut network = SpikingNetwork::with_dimensions(size, 5, size);
+                for neuron in &mut network.neurons {
+                    neuron.weights.fill(2.0 / size as f32);
+                }
+                let stimuli = vec![1.0; size];
+                let modulators = NeuroModulators::default();
+                let mut rng = StdRng::seed_from_u64(190);
+                let mut step = || {
+                    if frozen {
+                        network.step_frozen_with_rng(
+                            black_box(&stimuli),
+                            black_box(&modulators),
+                            &mut rng,
+                        )
+                    } else {
+                        network.step_with_rng(black_box(&stimuli), black_box(&modulators), &mut rng)
+                    }
+                    .unwrap()
+                };
+                for _ in 0..200 {
+                    black_box(step());
+                }
+                b.iter(|| black_box(step()));
+            });
+        }
+    }
+    group.finish();
+}
+
 fn channel_drive_stimuli(steps: usize) -> Vec<Vec<f32>> {
     (0..steps)
         .map(|step| {
@@ -287,6 +324,7 @@ criterion_group!(
     bench_eligibility_trace_accumulate,
     bench_reward_conversion,
     bench_engine_step_with_traces,
+    bench_engine_step_allocations,
     bench_engine_channel_drive,
     bench_stdp_weight_update,
     bench_hebbian_network_update,

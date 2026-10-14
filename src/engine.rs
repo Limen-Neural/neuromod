@@ -816,25 +816,23 @@ impl SpikingNetwork {
 
     /// Fire LIF neurons, then laterally inhibit the ones that did not spike.
     ///
-    /// Membership is an O(1) `fired` mask so this stays linear in neuron count
-    /// even when `with_dimensions` builds a large bank.
+    /// The current step's `last_spike` flags provide O(1) membership without a
+    /// duplicate mask. Reserving the bank size avoids output reallocations.
     fn fire_lif_and_inhibit(&mut self) -> Vec<usize> {
-        let mut spike_ids = Vec::new();
-        let mut fired = vec![false; self.neurons.len()];
+        let mut spike_ids = Vec::with_capacity(self.neurons.len());
         for (i, neuron) in self.neurons.iter_mut().enumerate() {
             if let Some(_peak_v) = neuron.check_fire() {
                 neuron.last_spike = true;
                 neuron.last_spike_time = self.global_step;
                 spike_ids.push(i);
-                fired[i] = true;
             } else {
                 neuron.last_spike = false;
             }
         }
 
         if !spike_ids.is_empty() {
-            for (i, neuron) in self.neurons.iter_mut().enumerate() {
-                if !fired[i] {
+            for neuron in &mut self.neurons {
+                if !neuron.last_spike {
                     neuron.membrane_potential =
                         (neuron.membrane_potential - INHIBITION_STRENGTH).max(0.0);
                 }

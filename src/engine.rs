@@ -398,7 +398,7 @@ impl PlasticitySnapshot {
 impl SpikingNetwork {
     /// Create the default network (16 LIF, 5 Izhikevich, 16 channels).
     pub fn new() -> Self {
-        Self::with_dimensions(16, 5, crate::NUM_INPUT_CHANNELS)
+        Self::default()
     }
 
     /// Create a dynamically sized network.
@@ -1028,9 +1028,11 @@ impl SpikingNetwork {
 }
 
 impl Default for SpikingNetwork {
+    // Sized construction does not call `default`, so this is not recursive.
+    // skipcq: RS-A1008
     fn default() -> Self {
-        // `new` calls `with_dimensions` and does not call `default`.
-        Self::new() // skipcq: RS-A1008
+        // skipcq: RS-A1008
+        Self::with_dimensions(16, 5, crate::NUM_INPUT_CHANNELS)
     }
 }
 

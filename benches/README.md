@@ -49,6 +49,9 @@ Benchmarks individual neuron model performance:
 - `hodgkin_huxley_step` - Hodgkin-Huxley neuron step
 - `fitzhugh_nagumo_step` - FitzHugh-Nagumo neuron step
 - `neuron_types` - Comparison across all neuron types
+- `sparse_gif_layer/step_into` / `sparse_gif_layer/step` - Sparse GIF layer stepping
+  (8, 64, 256 neurons; 64 input channels; fan-in 16), with reusable flags versus
+  allocating fired indices
 
 ### 2. STDP Benchmarks (`stdp_bench.rs`)
 
@@ -63,6 +66,8 @@ Benchmarks synaptic plasticity operations:
 - `rm_stdp_trace_to_weight` - One synapse's decay -> accumulate -> dopamine-gated conversion
 - `engine_step/unrewarded` / `engine_step/rewarded` - Full `SpikingNetwork::step` (64 LIF over 64 channels) carrying trace bookkeeping, with the dopamine gate shut and open
 - `engine_banked_trace_decay/{unrewarded,rewarded}/{64,512}` - Full step with nonzero banked traces, no input spikes, and trace values restored outside each timed step; isolates decay from spike-timing kernels and avoids underflow into the zero-trace fast path
+- `engine_step_allocations/{normal,frozen}/{16,64,512}` - Seeded full steps with dense firing, 200 warm-up steps, and bank/channel size scaling; wall-clock timings, not allocation counts
+- `engine_channel_drive/unrewarded` / `engine_channel_drive/rewarded` - Fixed seeded 32-step batches from a warmed checkpoint (64 LIF over 64 mixed channels); setup is untimed, throughput counts steps
 - `stdp_weight_update` - Complete weight update cycle
 - `hebbian_network_update` - Hebbian network weight update
 - `stdp_delta_t_calculation` - Spike timing difference calculation
@@ -137,6 +142,44 @@ On this run the ranking is LIF < Izhikevich < FitzHugh-Nagumo < Hodgkin-Huxley, 
 with their relative model complexity: LIF integrates a single membrane-potential state,
 Izhikevich and FitzHugh-Nagumo each track two coupled state variables, and Hodgkin-Huxley
 tracks four (membrane potential plus three gating variables `m`, `h`, `n`).
+
+### Sparse GIF transition scratch (issue #192)
+
+Measured 2026-10-08 on an x86_64 Linux orb with 2 vCPUs, Intel Xeon @ 2.60GHz,
+`rustc 1.98.1`, and the repository's release/LTO bench profile. Before is
+[e357311](https://github.com/Limen-Neural/neuromod/commit/e357311d5f3fe1669d8583bebaa6e5272b9105e1); after is the #192 transition-scratch
+implementation. Both use the same `neuron_bench` fixture: 64 channels alternating
+0/1, fan-in 16, seed 192, default GIF parameters, and 200 untimed warm-up steps.
+Construction, cloning, and output-buffer setup are outside the timed loop.
+`step` includes its per-call output allocation and disposal; `step_into` reuses
+the same output buffer. Each run uses 50 samples, 1 s warm-up, and 3 s measurement.
+
+| API / neurons | Before | After | Time reduction |
+| --- | ---: | ---: | ---: |
+| `step_into` / 8 | 317.86 ns | 229.75 ns | 27.7% |
+| `step` / 8 | 404.82 ns | 284.98 ns | 29.6% |
+| `step_into` / 64 | 1.9052 µs | 1.2442 µs | 34.7% |
+| `step` / 64 | 2.3250 µs | 1.5408 µs | 33.7% |
+| `step_into` / 256 | 7.8770 µs | 4.8951 µs | 37.9% |
+| `step` / 256 | 8.2273 µs | 5.6698 µs | 31.1% |
+
+Values are Criterion point estimates; reductions are calculated from those
+estimates, not Criterion's separate change-distribution estimate. All six
+comparisons reported a statistically significant improvement (p < 0.05).
+These are single-orb measurements with outliers, not a performance guarantee.
+The single-transition path trades O(neurons) persistent scratch space for less
+arithmetic; ingress validation and scratch writes still cost time, so eliminating
+the duplicate transition does not halve total latency. `step_into` is the
+allocation-free hot-loop API; `step` remains an allocating convenience API.
+
+```bash
+# Before changing the library, with the benchmark fixture already added:
+cargo bench --bench neuron_bench -- sparse_gif_layer --warm-up-time 1 \
+  --measurement-time 3 --sample-size 50 --save-baseline gh192-before
+# After changing the library:
+cargo bench --bench neuron_bench -- sparse_gif_layer --warm-up-time 1 \
+  --measurement-time 3 --sample-size 50 --baseline gh192-before
+```
 
 ### STDP / plasticity (`stdp_bench.rs`)
 
@@ -284,6 +327,60 @@ Modulator primitive operations (not full network steps):
 | `modulator_add_norepinephrine` | 2.16 ns |
 | `modulator_decay` | 36.4 ns |
 
+## Engine allocation reduction (GH#190)
+
+Measured on 2026-10-08 (America/Chicago), comparing the engine at
+[`e357311`](https://github.com/Limen-Neural/neuromod/commit/e357311d5f3fe1669d8583bebaa6e5272b9105e1)
+with this change using the same benchmark harness. Rust 1.98.1, release/LTO bench
+profile, Linux x86_64 orb, two vCPUs on an Intel Xeon @ 2.60 GHz. This is a shared
+cloud machine, not an isolated performance rig; timings vary between runs.
+
+```bash
+# With the benchmark harness present, before changing the engine:
+cargo bench --bench stdp_bench -- engine_step --warm-up-time 1 \
+  --measurement-time 3 --sample-size 30 --save-baseline gh190-before
+# After changing the engine:
+cargo bench --bench stdp_bench -- engine_step --warm-up-time 1 \
+  --measurement-time 3 --sample-size 30 --baseline gh190-before
+# Allocation gate (thread-local counter, separate from Criterion timing):
+cargo test --test engine_allocations -- --nocapture
+```
+
+The baseline was repeated by running its already-built Criterion executable with
+the same arguments, without concurrent compilation/tests; the table uses that
+last baseline. Times are Criterion's middle point estimates, not medians; the
+percent column is the arithmetic change between those estimates, not Criterion's
+separate statistical change estimate.
+
+| Benchmark | Before | After | Point-estimate change |
+| --- | ---: | ---: | ---: |
+| `engine_step/unrewarded` (64×64, stimulus 0.5) | 54.559 µs | 51.749 µs | −5.1% |
+| `engine_step/rewarded` (64×64, stimulus 0.5) | 58.882 µs | 56.488 µs | −4.1% (no statistically detectable change) |
+| `engine_step_allocations/normal/16` | 3.1531 µs | 3.0212 µs | −4.2% (no statistically detectable change) |
+| `engine_step_allocations/frozen/16` | 477.76 ns | 289.18 ns | −39.5% |
+| `engine_step_allocations/normal/64` | 54.861 µs | 49.965 µs | −8.9% |
+| `engine_step_allocations/frozen/64` | 4.7396 µs | 1.8271 µs | −61.5% |
+| `engine_step_allocations/normal/512` | 3.5101 ms | 3.3265 ms | −5.2% |
+| `engine_step_allocations/frozen/512` | 216.95 µs | 142.26 µs | −34.4% |
+
+The dense-firing allocation gate measures 100 steps at each size, with all LIF
+neurons firing on every step (stimulus 1.0, weight budget 2.0, default modulators,
+`StdRng` seed 190). Both normal and frozen modes include five Izhikevich neurons.
+
+| LIF neurons × channels | Normal allocations/step, before → after | Frozen allocations/step, before → after |
+| --- | ---: | ---: |
+| 16×16 | 5 → 2 | 6 → 3 |
+| 64×64 | 7 → 2 | 8 → 3 |
+| 512×512 | 10 → 2 | 11 → 3 |
+
+This is allocation reduction, **not a zero-allocation API**. The channel-drive
+buffer and owned returned spike vector still allocate; frozen mode additionally
+allocates its existing plasticity snapshot. Reusable scratch fields are the
+optional follow-up identified in GH#190 and are not added here, preserving the
+public struct and checkpoint shape. Reserving spike output for the full LIF bank
+avoids reallocations but reserves more output memory for sparse/silent firing
+than an initially empty vector. STDP math and eligibility decay are unchanged.
+
 ## Continuous Benchmarking
 
 To track performance over time on your own machine:
@@ -300,3 +397,52 @@ improvements. Criterion's `--save-baseline` output lives under the git-ignored
 `target/criterion/`, so it never lands in this repo — the *Measured Baseline* table
 above is the durable, reviewable record; regenerate it (and update the commit/date
 above) whenever a change to `src/` is expected to move these numbers materially.
+
+## Channel-drive hoisting (#191, 2026-10-08)
+
+Comparison against commit `e357311`, with the same new
+`engine_channel_drive` benchmark copied onto that baseline. Each timed batch
+executes 32 full engine steps (64 LIF neurons, 5 Izhikevich neurons, 64 channels)
+from an identical warmed checkpoint and seeded RNG. Stimuli rotate through
+`0.009`, `-0.25`, `0.5`, and `1.5`. The checkpoint is warmed for 200 steps with
+seed 191; each measured batch starts with seed 192. Checkpoint restoration,
+RNG construction, and network destruction are outside timing.
+This isolates channel-drive hoisting.
+
+- Machine: 2-vCPU Intel Xeon @ 2.60 GHz Linux orb, shared virtualized environment.
+- Toolchain: rustc 1.98.1; default bench profile (opt-level 3, LTO,
+  one codegen unit), all features enabled, no custom `RUSTFLAGS`.
+- Criterion: 100 samples, 3-second warm-up, 10-second measurement target per
+  case (automatically extended to approximately 13–15 seconds).
+- Times below are point estimates with 95% confidence intervals, not medians.
+
+| Seeded benchmark (32-step batch) | Before (ms) | After (ms) | Point-estimate reduction |
+| --- | --- | --- | --- |
+| `engine_channel_drive/unrewarded` | 2.2506 [2.2318, 2.2708] | 2.1341 [2.1199, 2.1503] | 5.18% |
+| `engine_channel_drive/rewarded` | 2.5408 [2.5182, 2.5659] | 2.4323 [2.3986, 2.4728] | 4.27% |
+
+Criterion reported an improvement in both seeded cases (`p < 0.05`), with
+comparison intervals of −5.69% to −4.10% unrewarded and −5.38% to −2.80% rewarded.
+These are single-orb measurements, not a performance SLA. Stimulus clamping
+and surprise arithmetic now execute once per channel rather than once per
+neuron-channel pair.
+
+For completeness, the unchanged stochastic `engine_step` benchmark measured
+73.886 → 68.855 µs unrewarded and 77.598 → 82.525 µs rewarded on the final
+implementation, with Criterion reporting improvement and regression,
+respectively. An earlier run showed no clear improvement in either case.
+Those benchmarks use thread-local input encoding and evolve through different
+random workloads; the fixed seeded batches above provide the controlled
+comparison rather than attributing those inconsistent results to this fix.
+
+Reproduce on the baseline commit and then the hoisted implementation, respectively:
+
+```bash
+# Copy benches/stdp_bench.rs from this change onto the baseline first.
+# Use separate build directories and a shared absolute CRITERION_HOME when
+# comparing worktrees to avoid reusing a binary built from the other source.
+cargo bench --all-features --bench stdp_bench -- engine_channel_drive \
+  --save-baseline gh191-seeded-before --sample-size 100 --warm-up-time 3 --measurement-time 10
+cargo bench --all-features --bench stdp_bench -- engine_channel_drive \
+  --baseline gh191-seeded-before --sample-size 100 --warm-up-time 3 --measurement-time 10
+```

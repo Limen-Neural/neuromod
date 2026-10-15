@@ -260,8 +260,11 @@ Its per-step timer overhead is included identically in both runs.
 | `engine_banked_trace_decay/rewarded/512` | 3.0369 ms | 1.8137 ms | 40.3% |
 
 Standalone `EligibilityTrace::decay()` is unchanged. The engine reuses the factor only
-for matching taus; public per-trace overrides and invalid taus retain standalone decay
-semantics. No persistent cache, layout change, or allocation optimization is involved.
+for matching taus and evaluates it on the first matching nonzero trace, so a blank or
+quiet step does not call `exp`. These workloads all carry nonzero traces, so the table
+still includes one `exp` per step. Public per-trace overrides and invalid taus retain
+standalone decay semantics. No persistent cache, layout change, or allocation
+optimization is involved.
 
 ### Memory (`memory_bench.rs`)
 

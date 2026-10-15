@@ -308,11 +308,15 @@ impl EligibilityTrace {
         self.value *= (-1.0 / tau).exp();
     }
 
-    /// Reuse the engine's factor only when this trace has the same tau.
-    /// Public edits and checkpoints may contain heterogeneous or invalid taus;
-    /// those retain the standalone decay semantics, including its fallback.
-    pub(crate) fn decay_with_cached_factor(&mut self, tau: f32, factor: f32) {
+    /// Reuse one step's factor when this trace's tau matches `tau`.
+    ///
+    /// `factor` starts as `None` and is filled on the first matching trace, so
+    /// a step whose traces are all zero never evaluates `exp`. A mismatched or
+    /// invalid tau keeps [`Self::decay`]'s fallback, including its own `exp`.
+    #[inline]
+    pub(crate) fn decay_with_cached_factor(&mut self, tau: f32, factor: &mut Option<f32>) {
         if self.tau == tau {
+            let factor = *factor.get_or_insert_with(|| (-1.0 / tau).exp());
             self.value *= factor;
         } else {
             self.decay();
@@ -480,6 +484,47 @@ mod tests {
         trace.reset();
         assert_eq!(trace.value, 0.0);
         assert_eq!(trace.tau, 60.0);
+    }
+
+    #[test]
+    fn cached_factor_stays_empty_until_a_matching_tau_decays() {
+        let mut outlier = EligibilityTrace {
+            value: 1.0,
+            tau: 20.0,
+        };
+        let mut cached = None;
+        outlier.decay_with_cached_factor(RM_STDP_TAU_ELIGIBILITY, &mut cached);
+        assert!(cached.is_none());
+
+        let mut via_decay = EligibilityTrace {
+            value: 1.0,
+            tau: 20.0,
+        };
+        via_decay.decay();
+        assert_eq!(outlier.value.to_bits(), via_decay.value.to_bits());
+
+        let mut matched = EligibilityTrace {
+            value: 1.0,
+            tau: RM_STDP_TAU_ELIGIBILITY,
+        };
+        matched.decay_with_cached_factor(RM_STDP_TAU_ELIGIBILITY, &mut cached);
+        let factor = cached.expect("the first matching trace fills the cache");
+
+        let mut expected = EligibilityTrace {
+            value: 1.0,
+            tau: RM_STDP_TAU_ELIGIBILITY,
+        };
+        expected.decay();
+        assert_eq!(matched.value.to_bits(), expected.value.to_bits());
+
+        let mut second = EligibilityTrace {
+            value: 0.5,
+            tau: RM_STDP_TAU_ELIGIBILITY,
+        };
+        let mut already = Some(factor);
+        second.decay_with_cached_factor(RM_STDP_TAU_ELIGIBILITY, &mut already);
+        assert_eq!(already, Some(factor));
+        assert_eq!(second.value.to_bits(), (0.5 * factor).to_bits());
     }
 
     #[test]

@@ -900,7 +900,10 @@ impl SpikingNetwork {
         let (w_min, w_max) = config.weight_bounds();
         let reward_lr = config.effective_reward_lr();
         let decay_tau = config.effective_tau_eligibility();
-        let decay_factor = (-1.0 / decay_tau).exp();
+        // Filled on the first nonzero trace that shares `decay_tau`. A blank
+        // or quiet step used to skip `exp` entirely; computing it up front
+        // would put that cost back on every step.
+        let mut decay_factor = None;
         let rewarding = dopamine_lr >= 1e-6;
         let input_times = &self.input_spike_times;
 
@@ -929,7 +932,7 @@ impl SpikingNetwork {
                 } else if trace.value != 0.0 {
                     // Uniform traces share one exp per step. Leave untouched
                     // traces alone and retain per-trace tau overrides.
-                    trace.decay_with_cached_factor(decay_tau, decay_factor);
+                    trace.decay_with_cached_factor(decay_tau, &mut decay_factor);
                 }
 
                 if pre_time >= 0
@@ -975,7 +978,7 @@ impl SpikingNetwork {
                 if !trace.value.is_finite() {
                     trace.reset();
                 } else if trace.value != 0.0 {
-                    trace.decay_with_cached_factor(decay_tau, decay_factor);
+                    trace.decay_with_cached_factor(decay_tau, &mut decay_factor);
                 }
             }
         }

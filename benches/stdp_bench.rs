@@ -1,4 +1,8 @@
-use criterion::{BatchSize, BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
+use criterion::measurement::WallTime;
+use criterion::{
+    BatchSize, Bencher, BenchmarkGroup, BenchmarkId, Criterion, Throughput, criterion_group,
+    criterion_main,
+};
 use neuromod::rm_stdp::{
     EligibilityTrace, RM_STDP_A_MINUS, RM_STDP_A_PLUS, RM_STDP_TAU_MINUS, RM_STDP_TAU_PLUS,
     RmStdpConfig,
@@ -146,6 +150,87 @@ fn bench_engine_step_with_traces(c: &mut Criterion) {
     }
 
     group.finish();
+}
+
+/// Deterministic banked-credit workload: every trace stays nonzero, without
+/// spike-timing kernels obscuring the cost of decay. Restore values outside
+/// the timed step so long measurements cannot underflow into the zero fast path.
+fn bench_engine_banked_trace_decay(c: &mut Criterion) {
+    let mut group = c.benchmark_group("engine_banked_trace_decay");
+    register_banked_trace_decay(&mut group, "unrewarded", 0.0, 64);
+    register_banked_trace_decay(&mut group, "rewarded", 0.9, 64);
+    register_banked_trace_decay(&mut group, "unrewarded", 0.0, 512);
+    register_banked_trace_decay(&mut group, "rewarded", 0.9, 512);
+    group.finish();
+}
+
+fn register_banked_trace_decay(
+    group: &mut BenchmarkGroup<WallTime>,
+    label: &'static str,
+    dopamine: f32,
+    size: usize,
+) {
+    group.bench_with_input(BenchmarkId::new(label, size), &size, |b, &size| {
+        measure_banked_trace_decay(b, size, dopamine);
+    });
+}
+
+fn measure_banked_trace_decay(b: &mut Bencher<'_>, size: usize, dopamine: f32) {
+    let mut network = prepared_banked_network(size);
+    let stimuli = vec![0.0; size];
+    let modulators = NeuroModulators {
+        dopamine,
+        ..Default::default()
+    };
+    b.iter_custom(|iterations| time_banked_steps(&mut network, &stimuli, &modulators, iterations));
+}
+
+fn prepared_banked_network(size: usize) -> SpikingNetwork {
+    let mut network = SpikingNetwork::with_dimensions(size, 5, size);
+    let weight = 2.0 / size as f32;
+    for neuron in &mut network.neurons {
+        neuron.weights.fill(weight);
+    }
+    network
+}
+
+fn time_banked_steps(
+    network: &mut SpikingNetwork,
+    stimuli: &[f32],
+    modulators: &NeuroModulators,
+    iterations: u64,
+) -> std::time::Duration {
+    let mut elapsed = std::time::Duration::ZERO;
+    for _ in 0..iterations {
+        elapsed += one_banked_step(network, stimuli, modulators);
+    }
+    elapsed
+}
+
+fn one_banked_step(
+    network: &mut SpikingNetwork,
+    stimuli: &[f32],
+    modulators: &NeuroModulators,
+) -> std::time::Duration {
+    restore_alternating_traces(network);
+    let start = std::time::Instant::now();
+    black_box(network.step(black_box(stimuli), black_box(modulators)))
+        .expect("finite inputs with matching dimensions");
+    // Observe decay writes before the next iteration resets them.
+    black_box(&network.neurons);
+    start.elapsed()
+}
+
+fn restore_alternating_traces(network: &mut SpikingNetwork) {
+    for neuron in &mut network.neurons {
+        write_alternating_trace_values(&mut neuron.eligibility);
+    }
+}
+
+fn write_alternating_trace_values(traces: &mut [EligibilityTrace]) {
+    for (channel, trace) in traces.iter_mut().enumerate() {
+        trace.value = [0.5_f32, -0.25][channel % 2];
+    }
 }
 
 /// Seeded, steady-state normal/frozen steps across bank sizes. Binary stimuli
@@ -324,6 +409,7 @@ criterion_group!(
     bench_eligibility_trace_accumulate,
     bench_reward_conversion,
     bench_engine_step_with_traces,
+    bench_engine_banked_trace_decay,
     bench_engine_step_allocations,
     bench_engine_channel_drive,
     bench_stdp_weight_update,

@@ -4,6 +4,27 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+### Added
+
+- **ADR 003 records the renormalization design decision** — the per-step L1 renormalization
+  pass in `SpikingNetwork::step` stays unconditional, dopamine-silent steps included
+  ([#193](https://github.com/Limen-Neural/neuromod/issues/193),
+  [LIM-1507](https://linear.app/rpd-34/issue/LIM-1507/perfengine-decide-whether-renormalize-lif-weights-should-run-on)).
+  When the dopamine-derived learning rate is below `1e-6`, `apply_stdp` cannot write a weight,
+  so on such a step the pass reaches only weights changed from outside the engine — and
+  `LifNeuron::weights` is a public field that checkpoints deserialize straight into, so the
+  engine cannot know the weights changed without scanning them. The pass is what upholds the
+  documented step contract (on-budget weights after every Normal step) against caller edits
+  and restored checkpoints, not just against STDP writes. A weights-dirty flag and an opt-in
+  renormalization switch were rejected as unsound (public-field edits bypass any flag) or
+  semantics-changing (removing homeostatic L1 scaling from R-STDP); the decision record is
+  [ADR 003](https://github.com/Limen-Neural/neuromod/blob/main/docs/adr/003-renormalize-every-normal-step.md).
+  A scratch Criterion comparison (two runs per build, 64 LIF × 64 channels) bounds the pass's
+  true cost at roughly 2 µs of a ~41 µs unrewarded step (~5%), inside the ±3–5% between-build
+  noise of the shared bench VM; see `benches/README.md`. The decision is locked by a new
+  contract test asserting that a dopamine-silent step still re-normalizes caller-edited,
+  off-budget weights. No behavior or performance change ships with this entry.
+
 ## [0.7.0] - 2026-09-27
 
 ### Added

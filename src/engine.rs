@@ -557,8 +557,14 @@ impl SpikingNetwork {
     ///    the clamp provably cannot bind — weights are non-negative and `w_max`
     ///    equals the budget — so the L1 sum lands on budget exactly. A binding
     ///    bound is still enforced, leaving the sum off budget in whichever
-    ///    direction it binds.
+    ///    direction it binds. This pass runs on every Normal step,
+    ///    dopamine-silent ones included: `weights` is public and checkpoints
+    ///    deserialize straight into it, so the engine cannot know the weights
+    ///    changed without scanning them. That per-step cost is intentional
+    ///    ([ADR 003][renorm-adr]).
     /// 10. Drive each Izhikevich neuron from mean LIF membrane potential + dopamine.
+    ///
+    /// [renorm-adr]: https://github.com/Limen-Neural/neuromod/blob/main/docs/adr/003-renormalize-every-normal-step.md
     ///
     /// # Examples
     ///
@@ -850,7 +856,19 @@ impl SpikingNetwork {
     /// Scale toward the L1 budget, then enforce the configured bounds. The
     /// bounds win where the two disagree: under the defaults they cannot
     /// bind here, so the budget holds exactly; a narrowed range is honored
-    /// and leaves the sum off budget. See the `step` contract, item 8.
+    /// and leaves the sum off budget. See the `step` contract, item 9.
+    ///
+    /// Runs on every Normal step, dopamine-silent ones included, even though
+    /// [`Self::apply_stdp`] cannot have written a weight on those steps.
+    /// `LifNeuron::weights` is public and checkpoints deserialize straight
+    /// into it, so the engine cannot know the weights changed without
+    /// scanning them: this pass is what upholds the step-9 contract against
+    /// caller edits and restored checkpoints, not just against STDP writes.
+    /// Its per-step cost is the intentional price of that policing — see
+    /// [ADR 003][adr] for the decision record and the measured share of the
+    /// step.
+    ///
+    /// [adr]: https://github.com/Limen-Neural/neuromod/blob/main/docs/adr/003-renormalize-every-normal-step.md
     fn renormalize_lif_weights(&mut self) {
         let (w_min, w_max) = self.stdp_config.weight_bounds();
         for neuron in &mut self.neurons {
@@ -2201,6 +2219,37 @@ mod tests {
             "an unrewarded step must not conjure a connection out of w_min"
         );
         assert_eq!(network.neurons[0].weights[0], WEIGHT_BUDGET);
+    }
+
+    #[test]
+    fn test_dopamine_silent_step_renormalizes_caller_edited_weights() {
+        // While the dopamine-derived learning rate is ~0, `apply_stdp` cannot
+        // write a weight, so the renormalization pass is the only plasticity
+        // work left on the step. It still runs: `weights` is a public field
+        // that callers and checkpoints can edit unseen, and the pass is what
+        // polices those edits back onto the L1 budget. Skipping it on
+        // unrewarded steps was considered and rejected (ADR 003) — this test
+        // locks that decision.
+        let mut network = SpikingNetwork::with_dimensions(1, 1, 4);
+        // Double the budget, with unconnected channels that must stay
+        // unconnected: total 4.0 -> scale 0.5 -> [1.5, 0.5, 0.0, 0.0].
+        network.neurons[0].weights = vec![3.0, 1.0, 0.0, 0.0];
+        let no_reward = NeuroModulators::default();
+
+        network.step(&[0.0; 4], &no_reward).expect("length matches");
+
+        let total: f32 = network.neurons[0].weights.iter().sum();
+        assert!(
+            (total - WEIGHT_BUDGET).abs() < 1e-5,
+            "an unrewarded step must still police the L1 budget: got {total}"
+        );
+        assert!((network.neurons[0].weights[0] - 1.5).abs() < 1e-5);
+        assert!((network.neurons[0].weights[1] - 0.5).abs() < 1e-5);
+        assert_eq!(
+            network.neurons[0].weights[2], 0.0,
+            "an unconnected synapse must stay unconnected"
+        );
+        assert_eq!(network.neurons[0].weights[3], 0.0);
     }
 
     #[test]

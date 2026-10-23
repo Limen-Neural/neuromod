@@ -203,6 +203,18 @@ state after 200 warm-up steps):
 | `engine_step/unrewarded` (dopamine = 0.0) | 35.6 µs |
 | `engine_step/rewarded` (dopamine = 0.9) | 51.2 µs |
 
+The gap between the two is essentially the trace → weight conversion: eligibility decay and
+the L1 renormalization scan run on both paths. Renormalization is **not** skipped on
+dopamine-silent steps — `LifNeuron::weights` is public and checkpoints deserialize straight
+into it, so the engine cannot know the weights changed without scanning them; see
+[ADR 003](https://github.com/Limen-Neural/neuromod/blob/main/docs/adr/003-renormalize-every-normal-step.md).
+Measured 2026-10-23 on this orb (rustc 1.98.1, two runs per build, 30 samples):
+temporarily skipping the pass while the dopamine-derived learning rate is `< 1e-6` moved
+`engine_step/unrewarded` by a −10% point estimate, but the rewarded control in the same
+builds — whose per-step work is identical — moved −4%, and a no-change rebuild moved that
+control −3.5% on its own. Corrected for that ±3–5% between-build noise, the pass costs
+roughly 2 µs of a ~41 µs unrewarded 64×64 step (~5%).
+
 `stdp_network_size` (`HebbianIzhikevichNetwork::update_weights` over every pre/post pair,
 fully connected):
 

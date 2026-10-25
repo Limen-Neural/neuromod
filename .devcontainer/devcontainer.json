@@ -1,5 +1,5 @@
 {
-    "name": "neuromod Rust 1.98",
+    "name": "neuromod Rust 1.99",
     "build": {
         "dockerfile": "Dockerfile"
     },

@@ -98,9 +98,9 @@ This module is an upstream port of the equivalent layer from the author's `corin
 
 | | |
 |--|--|
-| **MSRV** | **Rust 1.98.1** (`rust-version` in `Cargo.toml`) |
+| **MSRV** | **Rust 1.99.0** (`rust-version` in `Cargo.toml`) |
 | **Edition** | 2024 |
-| **Pin** | [`rust-toolchain.toml`](rust-toolchain.toml) (channel `1.98.1`) |
+| **Pin** | [`rust-toolchain.toml`](rust-toolchain.toml) (channel `1.99.0`) |
 | **CI platforms** | **Linux**, **macOS**, and **Windows** (GitHub Actions matrix: `ubuntu-latest`, `macos-latest`, `windows-latest`) |
 
 CI installs the same toolchain on each OS. Keep `Cargo.toml` `rust-version`, `rust-toolchain.toml`, and the version string in `.github/workflows/ci.yml` identical (the CI job fails if they drift).

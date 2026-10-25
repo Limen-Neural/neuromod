@@ -1,5 +1,5 @@
-# Base image matches the pinned rust-toolchain.toml version (1.98.1) and Dockerfile's base.
-FROM rust:1.98.1-slim-bookworm
+# Base image matches the pinned rust-toolchain.toml version (1.99.0) and Dockerfile's base.
+FROM rust:1.99.0-slim-bookworm
 
 # Add components used by CI, local review, and the dev container post-create step.
 RUN rustup component add rustfmt clippy llvm-tools-preview

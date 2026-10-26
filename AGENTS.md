@@ -26,7 +26,7 @@ Part of the [Limen-Neural](https://github.com/Limen-Neural) ecosystem. See [docs
 | `examples/` | Runnable demos (`basic`, `basic_lif`, `hebbian_learning`, `rstdp_demo`) |
 | `benches/` | Criterion benchmarks |
 | `docs/` | Architecture docs: boundary matrix, org modularization index, signal unit conventions, Architecture Decision Records (ADRs) |
-| [rust-toolchain.toml](rust-toolchain.toml) | Pinned Rust toolchain (1.98.1) |
+| [rust-toolchain.toml](rust-toolchain.toml) | Pinned Rust toolchain (1.99.0) |
 | `.devcontainer/` | VS Code dev container configuration |
 | `AGENTS.md` | Agent instructions (this file) |
 | `.github/workflows/` | CI/CD pipelines |
@@ -36,7 +36,7 @@ Part of the [Limen-Neural](https://github.com/Limen-Neural) ecosystem. See [docs
 ## Toolchain
 
 - **Edition:** 2024
-- **Pinned toolchain:** `1.98.1` (see [rust-toolchain.toml](rust-toolchain.toml))
+- **Pinned toolchain:** `1.99.0` (see [rust-toolchain.toml](rust-toolchain.toml))
 
 ## Build, test, and examples
 
@@ -78,7 +78,7 @@ Open in VS Code with the Dev Containers extension or run:
 devcontainer up --workspace-folder .
 ```
 
-The container is `rust:1.98.1-slim-bookworm`. `cargo fetch` runs on first create. The `vscode` user owns the toolchain, so `cargo` commands and component installs work from the terminal. `cargo-llvm-cov` is also supported.
+The container is `rust:1.99.0-slim-bookworm`. `cargo fetch` runs on first create. The `vscode` user owns the toolchain, so `cargo` commands and component installs work from the terminal. `cargo-llvm-cov` is also supported.
 
 ## Boundaries
 

@@ -53,7 +53,7 @@ cargo run --example rstdp_demo
 
 Before pushing changes that touch `src/`, `benches/`, `examples/`, `tests/`, or `Cargo.toml`, run the full gate in [REVIEW.md](REVIEW.md). That gate covers fmt, clippy, build, test, examples smoke, docs domain-hygiene grep, and public-API regression greps.
 
-The toolchain is pinned in [rust-toolchain.toml](rust-toolchain.toml) (1.98.1). A matching `.devcontainer/` is available (`devcontainer up --workspace-folder .`).
+The toolchain is pinned in [rust-toolchain.toml](rust-toolchain.toml) (1.99.0). A matching `.devcontainer/` is available (`devcontainer up --workspace-folder .`).
 
 ## Architecture
 

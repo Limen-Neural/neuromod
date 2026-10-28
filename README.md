@@ -372,7 +372,8 @@ rewarded or unrewarded; police by hand with the new public
 load. Checkpoints in self-describing formats (JSON, YAML, TOML, RON) written before the
 field existed deserialize with `true` — they keep renormalizing, so no migration is needed
 for them. Positional binary formats such as `bincode` / `postcard` written before the field
-need re-encoding because they do not name fields (the same caveat as the 0.6
+may fail to decode, or decode with silently shifted values, because they do not name
+fields; they must be re-encoded (the same caveat as the 0.6
 eligibility-trace migration). R-STDP weight updates
 remain individually clamped to `w_min` / `w_max` inside `apply_stdp` either way.
 

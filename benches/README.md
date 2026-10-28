@@ -230,7 +230,7 @@ for. Same 64 LIF × 64 channel steady-state workload as the
 table above, `--warm-up-time 1 --measurement-time 3 --sample-size 30`, two runs per build.
 Each variant draws from the thread-local RNG via `step`, so it runs its own stochastic
 steady state rather than a controlled A/B over one shared spike sequence; the
-preserve-vs-unrewarded gap is an end-to-end estimate that bounds the pass's cost, not an
+preserve-vs-unrewarded gap is an end-to-end estimate of the pass's cost, not an
 exact isolation. Measured on a local Windows 11 desktop, rustc 1.99.0; do not compare these
 absolute times to the Linux orb numbers elsewhere in this file.
 

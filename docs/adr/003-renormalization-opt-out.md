@@ -63,7 +63,9 @@ explicit opt-out for callers who need un-rescaled weights:
 Why the default stays on: `LifNeuron::weights` is public and checkpoints deserialize straight
 into it, so the engine cannot know weights changed without scanning them. The pass is what
 upholds the documented step contract — every non-blank neuron back on the L1 budget after each
-Normal step; a blank neuron (total ≤ `1e-6`) stays blank by design — against caller edits and
+Normal step when its configured bounds permit (the bounds win over the budget, so a narrowed
+range leaves the sum off budget); a blank neuron (total ≤ `1e-6`) stays blank by design —
+against caller edits and
 restored checkpoints, not just against STDP writes. `tests/soak.rs` asserts the budget after
 every step on its network, which never contains a blank neuron.
 
@@ -89,8 +91,9 @@ from that draft is retained above and is what justifies keeping the default unch
   `test_dopamine_silent_step_renormalizes_caller_edited_weights` (`src/engine.rs`).
 - Checkpoints in self-describing formats (JSON, YAML, TOML, RON) written before the field
   existed deserialize with `renormalize_weights: true` and keep renormalizing. Positional
-  binary formats (`bincode`, `postcard`) written before the field hit end-of-input and must
-  be re-serialized — the same caveat as every other post-release serde field (ADR 002).
+  binary formats (`bincode`, `postcard`) written before the field may fail to decode, or
+  decode with silently shifted values, so they must be re-encoded — the same caveat as
+  every other post-release serde field (ADR 002).
 - Adding the field to `RmStdpConfig` breaks exhaustive struct literals; migration is
   `renormalize_weights: ...` or `..RmStdpConfig::default()`. Per the crate's pre-1.0
   convention this ships as the 0.8.0 minor bump, recorded in the README migration notes —

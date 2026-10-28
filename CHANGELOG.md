@@ -23,7 +23,8 @@ All notable changes to this project are documented in this file.
   the stored LIF weights (`O(num_lif × num_channels)` on a standard-shaped network)
   instead of one per step. Self-describing checkpoints written before the field existed
   deserialize with `true` and keep renormalizing; positional binary formats
-  (`bincode`, `postcard`) written before it hit end-of-input and need re-serialization.
+  (`bincode`, `postcard`) written before it may fail to decode, or decode with silently
+  shifted values, and must be re-encoded.
   Exhaustive `RmStdpConfig`
   struct literals need `renormalize_weights: ...` or `..Default::default()`, so this
   ships as the 0.8.0 minor bump, not a 0.7.x patch. A `preserve`

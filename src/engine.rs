@@ -864,8 +864,8 @@ impl SpikingNetwork {
     /// Scale every LIF neuron's weights toward the L1 budget, then enforce the
     /// configured bounds. The bounds win where the two disagree: under the
     /// defaults they cannot bind here, so the budget holds exactly; a narrowed
-    /// range is honored and leaves the sum off budget. See the `step`
-    /// contract, item 9.
+    /// range is honored and, where it binds, leaves the sum off budget. See
+    /// the `step` contract, item 9.
     ///
     /// This is the pass [`Self::step`] runs after the private `apply_stdp`
     /// phase on every Normal step while [`RmStdpConfig::renormalize_weights`]

@@ -144,10 +144,12 @@ pub struct RmStdpConfig {
     /// Checkpoints in self-describing formats (JSON, YAML, TOML, RON) written
     /// before this field existed deserialize with `true`, so they keep the
     /// per-step budget contract they were written under. Positional binary
-    /// formats (`bincode`, `postcard`) written before the field cannot be
-    /// trusted: they may fail to decode, or decode with silently shifted
-    /// values, so they must be re-encoded from a current-format source — the
-    /// same caveat as every other post-release serde field in this crate.
+    /// formats (`bincode`, `postcard`) written before the field must be
+    /// re-encoded: a checkpoint holding exactly a `SpikingNetwork` ends
+    /// before the new trailing bool and fails at end-of-input, while an
+    /// enclosing positional wrapper with more data after the network can
+    /// instead consume the new field's bytes and decode silently shifted —
+    /// the same caveat as every other post-release serde field in this crate.
     #[serde(default = "default_renormalize_weights")]
     pub renormalize_weights: bool,
 }

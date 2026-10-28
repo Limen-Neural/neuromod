@@ -84,7 +84,7 @@ Construction is topology-neutral. `new()` is the legacy default (16 LIF, 5 Izhik
 5. `encode_input_spikes` — stochastically encode `stimuli` into `input_spike_times` (Poisson-style, probability proportional to stimulus magnitude). `step` draws from the thread-local RNG; `step_with_rng` draws from the caller generator and does not construct or reseed a generator per neuron or per step.
 6. `integrate_lif_bank` then `fire_lif_and_inhibit` — integrate LIF membrane potentials, fire (`check_fire`), apply lateral inhibition to non-firing LIF neurons (O(1) membership via the current step's `last_spike`, with no duplicate mask). Spike output reserves the LIF bank size to avoid reallocations.
 7. `apply_stdp` — reward-modulated STDP. Runs every step: per-synapse eligibility traces decay and accumulate regardless of dopamine; the `dopamine`-derived `learning_rate` gates only the trace → weight conversion.
-8. `renormalize_lif_weights` — re-normalize each neuron's weights to `WEIGHT_BUDGET` (L1 budget) and clamp to the `stdp_config` bounds (`RmStdpConfig::w_min`/`w_max`).
+8. `renormalize_weights` (pub; gated by `RmStdpConfig::renormalize_weights`, default `true`) — re-normalize each neuron's weights to `WEIGHT_BUDGET` (L1 budget) and clamp to the `stdp_config` bounds (`RmStdpConfig::w_min`/`w_max`). With the flag `false`, `step` never rescales weights; callers police by hand via the same method (ADR 003).
 9. `drive_izhikevich_bank` — drive the Izhikevich bank from the mean LIF membrane potential + dopamine (`iz_drive`), independent of the LIF spike/STDP pipeline.
 
 Returns the indices of LIF neurons that fired this step.

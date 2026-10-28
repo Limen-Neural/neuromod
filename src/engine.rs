@@ -439,6 +439,8 @@ impl SpikingNetwork {
     /// value is replaced by the published default rather than stored and worked
     /// around later. Assigning [`Self::stdp_config`] directly bypasses this; the
     /// engine still reads through the same guards, so it stays safe either way.
+    /// [`RmStdpConfig::renormalize_weights`] has no invalid values to guard, so
+    /// it passes through unchanged.
     ///
     /// Accumulated trace *values* are preserved — only the decay time constant
     /// changes. Use [`Self::reset`] to clear them.
@@ -465,6 +467,7 @@ impl SpikingNetwork {
             reward_lr: config.effective_reward_lr(),
             w_min,
             w_max,
+            renormalize_weights: config.renormalize_weights,
         };
 
         for neuron in &mut self.neurons {
@@ -549,22 +552,25 @@ impl SpikingNetwork {
     ///    into weight changes only when the dopamine-derived learning rate is
     ///    above ≈ 0.
     /// 9. Renormalize LIF weights toward an L1 budget, then clamp to the
-    ///    [`RmStdpConfig`] bounds. Applies only to a neuron whose weights already
-    ///    sum above `1e-6`; a blank neuron stays blank rather than being scaled
-    ///    up to the budget, and a synapse at exactly zero is left alone so a
-    ///    positive `w_min` cannot conjure a connection on an unrewarded step.
-    ///    **Bounds take precedence over the budget.** Under the default bounds
-    ///    the clamp provably cannot bind — weights are non-negative and `w_max`
-    ///    equals the budget — so the L1 sum lands on budget exactly. A binding
-    ///    bound is still enforced, leaving the sum off budget in whichever
-    ///    direction it binds. This pass runs on every Normal step,
-    ///    dopamine-silent ones included: `weights` is public and checkpoints
-    ///    deserialize straight into it, so the engine cannot know the weights
-    ///    changed without scanning them. That per-step cost is intentional
-    ///    ([ADR 003][renorm-adr]).
+    ///    [`RmStdpConfig`] bounds, while [`RmStdpConfig::renormalize_weights`]
+    ///    is `true` (the default). Applies only to a neuron whose weights
+    ///    already sum above `1e-6`; a blank neuron stays blank rather than
+    ///    being scaled up to the budget, and a synapse at exactly zero is left
+    ///    alone so a positive `w_min` cannot conjure a connection on an
+    ///    unrewarded step. **Bounds take precedence over the budget.** Under
+    ///    the default bounds the clamp provably cannot bind — weights are
+    ///    non-negative and `w_max` equals the budget — so the L1 sum lands on
+    ///    budget exactly. A binding bound is still enforced, leaving the sum
+    ///    off budget in whichever direction it binds. The default keeps the
+    ///    pass on every Normal step, dopamine-silent ones included, because
+    ///    `weights` is public and checkpoints deserialize straight into it, so
+    ///    the engine cannot know the weights changed without scanning them;
+    ///    setting the flag `false` opts out of this pass on every Normal step
+    ///    (rewarded or not) in favor of the on-demand
+    ///    [`Self::renormalize_weights`] ([ADR 003][renorm-adr]).
     /// 10. Drive each Izhikevich neuron from mean LIF membrane potential + dopamine.
     ///
-    /// [renorm-adr]: https://github.com/Limen-Neural/neuromod/blob/main/docs/adr/003-renormalize-every-normal-step.md
+    /// [renorm-adr]: https://github.com/Limen-Neural/neuromod/blob/main/docs/adr/003-renormalization-opt-out.md
     ///
     /// # Examples
     ///
@@ -755,7 +761,9 @@ impl SpikingNetwork {
         let spike_ids = self.fire_lif_and_inhibit();
         if matches!(mode, StepMode::Normal) {
             self.apply_stdp(learning_rate);
-            self.renormalize_lif_weights();
+            if self.stdp_config.renormalize_weights {
+                self.renormalize_weights();
+            }
         }
         self.drive_izhikevich_bank();
 
@@ -853,23 +861,54 @@ impl SpikingNetwork {
         self.fire_lif_and_inhibit()
     }
 
-    /// Scale toward the L1 budget, then enforce the configured bounds. The
-    /// bounds win where the two disagree: under the defaults they cannot
-    /// bind here, so the budget holds exactly; a narrowed range is honored
-    /// and leaves the sum off budget. See the `step` contract, item 9.
+    /// Scale every LIF neuron's weights toward the L1 budget, then enforce the
+    /// configured bounds. The bounds win where the two disagree: under the
+    /// defaults they cannot bind here, so the budget holds exactly; a narrowed
+    /// range is honored and leaves the sum off budget. See the `step`
+    /// contract, item 9.
     ///
-    /// Runs on every Normal step, dopamine-silent ones included, even though
-    /// [`Self::apply_stdp`] cannot have written a weight on those steps.
-    /// `LifNeuron::weights` is public and checkpoints deserialize straight
-    /// into it, so the engine cannot know the weights changed without
-    /// scanning them: this pass is what upholds the step-9 contract against
-    /// caller edits and restored checkpoints, not just against STDP writes.
-    /// Its per-step cost is the intentional price of that policing — see
-    /// [ADR 003][adr] for the decision record and the measured share of the
-    /// step.
+    /// This is the pass [`Self::step`] runs after [`Self::apply_stdp`] on
+    /// every Normal step while [`RmStdpConfig::renormalize_weights`] is
+    /// `true` (the default) — dopamine-silent steps included, where
+    /// [`Self::apply_stdp`] cannot have written a weight and only a caller
+    /// edit or a restored checkpoint can have changed one, since
+    /// `LifNeuron::weights` is public and checkpoints deserialize straight into
+    /// it. With the flag `false`, no Normal step rescales weights, rewarded or
+    /// not, and this method is the on-demand replacement: call it once after a
+    /// `weights` hand edit or a checkpoint load — one
+    /// `O(num_lif × num_channels)` pass — instead of paying it every step.
+    /// The decision record, including the measured per-step cost, is
+    /// [ADR 003][adr].
     ///
-    /// [adr]: https://github.com/Limen-Neural/neuromod/blob/main/docs/adr/003-renormalize-every-normal-step.md
-    fn renormalize_lif_weights(&mut self) {
+    /// A neuron whose weights sum to at most `1e-6` is skipped: a blank neuron
+    /// stays blank, and a synapse at exactly zero stays zero.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use neuromod::{NeuroModulators, RmStdpConfig, SpikingNetwork};
+    ///
+    /// let mut net = SpikingNetwork::with_dimensions(1, 1, 2);
+    /// net.set_rm_stdp_config(RmStdpConfig {
+    ///     renormalize_weights: false,
+    ///     ..RmStdpConfig::default()
+    /// });
+    /// // Caller-chosen weights, deliberately off the L1 budget.
+    /// net.neurons[0].weights = vec![3.0, 1.0];
+    ///
+    /// // Opt-out steps never rescale them, rewarded or not.
+    /// net.step(&[0.5, 0.5], &NeuroModulators::default())
+    ///     .expect("length matches");
+    /// assert_eq!(net.neurons[0].weights, vec![3.0, 1.0]);
+    ///
+    /// // Policing is by hand instead: one call restores the budget.
+    /// net.renormalize_weights();
+    /// let total: f32 = net.neurons[0].weights.iter().sum();
+    /// assert!((total - 2.0).abs() < 1e-5);
+    /// ```
+    ///
+    /// [adr]: https://github.com/Limen-Neural/neuromod/blob/main/docs/adr/003-renormalization-opt-out.md
+    pub fn renormalize_weights(&mut self) {
         let (w_min, w_max) = self.stdp_config.weight_bounds();
         for neuron in &mut self.neurons {
             let total: f32 = neuron.weights.iter().sum();
@@ -2053,6 +2092,7 @@ mod tests {
             reward_lr: f32::INFINITY,
             w_min: 1.5,
             w_max: 0.2, // reversed
+            renormalize_weights: true,
         });
 
         // The setter installs guarded values rather than storing nonsense and
@@ -2066,6 +2106,23 @@ mod tests {
                     .all(|t| t.tau == RmStdpConfig::default().tau_eligibility)
             );
         }
+
+        // The switch has no invalid values to guard, so it passes through
+        // untouched: opting out must not be silently flipped back on.
+        network.set_rm_stdp_config(RmStdpConfig {
+            tau_eligibility: f32::NAN,
+            reward_lr: f32::INFINITY,
+            w_min: 1.5,
+            w_max: 0.2, // reversed
+            renormalize_weights: false,
+        });
+        assert_eq!(
+            network.stdp_config,
+            RmStdpConfig {
+                renormalize_weights: false,
+                ..RmStdpConfig::default()
+            }
+        );
     }
 
     #[test]
@@ -2076,6 +2133,7 @@ mod tests {
             reward_lr: 0.02,
             w_min: 0.1,
             w_max: 1.5,
+            renormalize_weights: false,
         };
 
         network.set_rm_stdp_config(config);
@@ -2250,6 +2308,168 @@ mod tests {
             "an unconnected synapse must stay unconnected"
         );
         assert_eq!(network.neurons[0].weights[3], 0.0);
+    }
+
+    #[test]
+    fn test_renormalize_opt_out_leaves_caller_weights_untouched_on_unrewarded_steps() {
+        // The opt-out must be total, not a dopamine-silent skip: with the
+        // flag `false` no Normal step rescales weights, so caller-chosen
+        // magnitudes survive even a spiking, trace-accumulating step.
+        let mut network = SpikingNetwork::with_dimensions(1, 1, 4);
+        network.set_rm_stdp_config(RmStdpConfig {
+            renormalize_weights: false,
+            ..RmStdpConfig::default()
+        });
+        network.neurons[0].weights = vec![3.0, 1.0, 0.0, 0.0];
+        let before = network.neurons[0].weights.clone();
+
+        network
+            .step(&[0.5, 0.5, 0.5, 0.5], &NeuroModulators::default())
+            .expect("length matches");
+
+        assert_eq!(
+            network.neurons[0].weights, before,
+            "an opted-out step must leave caller weights bit-identical"
+        );
+    }
+
+    #[test]
+    fn test_renormalize_opt_out_leaves_caller_weights_unscaled_on_rewarded_steps() {
+        let mut network = SpikingNetwork::with_dimensions(1, 1, 2);
+        network.set_rm_stdp_config(RmStdpConfig {
+            renormalize_weights: false,
+            ..RmStdpConfig::default()
+        });
+        // In bounds but off budget: total 1.8, where renormalization would
+        // scale up to exactly 2.0. Channel 1 carries no input on any step, so
+        // only channel 0 can move.
+        network.neurons[0].weights = vec![1.2, 0.6];
+        let reward = NeuroModulators {
+            dopamine: 0.9,
+            ..Default::default()
+        };
+
+        network.step(&[1.0, 0.0], &reward).expect("length matches");
+
+        let w0 = network.neurons[0].weights[0];
+        let total: f32 = network.neurons[0].weights.iter().sum();
+        assert!(
+            w0 > 1.2,
+            "a rewarded step must still convert traces into weight: {w0}"
+        );
+        assert_eq!(
+            network.neurons[0].weights[1], 0.6,
+            "a silent channel's weight must not move"
+        );
+        assert!(
+            (total - 1.8).abs() < 0.01,
+            "a rewarded opted-out step must add the STDP delta, not rescale: {total}"
+        );
+        assert!(
+            (total - WEIGHT_BUDGET).abs() > 1e-3,
+            "no rewarded step may pull opted-out weights back onto the budget: {total}"
+        );
+    }
+
+    #[test]
+    fn test_explicit_renormalize_weights_restores_budget_zeroes_and_blank_neurons() {
+        let mut network = SpikingNetwork::with_dimensions(2, 1, 4);
+        network.set_rm_stdp_config(RmStdpConfig {
+            renormalize_weights: false,
+            ..RmStdpConfig::default()
+        });
+        // Neuron 0: double the budget with unconnected channels. Neuron 1:
+        // deliberately blank — a blank neuron must not be scaled up.
+        network.neurons[0].weights = vec![3.0, 1.0, 0.0, 0.0];
+        let no_reward = NeuroModulators::default();
+
+        network
+            .step(&[0.5, 0.5, 0.5, 0.5], &no_reward)
+            .expect("length matches");
+        assert_eq!(
+            network.neurons[0].weights,
+            vec![3.0, 1.0, 0.0, 0.0],
+            "opt-out steps must keep caller weights un-rescaled before the explicit pass"
+        );
+
+        // On-demand policing after the hand edit: one explicit pass restores
+        // the budget, keeps unconnected synapses zero, leaves blanks blank.
+        network.renormalize_weights();
+
+        let total: f32 = network.neurons[0].weights.iter().sum();
+        assert!(
+            (total - WEIGHT_BUDGET).abs() < 1e-5,
+            "the explicit pass must police the L1 budget: got {total}"
+        );
+        assert!((network.neurons[0].weights[0] - 1.5).abs() < 1e-5);
+        assert!((network.neurons[0].weights[1] - 0.5).abs() < 1e-5);
+        assert_eq!(network.neurons[0].weights[2], 0.0);
+        assert_eq!(network.neurons[0].weights[3], 0.0);
+        assert!(
+            network.neurons[1].weights.iter().all(|&w| w == 0.0),
+            "a blank neuron must stay blank under the explicit pass"
+        );
+    }
+
+    #[test]
+    fn test_explicit_renormalize_weights_honors_narrowed_bounds() {
+        let mut network = SpikingNetwork::with_dimensions(1, 1, 2);
+        network.set_rm_stdp_config(RmStdpConfig {
+            renormalize_weights: false,
+            w_max: 1.5,
+            ..RmStdpConfig::default()
+        });
+        // Total 1.8 -> scale 1.111... -> channel 0 would land at 1.556, past
+        // the narrowed w_max: the bound must win and leave the sum short.
+        network.neurons[0].weights = vec![1.4, 0.4];
+
+        network.renormalize_weights();
+
+        assert_eq!(network.neurons[0].weights[0], 1.5);
+        assert!(network.neurons[0].weights[1] > 0.4 && network.neurons[0].weights[1] < 0.45);
+        let total: f32 = network.neurons[0].weights.iter().sum();
+        assert!(
+            (total - WEIGHT_BUDGET).abs() > 1e-3,
+            "a binding bound must leave the sum off budget: {total}"
+        );
+    }
+
+    #[test]
+    fn test_pre_opt_out_checkpoint_loads_with_renormalization_enabled() {
+        // Serialize a network that opted out, then strip the flag to mimic a
+        // checkpoint written before the field existed.
+        let mut network = SpikingNetwork::with_dimensions(1, 1, 2);
+        network.stdp_config.renormalize_weights = false;
+        let mut state = serde_json::to_value(&network).expect("network serializes");
+        state["stdp_config"]
+            .as_object_mut()
+            .expect("stdp_config is a JSON object")
+            .remove("renormalize_weights");
+
+        let mut restored: SpikingNetwork =
+            serde_json::from_value(state).expect("older checkpoint deserializes");
+        assert!(
+            restored.stdp_config.renormalize_weights,
+            "a pre-opt-out checkpoint must keep renormalizing every step"
+        );
+
+        // And it behaves like the default: an off-budget edit is policed on
+        // the very next step.
+        restored.neurons[0].weights = vec![3.0, 1.0];
+        restored
+            .step(&[0.0, 0.0], &NeuroModulators::default())
+            .expect("length matches");
+        let total: f32 = restored.neurons[0].weights.iter().sum();
+        assert!(
+            (total - WEIGHT_BUDGET).abs() < 1e-5,
+            "a restored pre-opt-out checkpoint must police the L1 budget: got {total}"
+        );
+
+        // An explicit opt-out survives the round trip.
+        let round: SpikingNetwork =
+            serde_json::from_str(&serde_json::to_string(&network).expect("serializes"))
+                .expect("opted-out network round-trips");
+        assert!(!round.stdp_config.renormalize_weights);
     }
 
     #[test]
@@ -2981,6 +3201,7 @@ mod tests {
     struct FrozenStateBits {
         modulators: [u32; 4],
         stdp_config: [u32; 4],
+        renormalize: bool,
         lif: Vec<FrozenLifBits>,
         iz_parameters: Vec<[u32; 4]>,
     }
@@ -3009,6 +3230,7 @@ mod tests {
                     network.stdp_config.w_min.to_bits(),
                     network.stdp_config.w_max.to_bits(),
                 ],
+                renormalize: network.stdp_config.renormalize_weights,
                 lif: network
                     .neurons
                     .iter()
@@ -3051,6 +3273,7 @@ mod tests {
                 reward_lr: f32::from_bits(self.stdp_config[1]),
                 w_min: f32::from_bits(self.stdp_config[2]),
                 w_max: f32::from_bits(self.stdp_config[3]),
+                renormalize_weights: self.renormalize,
             };
             for (neuron, frozen) in network.neurons.iter_mut().zip(&self.lif) {
                 neuron.decay_rate = f32::from_bits(frozen.decay_rate);
@@ -3134,6 +3357,9 @@ mod tests {
             reward_lr: 0.09,
             w_min: 0.02,
             w_max: 1.75,
+            // Off the default so the bit-identity checks prove the switch
+            // itself is captured and restored, not just the float fields.
+            renormalize_weights: false,
         };
         network.predictive_state = vec![0.1, 0.2, 0.3];
         network.input_spike_times = vec![1, 2, 3];

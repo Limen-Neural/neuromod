@@ -102,6 +102,12 @@ impl Default for EligibilityTrace {
 /// All of that applies only to a neuron the renormalization pass actually
 /// reaches — one whose weights already sum above its `1e-6` threshold. A blank
 /// neuron stays at zero: nothing scales a zero vector up to the budget.
+///
+/// The pass itself is switchable: it runs on every Normal step while
+/// [`Self::renormalize_weights`] is `true` (the default), and `false` opts out
+/// entirely — caller-chosen weights then survive every step un-rescaled, and
+/// [`SpikingNetwork::renormalize_weights`](crate::SpikingNetwork::renormalize_weights)
+/// polices them on demand.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct RmStdpConfig {
     /// Eligibility trace decay time constant, in steps. Typical values are 50-100.
@@ -119,6 +125,32 @@ pub struct RmStdpConfig {
     pub w_min: f32,
     /// Maximum weight (prevents runaway excitation).
     pub w_max: f32,
+    /// Whether every Normal `step` runs the L1 renormalization pass over LIF
+    /// weights (default `true`).
+    ///
+    /// `false` opts out entirely: `step` never rescales LIF weights, rewarded
+    /// and unrewarded steps alike, so caller-chosen weights keep their exact
+    /// magnitudes — a diagonal weight (one neuron listening to one channel)
+    /// no longer has to equal the L1 budget. R-STDP weight *updates* are still
+    /// individually clamped to `w_min` / `w_max` inside `apply_stdp`, so
+    /// learning alone cannot push a weight past `w_max`.
+    ///
+    /// With the pass off, nothing polices the public `weights` field or a
+    /// restored checkpoint automatically. Call
+    /// [`SpikingNetwork::renormalize_weights`](crate::SpikingNetwork::renormalize_weights)
+    /// by hand for one on-demand pass — after a hand edit or a checkpoint
+    /// load — instead of paying the scan on every step.
+    ///
+    /// Checkpoints written before this field existed deserialize with `true`,
+    /// so they keep the per-step budget contract they were written under.
+    #[serde(default = "default_renormalize_weights")]
+    pub renormalize_weights: bool,
+}
+
+/// Serde default for [`RmStdpConfig::renormalize_weights`]: `true`, so a
+/// checkpoint written before the field existed keeps renormalizing every step.
+fn default_renormalize_weights() -> bool {
+    true
 }
 
 impl Default for RmStdpConfig {
@@ -128,6 +160,7 @@ impl Default for RmStdpConfig {
             reward_lr: RM_STDP_REWARD_LR,
             w_min: RM_STDP_W_MIN,
             w_max: RM_STDP_W_MAX,
+            renormalize_weights: true,
         }
     }
 }
@@ -354,6 +387,32 @@ mod tests {
         assert_eq!(config.reward_lr, RM_STDP_REWARD_LR);
         assert_eq!(config.w_min, RM_STDP_W_MIN);
         assert_eq!(config.w_max, RM_STDP_W_MAX);
+        assert!(config.renormalize_weights);
+    }
+
+    #[test]
+    fn config_without_renormalize_flag_deserializes_to_true() {
+        // A 0.7.x checkpoint carries stdp_config without the flag; it must
+        // load with the default-true pass, not the bool type default.
+        let older = serde_json::json!({
+            "tau_eligibility": RM_STDP_TAU_ELIGIBILITY,
+            "reward_lr": RM_STDP_REWARD_LR,
+            "w_min": RM_STDP_W_MIN,
+            "w_max": RM_STDP_W_MAX,
+        });
+        let config: RmStdpConfig =
+            serde_json::from_value(older).expect("pre-flag config deserializes");
+        assert!(config.renormalize_weights);
+
+        // An explicit opt-out survives the round trip.
+        let opted_out = RmStdpConfig {
+            renormalize_weights: false,
+            ..RmStdpConfig::default()
+        };
+        let round: RmStdpConfig =
+            serde_json::from_value(serde_json::to_value(opted_out).expect("serializes"))
+                .expect("opted-out config round-trips");
+        assert!(!round.renormalize_weights);
     }
 
     #[test]

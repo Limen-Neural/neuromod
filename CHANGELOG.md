@@ -19,10 +19,14 @@ All notable changes to this project are documented in this file.
   magnitudes survive: a diagonal weight (one neuron listening to one channel) no longer has
   to equal the L1 budget. R-STDP weight updates are still individually clamped to `w_min` /
   `w_max` inside `apply_stdp`. The pass is exposed as the public `SpikingNetwork::renormalize_weights()`
-  for on-demand policing after a hand edit or a checkpoint load — one `O(num_lif × num_channels)`
-  call instead of one per step. Checkpoints written before the field existed deserialize
-  with `true` and keep renormalizing; no migration is needed. Exhaustive `RmStdpConfig`
-  struct literals need `renormalize_weights: ...` or `..Default::default()`. A `preserve`
+  for on-demand policing after a hand edit or a checkpoint load — one linear pass over
+  the stored LIF weights (`O(num_lif × num_channels)` on a standard-shaped network)
+  instead of one per step. Self-describing checkpoints written before the field existed
+  deserialize with `true` and keep renormalizing; positional binary formats
+  (`bincode`, `postcard`) written before it hit end-of-input and need re-serialization.
+  Exhaustive `RmStdpConfig`
+  struct literals need `renormalize_weights: ...` or `..Default::default()`, so this
+  ships as the 0.8.0 minor bump, not a 0.7.x patch. A `preserve`
   Criterion variant joins `engine_step/unrewarded` / `rewarded`; the pass costs roughly 2 µs
   of a ~41 µs unrewarded 64×64 step (~5%, measured, see `benches/README.md`). New tests lock
   the opt-out (weights survive unrewarded *and* rewarded steps un-rescaled), the on-demand

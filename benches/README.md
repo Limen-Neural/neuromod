@@ -65,7 +65,7 @@ Benchmarks synaptic plasticity operations:
 - `eligibility_trace_accumulate_ltd` - Same for post-before-pre (depression)
 - `rm_stdp_trace_to_weight` - One synapse's decay -> accumulate -> dopamine-gated conversion
 - `engine_step/unrewarded` / `engine_step/rewarded` - Full `SpikingNetwork::step` (64 LIF over 64 channels) carrying trace bookkeeping, with the dopamine gate shut and open
-- `engine_step/preserve` - The same step with `RmStdpConfig::renormalize_weights = false` (dopamine 0.0): identical per-step work to `unrewarded` minus the L1 renormalization scan, so the gap to `unrewarded` isolates the pass's cost
+- `engine_step/preserve` - The same step with `RmStdpConfig::renormalize_weights = false` (dopamine 0.0): identical per-step work to `unrewarded` minus the L1 renormalization scan, so the gap to `unrewarded` is an end-to-end estimate of the pass's cost
 - `engine_banked_trace_decay/{unrewarded,rewarded}/{64,512}` - Full step with nonzero banked traces, no input spikes, and trace values restored outside each timed step; isolates decay from spike-timing kernels and avoids underflow into the zero-trace fast path
 - `engine_step_allocations/{normal,frozen}/{16,64,512}` - Seeded full steps with dense firing, 200 warm-up steps, and bank/channel size scaling; wall-clock timings, not allocation counts
 - `engine_channel_drive/unrewarded` / `engine_channel_drive/rewarded` - Fixed seeded 32-step batches from a warmed checkpoint (64 LIF over 64 mixed channels); setup is untimed, throughput counts steps
@@ -225,11 +225,14 @@ measurement section below for its numbers.
 
 The permanent `engine_step/preserve` variant (`RmStdpConfig::renormalize_weights = false`,
 dopamine 0.0) against the default `engine_step/unrewarded` / `engine_step/rewarded`, all
-timed in one process from identical builds — the cleanest isolation of the pass's cost, with
-no between-build noise to correct for. Same 64 LIF × 64 channel steady-state workload as the
+timed in one process from identical builds, so there is no between-build noise to correct
+for. Same 64 LIF × 64 channel steady-state workload as the
 table above, `--warm-up-time 1 --measurement-time 3 --sample-size 30`, two runs per build.
-Measured on a local Windows 11 desktop, rustc 1.99.0; do not compare these absolute times to
-the Linux orb numbers elsewhere in this file.
+Each variant draws from the thread-local RNG via `step`, so it runs its own stochastic
+steady state rather than a controlled A/B over one shared spike sequence; the
+preserve-vs-unrewarded gap is an end-to-end estimate that bounds the pass's cost, not an
+exact isolation. Measured on a local Windows 11 desktop, rustc 1.99.0; do not compare these
+absolute times to the Linux orb numbers elsewhere in this file.
 
 | Benchmark | Run 1 | Run 2 |
 | --- | ---: | ---: |

@@ -50,20 +50,22 @@ one channel and leaves no way to express anything else.
 Keep the pass on every Normal step by default — behavior bit-identical to before — and add an
 explicit opt-out for callers who need un-rescaled weights:
 
-1. `RmStdpConfig::renormalize_weights: bool`, default `true`, deserializing a checkpoint that
-   predates the field to `true` so existing state keeps the contract it was written under.
-   When `false`, `step` never renormalizes — rewarded and unrewarded steps alike.
+1. `RmStdpConfig::renormalize_weights: bool`, default `true`, deserializing a
+   self-describing checkpoint that predates the field to `true` so existing state keeps the
+   contract it was written under. When `false`, `step` never renormalizes — rewarded and
+   unrewarded steps alike.
 2. Expose the pass as `SpikingNetwork::renormalize_weights()`, so an opt-out caller can police
    the public `weights` field on demand (after a hand edit or a checkpoint load) with one
-   `O(num_lif × num_channels)` call instead of one per step.
+   linear pass over the stored LIF weights instead of one per step.
 3. `engine_step/preserve` joins `engine_step/unrewarded` / `engine_step/rewarded` in the
    Criterion suite so the opt-out's per-step saving is measured, not asserted.
 
 Why the default stays on: `LifNeuron::weights` is public and checkpoints deserialize straight
 into it, so the engine cannot know weights changed without scanning them. The pass is what
-upholds the documented step contract (on-budget weights after every Normal step, which
-`tests/soak.rs` asserts per step) against caller edits and restored checkpoints — not just
-against STDP writes.
+upholds the documented step contract — every non-blank neuron back on the L1 budget after each
+Normal step; a blank neuron (total ≤ `1e-6`) stays blank by design — against caller edits and
+restored checkpoints, not just against STDP writes. `tests/soak.rs` asserts the budget after
+every step on its network, which never contains a blank neuron.
 
 Why the opt-out is safe for those who choose it: weight updates from `apply_stdp` are
 individually clamped to the `RmStdpConfig` bounds, so learning alone cannot push a weight past
@@ -85,11 +87,14 @@ from that draft is retained above and is what justifies keeping the default unch
   call (the `> 1e-6` total guard and the zero-skip in the write loop).
 - A dopamine-silent default step still polices caller-edited, off-budget weights — locked by
   `test_dopamine_silent_step_renormalizes_caller_edited_weights` (`src/engine.rs`).
-- Checkpoints written before the field existed deserialize with `renormalize_weights: true`
-  and keep renormalizing; no migration is needed. The field follows the crate's
-  missing-field-takes-default serde convention for self-describing formats.
+- Checkpoints in self-describing formats (JSON, YAML, TOML, RON) written before the field
+  existed deserialize with `renormalize_weights: true` and keep renormalizing. Positional
+  binary formats (`bincode`, `postcard`) written before the field hit end-of-input and must
+  be re-serialized — the same caveat as every other post-release serde field (ADR 002).
 - Adding the field to `RmStdpConfig` breaks exhaustive struct literals; migration is
-  `renormalize_weights: ...` or `..RmStdpConfig::default()`.
+  `renormalize_weights: ...` or `..RmStdpConfig::default()`. Per the crate's pre-1.0
+  convention this ships as the 0.8.0 minor bump, recorded in the README migration notes —
+  not as a 0.7.x patch.
 - A weights-dirty flag remains impossible (public-field edits bypass any flag), and a
   dopamine-level-dependent skip remains rejected: whether weights are policed must not depend
   on whether reward happens to be present on a given step.

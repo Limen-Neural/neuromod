@@ -113,7 +113,10 @@ fn bench_reward_conversion(c: &mut Criterion) {
 /// for the trace -> weight conversion. `preserve` is the
 /// `RmStdpConfig::renormalize_weights = false` opt-out at dopamine 0.0: the
 /// same per-step work as `unrewarded` minus the L1 renormalization scan, so
-/// the gap between the two isolates the pass's cost.
+/// the gap between the two is an end-to-end estimate of the pass's cost —
+/// each variant draws from the thread-local RNG via `step` and runs its own
+/// stochastic steady state, not a controlled A/B with one shared spike
+/// sequence.
 ///
 /// The network is warmed to steady state before timing. `apply_stdp` skips both
 /// the decay `exp` and the weight conversion while a trace is still exactly

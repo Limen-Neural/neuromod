@@ -867,10 +867,10 @@ impl SpikingNetwork {
     /// range is honored and leaves the sum off budget. See the `step`
     /// contract, item 9.
     ///
-    /// This is the pass [`Self::step`] runs after [`Self::apply_stdp`] on
-    /// every Normal step while [`RmStdpConfig::renormalize_weights`] is
-    /// `true` (the default) — dopamine-silent steps included, where
-    /// [`Self::apply_stdp`] cannot have written a weight and only a caller
+    /// This is the pass [`Self::step`] runs after the private `apply_stdp`
+    /// phase on every Normal step while [`RmStdpConfig::renormalize_weights`]
+    /// is `true` (the default) — dopamine-silent steps included, where
+    /// `apply_stdp` cannot have written a weight and only a caller
     /// edit or a restored checkpoint can have changed one, since
     /// `LifNeuron::weights` is public and checkpoints deserialize straight into
     /// it. With the flag `false`, no Normal step rescales weights, rewarded or

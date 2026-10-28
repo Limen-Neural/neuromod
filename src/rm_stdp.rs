@@ -141,8 +141,12 @@ pub struct RmStdpConfig {
     /// by hand for one on-demand pass — after a hand edit or a checkpoint
     /// load — instead of paying the scan on every step.
     ///
-    /// Checkpoints written before this field existed deserialize with `true`,
-    /// so they keep the per-step budget contract they were written under.
+    /// Checkpoints in self-describing formats (JSON, YAML, TOML, RON) written
+    /// before this field existed deserialize with `true`, so they keep the
+    /// per-step budget contract they were written under. Positional binary
+    /// formats (`bincode`, `postcard`) written before the field hit
+    /// end-of-input and must be re-serialized, the same caveat as every other
+    /// post-release serde field in this crate.
     #[serde(default = "default_renormalize_weights")]
     pub renormalize_weights: bool,
 }

@@ -369,8 +369,11 @@ to the configured bounds on every Normal step, dopamine-silent steps included.
 Set the flag `false` to run with caller-chosen weights that are never rescaled,
 rewarded or unrewarded; police by hand with the new public
 `SpikingNetwork::renormalize_weights()` after a `weights` edit or a checkpoint
-load. Checkpoints written before the field existed deserialize with `true` —
-they keep renormalizing, so no migration is needed. R-STDP weight updates
+load. Checkpoints in self-describing formats (JSON, YAML, TOML, RON) written before the
+field existed deserialize with `true` — they keep renormalizing, so no migration is needed
+for them. Positional binary formats such as `bincode` / `postcard` written before the field
+need re-encoding because they do not name fields (the same caveat as the 0.6
+eligibility-trace migration). R-STDP weight updates
 remain individually clamped to `w_min` / `w_max` inside `apply_stdp` either way.
 
 ### 0.7 — finite sparse GIF construction and stepping

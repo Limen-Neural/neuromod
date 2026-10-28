@@ -71,7 +71,7 @@ Construction is topology-neutral. `new()` is the legacy default (16 LIF, 5 Izhik
 
 `SpikingNetwork::step_with_rng` is the same pipeline with a caller-owned `&mut impl rand::Rng`. That injected random-number generator (RNG) is used only for Bernoulli encoding of `input_spike_times`. The convenience `step` draws from the thread-local RNG.
 
-`step_with_rng` is an orchestrator. The length guard stays inline. Each numbered phase below is a private helper on `SpikingNetwork`:
+`step_with_rng` is an orchestrator. The length guard stays inline. Each numbered phase below is a helper method on `SpikingNetwork` — all private except phase 8, `renormalize_weights`, which is public for on-demand policing per [ADR 003](docs/adr/003-renormalization-opt-out.md):
 
 1. Validate `stimuli.len() == num_channels` and that every stimulus and modulator field is finite, else `Err(StepError::InputLenMismatch | NonFiniteStimulus | NonFiniteModulator)`. Rejection is a no-op: no `global_step` increment, no modulator store, no predictive-state update, no random-number generator (RNG) draw.
 2. If `global_step` is negative or already `i64::MAX`, return

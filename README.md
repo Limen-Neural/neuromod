@@ -360,6 +360,24 @@ them: [ADR 002](https://github.com/Limen-Neural/neuromod/blob/main/docs/adr/002-
 
 ## Migration Notes
 
+### 0.8 — explicit opt-out from per-step L1 weight renormalization
+
+`RmStdpConfig` gains `renormalize_weights: bool` (default `true`). **Exhaustive
+struct literals need the field or `..Default::default()`.** The default path is
+unchanged: `step` still renormalizes LIF weights toward the L1 budget and clamps
+to the configured bounds on every Normal step, dopamine-silent steps included.
+Set the flag `false` to run with caller-chosen weights that are never rescaled,
+rewarded or unrewarded; police by hand with the new public
+`SpikingNetwork::renormalize_weights()` after a `weights` edit or a checkpoint
+load. Checkpoints in self-describing formats (JSON, YAML, TOML, RON) written before the
+field existed deserialize with `true` — they keep renormalizing, so no migration is needed
+for them. Positional binary formats such as `bincode` / `postcard` written before the field
+fail to decode at the new trailing field: a checkpoint holding exactly a network ends
+before the bool (end-of-input), while a positional wrapper storing more data after the
+network can decode silently shifted. They must be re-encoded (the same caveat as the 0.6
+eligibility-trace migration). R-STDP weight updates
+remain individually clamped to `w_min` / `w_max` inside `apply_stdp` either way.
+
 ### 0.7 — finite sparse GIF construction and stepping
 
 `GifLayerError` gains four variants: `NonFiniteParam { field, class }`,
@@ -643,6 +661,7 @@ See the full planning documents:
 - [neuromod Boundary Matrix](https://github.com/Limen-Neural/neuromod/blob/main/docs/neuromod-boundary-matrix.md) — runtime/deployment role, owns/does-not-own, allowed/forbidden dependencies vs. limbic-critic, brainstem-daemon, axon-encoder, synaptic-mesh, silicon-bridge, Spikenaut-Hardware, plasticity-lab, etc. (LIM-9).
 - [ADR 001: Shared traits live in neuromod](https://github.com/Limen-Neural/neuromod/blob/main/docs/adr/001-traits-in-neuromod.md) — why traits are hosted here.
 - [ADR 002: Wire eligibility traces into the engine](https://github.com/Limen-Neural/neuromod/blob/main/docs/adr/002-wire-eligibility-traces.md) — why R-STDP is wired rather than demoted, and what changed in the learning path.
+- [ADR 003: Per-step LIF weight renormalization — on by default, explicit opt-out](https://github.com/Limen-Neural/neuromod/blob/main/docs/adr/003-renormalization-opt-out.md) — why the L1 renormalization pass stays on every Normal step by default, the measured cost of the pass, and the `RmStdpConfig::renormalize_weights` opt-out for caller-chosen weights that must not be rescaled.
 - [RNG inventory](https://github.com/Limen-Neural/neuromod/blob/main/docs/rng.md) — live stochastic paths, caller-injected RNG variants, and deterministic surfaces.
 
 ## Examples

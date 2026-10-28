@@ -110,7 +110,13 @@ fn bench_reward_conversion(c: &mut Criterion) {
 
 /// End-to-end engine step, which now carries trace bookkeeping for every
 /// synapse. Rewarded and unrewarded are separate: only the rewarded path pays
-/// for the trace -> weight conversion.
+/// for the trace -> weight conversion. `preserve` is the
+/// `RmStdpConfig::renormalize_weights = false` opt-out at dopamine 0.0: the
+/// same per-step work as `unrewarded` minus the L1 renormalization scan, so
+/// the gap between the two is an end-to-end estimate of the pass's cost —
+/// each variant draws from the thread-local RNG via `step` and runs its own
+/// stochastic steady state, not a controlled A/B with one shared spike
+/// sequence.
 ///
 /// The network is warmed to steady state before timing. `apply_stdp` skips both
 /// the decay `exp` and the weight conversion while a trace is still exactly
@@ -124,9 +130,14 @@ fn bench_engine_step_with_traces(c: &mut Criterion) {
 
     let mut group = c.benchmark_group("engine_step");
 
-    for (label, dopamine) in [("unrewarded", 0.0_f32), ("rewarded", 0.9)] {
+    for (label, dopamine, renormalize) in [
+        ("unrewarded", 0.0_f32, true),
+        ("rewarded", 0.9, true),
+        ("preserve", 0.0, false),
+    ] {
         group.bench_function(label, |b| {
             let mut network = SpikingNetwork::with_dimensions(64, 5, 64);
+            network.stdp_config.renormalize_weights = renormalize;
             for neuron in &mut network.neurons {
                 neuron.weights = vec![2.0 / 64.0; 64];
             }

@@ -38,12 +38,17 @@ All notable changes to this project are documented in this file.
 - **Per-neuron opt-out from the per-step LIF retune, default unchanged**
   ([#207](https://github.com/Limen-Neural/neuromod/issues/207),
   [LIM-1568](https://linear.app/rpd-34/issue/LIM-1568)).
-  `LifNeuron` gains `pinned: bool`, default `false`. Every engine step still assigns an
-  unpinned neuron's `decay_rate` from acetylcholine and soft-updates then clamps its
-  `threshold` to `[0.05, 0.50]` — even with dopamine at 0, so the constructor threshold
-  `0.02` reads as `0.05` after the first step. A pinned neuron is skipped by that retune,
-  so caller-set heterogeneous leak and thresholds (including values outside the clamp
-  range) survive every step; integration, firing, inhibition, and R-STDP are unaffected.
+  `LifNeuron` gains `pinned: bool`, default `false`. Every normal engine step (`step`,
+  `step_with_rng`) still assigns an unpinned neuron's `decay_rate` from acetylcholine and
+  soft-updates then clamps its `threshold` to `[0.05, 0.50]` — even with dopamine at 0, so
+  the constructor threshold `0.02` reads as `0.05` after the first normal step.
+  `step_frozen` and `step_frozen_with_rng` apply the retune only for that step and restore
+  both values before returning. A pinned neuron is skipped by the retune, so caller-set heterogeneous leak and
+  thresholds (including values outside the clamp range) survive every step. The flag pins
+  `decay_rate` and `threshold` together; there is no per-value pin. Integration, firing,
+  inhibition, and R-STDP run unchanged, but they now see the caller's values, so a pinned
+  neuron's firing and spike timing (and the R-STDP updates driven by them) can differ from
+  an unpinned one.
   The `decay_rate` and `threshold` rustdoc now states when the engine overwrites them.
   Self-describing checkpoints written before the field existed deserialize as `false` and
   keep retuning; positional binary formats (`bincode`, `postcard`) must be re-encoded.

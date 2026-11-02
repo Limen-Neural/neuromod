@@ -2122,8 +2122,13 @@ mod tests {
         assert_eq!(network.neurons[0].threshold, 0.8);
 
         let json = serde_json::to_string(&network).expect("serializes");
-        let restored: SpikingNetwork = serde_json::from_str(&json).expect("deserializes");
+        let mut restored: SpikingNetwork = serde_json::from_str(&json).expect("deserializes");
         assert!(restored.neurons[0].pinned);
+        assert_eq!(restored.neurons[0].decay_rate, 0.04);
+        assert_eq!(restored.neurons[0].threshold, 0.8);
+        restored.step(&[0.5], &modulators).expect("length matches");
+        assert_eq!(restored.neurons[0].decay_rate, 0.04);
+        assert_eq!(restored.neurons[0].threshold, 0.8);
 
         // A checkpoint written before the field existed loads unpinned.
         let mut state = serde_json::to_value(&network).expect("serializes");

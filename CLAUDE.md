@@ -79,7 +79,7 @@ Construction is topology-neutral. `new()` is the legacy default (16 LIF, 5 Izhik
    generator (RNG) draw. The counter is in discrete **steps** (not wall-clock),
    range `0..=i64::MAX`; `-1` on spike timestamps is the sentinel for no recorded
    spike.
-3. `retune_lif_from_modulators` — recompute per-neuron `decay_rate`/`threshold` targets from the current `NeuroModulators` (dopamine/serotonin/acetylcholine/norepinephrine each pull thresholds/decay in different directions — see formulas in `engine.rs`).
+3. `retune_lif_from_modulators` — recompute per-neuron `decay_rate`/`threshold` targets from the current `NeuroModulators` (dopamine/serotonin/acetylcholine/norepinephrine each pull thresholds/decay in different directions — see formulas in `engine.rs`). Neurons with `LifNeuron::pinned` set are skipped (#207).
 4. `update_predictive_drive` — update `predictive_state` (exponential moving average (EMA) per channel) and precompute clamped stimulus + weighted prediction error ("surprise") once per channel for all LIF neurons.
 5. `encode_input_spikes` — stochastically encode `stimuli` into `input_spike_times` (Poisson-style, probability proportional to stimulus magnitude). `step` draws from the thread-local RNG; `step_with_rng` draws from the caller generator and does not construct or reseed a generator per neuron or per step.
 6. `integrate_lif_bank` then `fire_lif_and_inhibit` — integrate LIF membrane potentials, fire (`check_fire`), apply lateral inhibition to non-firing LIF neurons (O(1) membership via the current step's `last_spike`, with no duplicate mask). Spike output reserves the LIF bank size to avoid reallocations.

@@ -378,6 +378,17 @@ network can decode silently shifted. They must be re-encoded (the same caveat as
 eligibility-trace migration). R-STDP weight updates
 remain individually clamped to `w_min` / `w_max` inside `apply_stdp` either way.
 
+### 0.8 — pin a LIF neuron's `decay_rate` / `threshold` against the per-step retune
+
+`LifNeuron` gains `pinned: bool` (default `false`). **Exhaustive `LifNeuron` struct
+literals need the field or `..LifNeuron::new()`.** The default path is unchanged: every
+engine step assigns an unpinned neuron's `decay_rate` from acetylcholine and soft-updates
+its `threshold`, then clamps it to `[0.05, 0.50]` even when dopamine is `0`. Set
+`neuron.pinned = true` to keep caller-chosen leak and threshold — per-neuron values, or a
+threshold outside that range — across every step. Self-describing checkpoints written
+before the field existed deserialize with `false` and keep retuning; positional binary
+formats such as `bincode` / `postcard` must be re-encoded, as with the other 0.8 field.
+
 ### 0.7 — finite sparse GIF construction and stepping
 
 `GifLayerError` gains four variants: `NonFiniteParam { field, class }`,

@@ -537,7 +537,10 @@ impl SpikingNetwork {
     ///    values, or an exhausted `global_step`.
     /// 2. Store `modulators` and derive stress / learning rates.
     /// 3. Recompute LIF targets from neuromodulators: assign `decay_rate`
-    ///    directly; soft-update `threshold` toward its target (learning-rate blend).
+    ///    directly; soft-update `threshold` toward its target (learning-rate
+    ///    blend), then clamp it to `[0.05, 0.50]`. Runs even when dopamine is
+    ///    `0`. Neurons with [`LifNeuron::pinned`] set are skipped and keep
+    ///    their caller-set `decay_rate` and `threshold`.
     /// 4. Update per-channel predictive EMA and precompute stimuli + surprise drive.
     /// 5. For each channel with `|stimuli| > 0.01`, run a Bernoulli trial
     ///    with probability `clamp(|stimuli|, 0.0, 1.0)` and stamp
@@ -775,8 +778,10 @@ impl SpikingNetwork {
     }
 
     /// Recompute LIF `decay_rate` and `threshold` from the current modulators.
+    ///
+    /// Neurons with [`LifNeuron::pinned`] set keep their caller-chosen values.
     fn retune_lif_from_modulators(&mut self, learning_rate: f32) {
-        for neuron in &mut self.neurons {
+        for neuron in self.neurons.iter_mut().filter(|n| !n.pinned) {
             let target_decay = 0.15 - (0.05 * self.modulators.acetylcholine);
             neuron.decay_rate = target_decay;
 
@@ -2029,6 +2034,112 @@ mod tests {
                     .all(|t| t.tau == network.stdp_config.tau_eligibility)
             );
         }
+    }
+
+    // --- Pinned neurons opt out of the per-step retune (#207) ------------
+
+    #[test]
+    fn test_pinned_neurons_keep_user_set_decay_and_threshold_across_steps() {
+        // Distinct per-neuron leak and thresholds, including values outside
+        // the retune clamp range [0.05, 0.50], under strongly non-default
+        // modulators that would otherwise overwrite all of them every step.
+        let user_params = [(0.03_f32, 0.02_f32), (0.21, 0.75), (0.09, 0.33)];
+        let mut network = SpikingNetwork::with_dimensions(4, 1, 2);
+        for (neuron, &(decay, threshold)) in network.neurons.iter_mut().zip(&user_params) {
+            neuron.decay_rate = decay;
+            neuron.threshold = threshold;
+            neuron.weights = vec![0.6, 0.6];
+            neuron.pinned = true;
+        }
+        // Neuron 3 stays unpinned as an in-network control.
+        network.neurons[3].weights = vec![0.6, 0.6];
+        network.neurons[3].decay_rate = 0.03;
+        network.neurons[3].threshold = 0.02;
+        let modulators = NeuroModulators {
+            dopamine: 1.0,
+            serotonin: 0.4,
+            acetylcholine: 1.0,
+            norepinephrine: 0.6,
+        };
+        let mut rng = StdRng::seed_from_u64(207);
+        let mut pinned_spikes = 0;
+
+        for _ in 0..50 {
+            let spikes = network
+                .step_with_rng(&[0.9, 0.8], &modulators, &mut rng)
+                .expect("finite, length matches");
+            pinned_spikes += spikes.iter().filter(|&&i| i < 3).count();
+            for (neuron, &(decay, threshold)) in network.neurons.iter().zip(&user_params) {
+                assert_eq!(neuron.decay_rate.to_bits(), decay.to_bits());
+                assert_eq!(neuron.threshold.to_bits(), threshold.to_bits());
+            }
+        }
+        assert!(
+            pinned_spikes > 0,
+            "pinned neurons must still integrate and fire"
+        );
+
+        // The unpinned control is still retuned: acetylcholine target decay
+        // and a threshold inside the clamp range.
+        let control = &network.neurons[3];
+        assert_eq!(control.decay_rate, 0.15 - 0.05 * modulators.acetylcholine);
+        assert!((0.05..=0.50).contains(&control.threshold));
+    }
+
+    #[test]
+    fn test_unpinned_retune_still_clamps_threshold_with_dopamine_silent() {
+        // Default behavior is unchanged: with default modulators the soft
+        // update is a no-op, yet decay is reassigned and the constructor
+        // threshold (0.02) is clamped up to 0.05 on the first step.
+        let mut network = SpikingNetwork::with_dimensions(1, 1, 1);
+        assert!(!network.neurons[0].pinned);
+        network.neurons[0].decay_rate = 0.03;
+        assert_eq!(network.neurons[0].threshold, 0.02);
+
+        network
+            .step(&[0.0], &NeuroModulators::default())
+            .expect("length matches");
+
+        assert_eq!(network.neurons[0].decay_rate, 0.15);
+        assert_eq!(network.neurons[0].threshold, 0.05);
+    }
+
+    #[test]
+    fn test_pinned_neuron_matches_frozen_step_and_round_trips() {
+        let mut network = SpikingNetwork::with_dimensions(1, 1, 1);
+        network.neurons[0].decay_rate = 0.04;
+        network.neurons[0].threshold = 0.8;
+        network.neurons[0].pinned = true;
+        let modulators = NeuroModulators {
+            dopamine: 1.0,
+            acetylcholine: 1.0,
+            ..Default::default()
+        };
+        network
+            .step_frozen(&[0.5], &modulators)
+            .expect("length matches");
+        assert_eq!(network.neurons[0].decay_rate, 0.04);
+        assert_eq!(network.neurons[0].threshold, 0.8);
+
+        let json = serde_json::to_string(&network).expect("serializes");
+        let restored: SpikingNetwork = serde_json::from_str(&json).expect("deserializes");
+        assert!(restored.neurons[0].pinned);
+
+        // A checkpoint written before the field existed loads unpinned.
+        let mut state = serde_json::to_value(&network).expect("serializes");
+        state["neurons"][0]
+            .as_object_mut()
+            .expect("neuron is a JSON object")
+            .remove("pinned");
+        let mut old: SpikingNetwork = serde_json::from_value(state).expect("older checkpoint");
+        assert!(!old.neurons[0].pinned);
+        old.step(&[0.0], &modulators).expect("length matches");
+        assert_eq!(
+            old.neurons[0].decay_rate,
+            0.15 - 0.05 * modulators.acetylcholine
+        );
+        let retuned = old.neurons[0].threshold;
+        assert!(retuned != 0.8 && (0.05..=0.50).contains(&retuned));
     }
 
     #[test]

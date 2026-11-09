@@ -95,8 +95,24 @@ impl PoissonEncoder {
 #[derive(Clone, Serialize, Deserialize, Debug)]
 pub struct LifNeuron {
     pub membrane_potential: f32, // Current charge state
-    pub decay_rate: f32,         // How fast it "forgets" (Leak)
-    pub threshold: f32,          // Limit to trigger an action potential
+    /// Fraction of membrane potential lost per [`Self::integrate`] call (leak).
+    ///
+    /// Inside [`crate::SpikingNetwork`], every step (Normal and frozen)
+    /// **overwrites** this with the acetylcholine target
+    /// `0.15 - 0.05 * acetylcholine` unless [`Self::pinned`] is `true`. Frozen
+    /// steps restore the previous value afterwards. Standalone use of
+    /// `LifNeuron` never touches it.
+    pub decay_rate: f32,
+    /// Membrane potential at or above which [`Self::check_fire`] spikes.
+    ///
+    /// Inside [`crate::SpikingNetwork`], every step (Normal and frozen)
+    /// soft-updates this toward a modulator-derived target at the
+    /// dopamine-derived learning rate and then **clamps it to `[0.05, 0.50]`**
+    /// — even when dopamine is `0` and the soft update is a no-op — unless
+    /// [`Self::pinned`] is `true`. So the constructor value `0.02` reads as
+    /// `0.05` after the first engine step. Frozen steps restore the previous
+    /// value afterwards. Standalone use of `LifNeuron` never touches it.
+    pub threshold: f32,
     /// Resting threshold baseline used for dynamic threshold modulation
     /// without losing the original calibrated value.
     #[serde(default = "default_base_threshold")]
@@ -123,6 +139,19 @@ pub struct LifNeuron {
     /// match `weights` before use.
     #[serde(default)]
     pub eligibility: Vec<EligibilityTrace>,
+    /// Exempt this neuron from the engine's per-step modulator retune.
+    ///
+    /// When `true`, [`crate::SpikingNetwork`] steps leave [`Self::decay_rate`]
+    /// and [`Self::threshold`] exactly as the caller set them: no
+    /// acetylcholine decay assignment, no threshold soft update, and no
+    /// `[0.05, 0.50]` threshold clamp. This allows per-neuron leak and
+    /// thresholds outside that range. Weights, eligibility traces,
+    /// integration, firing, and lateral inhibition are unaffected.
+    ///
+    /// Defaults to `false` (retuned every step, the pre-0.8 behavior);
+    /// checkpoints written before the field existed deserialize as `false`.
+    #[serde(default)]
+    pub pinned: bool,
 }
 
 impl Default for LifNeuron {
@@ -136,6 +165,7 @@ impl Default for LifNeuron {
             weights: Vec::new(),
             last_spike_time: -1,
             eligibility: Vec::new(),
+            pinned: false,
         }
     }
 }
@@ -187,6 +217,7 @@ mod tests {
         assert!(neuron.weights.is_empty());
         assert_eq!(neuron.last_spike_time, -1);
         assert!(neuron.eligibility.is_empty());
+        assert!(!neuron.pinned);
     }
 
     #[test]

@@ -137,7 +137,9 @@ Only `LifNeuron` and `IzhikevichNeuron` are wired into `SpikingNetwork`. The oth
 
 ### Serialization
 
-`SpikingNetwork` and its neuron banks derive `Serialize`/`Deserialize` (serde) for checkpointing. Fields added after the initial release use `#[serde(default)]` (for example `LifNeuron::weights`, `base_threshold`, `last_spike_time`) so older serialized states still load. `LifNeuron::pinned` (0.8.0) is also `#[serde(default)]`: self-describing formats such as JSON load it as `false`, but positional binary formats (`bincode`, `postcard`) must re-encode pre-0.8 checkpoints (see the 0.8.0 CHANGELOG entry).
+`SpikingNetwork` and its neuron banks derive `Serialize`/`Deserialize` (serde) for checkpointing. Fields added after the initial release use `#[serde(default)]` (for example `LifNeuron::weights`, `base_threshold`, `last_spike_time`) so older serialized states still load.
+
+`LifNeuron::pinned` (0.8.0) is also `#[serde(default)]`. JSON and other self-describing formats load it as `false`. Positional binary formats (`bincode`, `postcard`) need pre-0.8 checkpoints re-encoded; see the 0.8.0 CHANGELOG entry.
 
 ### Observability
 

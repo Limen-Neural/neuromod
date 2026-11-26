@@ -10,7 +10,7 @@ Run these commands before claiming a PR is ready, especially when touching `src/
 
 ## MSRV pin rule
 
-`Cargo.toml` `rust-version`, `rust-toolchain.toml` `channel`, and the toolchain string in `.github/workflows/ci.yml` must stay **identical**. CI enforces this; do not bump one without the others.
+`Cargo.toml` `rust-version` is the crate's **true measured MSRV** and may be lower than the dev toolchain. `rust-toolchain.toml` `channel` and the toolchain string in `.github/workflows/ci.yml` are the **dev pin** and must stay identical to each other. CI enforces `rust-version <= channel == ci.yml pin`; do not bump the dev pin without the others, and only change `rust-version` to a measured floor.
 
 ## Mandatory commands
 

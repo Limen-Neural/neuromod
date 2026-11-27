@@ -55,6 +55,10 @@ jobs:
           echo "ci.yml pin=$ci_rv"
           # Dev pin: channel and CI toolchain input must stay identical.
           test "$toolchain_ch" = "$ci_rv"
+          # Reject malformed values before comparing; only X.Y[.Z] is a
+          # valid rust-version (no pre-release text or empty fields).
+          echo "$cargo_rv" | grep -Eq '^[0-9]+\.[0-9]+(\.[0-9]+)?$'
+          echo "$toolchain_ch" | grep -Eq '^[0-9]+\.[0-9]+(\.[0-9]+)?$'
           # MSRV must not exceed the dev toolchain (numeric compare; works on
           # macOS bash where `sort -V` is unavailable).
           awk -v a="$cargo_rv" -v b="$toolchain_ch" 'BEGIN {
@@ -243,9 +247,10 @@ jobs:
           cargo run --release
 
   # Dedicated MSRV job (#214): installs whatever Cargo.toml rust-version
-  # declares instead of hardcoding a version. check-only — an older rustc's
-  # clippy can flag lints that did not exist when the code was written
-  # (e.g. uninlined_format_args on 1.88), so the lint gate stays on the dev pin.
+  # declares instead of hardcoding a version, then checks and tests on it.
+  # No clippy — an older rustc's clippy can flag lints that did not exist
+  # when the code was written (e.g. uninlined_format_args on 1.88), so the
+  # lint gate stays on the dev pin.
   msrv:
     name: MSRV check
     runs-on: ubuntu-latest
@@ -260,7 +265,7 @@ jobs:
         run: |
           set -euo pipefail
           rv=$(grep -m1 '^rust-version' Cargo.toml | sed -E 's/.*"([^"]+)".*/\1/')
-          test -n "$rv"
+          echo "$rv" | grep -Eq '^[0-9]+\.[0-9]+(\.[0-9]+)?$' || { echo "invalid rust-version: $rv" >&2; exit 1; }
           echo "version=$rv" >> "$GITHUB_OUTPUT"
           echo "MSRV=$rv"
 
@@ -269,8 +274,16 @@ jobs:
         with:
           toolchain: ${{ steps.msrv.outputs.version }}
 
+      # RUSTUP_TOOLCHAIN keeps the cache's rustc/cargo probes on the MSRV
+      # toolchain; without it rust-toolchain.toml's dev pin would install.
       - name: Rust Cache
         uses: Swatinem/rust-cache@c8037a86dde8214a8310e9f54a8fc61ab362aa31 # v2
+        env:
+          RUSTUP_TOOLCHAIN: ${{ steps.msrv.outputs.version }}
 
-      - name: Check on MSRV
-        run: cargo +${{ steps.msrv.outputs.version }} check --locked --all-targets --all-features
+      # `--all-targets` covers host targets; the browser-WASM check stays on
+      # the dev pin (wasm builds are outside the MSRV claim).
+      - name: Check and test on MSRV
+        run: |
+          cargo +${{ steps.msrv.outputs.version }} check --locked --all-targets --all-features
+          cargo +${{ steps.msrv.outputs.version }} test --locked --all-features

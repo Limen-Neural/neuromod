@@ -2,7 +2,7 @@
 name = "neuromod"
 version = "0.7.0"
 edition = "2024"
-rust-version = "1.99.0"
+rust-version = "1.88.0"
 license = "MIT OR Apache-2.0"
 authors = ["Raul Cardenas Montoya <montoyaraul34@gmail.com>"]
 description = "Biologically inspired SNN primitives in Rust: LIF/Izhikevich SpikingNetwork, neuromodulators, STDP building blocks, and standalone neuron models."

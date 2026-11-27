@@ -28,12 +28,11 @@ jobs:
           toolchain: 1.99.0
           components: clippy, rustfmt
 
-      # Keep Cargo.toml rust-version, rust-toolchain.toml, and this job's
-      # toolchain: string identical (MSRV single source of truth — #79).
-      # ci_rv is parsed from the dtolnay/rust-toolchain `toolchain:` input above
-      # so a bump of only that pin cannot silently pass this check.
+      # Cargo.toml rust-version is the crate's true MSRV and may be lower than
+      # the dev toolchain pin (#214). Require rust-version <= rust-toolchain.toml
+      # channel, and keep channel identical to this job's toolchain: input.
       # shell: bash so the awk script runs on Windows runners too.
-      - name: Verify MSRV pins agree
+      - name: Verify MSRV pins
         shell: bash
         run: |
           set -euo pipefail
@@ -54,8 +53,22 @@ jobs:
           echo "Cargo.toml rust-version=$cargo_rv"
           echo "rust-toolchain.toml channel=$toolchain_ch"
           echo "ci.yml pin=$ci_rv"
-          test "$cargo_rv" = "$toolchain_ch"
-          test "$cargo_rv" = "$ci_rv"
+          # Dev pin: channel and CI toolchain input must stay identical.
+          test "$toolchain_ch" = "$ci_rv"
+          # Reject malformed values before comparing; only X.Y[.Z] is a
+          # valid rust-version (no pre-release text or empty fields).
+          echo "$cargo_rv" | grep -Eq '^[0-9]+\.[0-9]+(\.[0-9]+)?$'
+          echo "$toolchain_ch" | grep -Eq '^[0-9]+\.[0-9]+(\.[0-9]+)?$'
+          # MSRV must not exceed the dev toolchain (numeric compare; works on
+          # macOS bash where `sort -V` is unavailable).
+          awk -v a="$cargo_rv" -v b="$toolchain_ch" 'BEGIN {
+            split(a, A, "."); split(b, B, ".");
+            for (i = 1; i <= 3; i++) {
+              if ((A[i] + 0) < (B[i] + 0)) exit 0;
+              if ((A[i] + 0) > (B[i] + 0)) exit 1;
+            }
+            exit 0;
+          }'
 
       - name: Rust Cache
         uses: Swatinem/rust-cache@c8037a86dde8214a8310e9f54a8fc61ab362aa31 # v2
@@ -232,3 +245,45 @@ jobs:
           cargo clippy --all-targets -- -D warnings
           cargo run
           cargo run --release
+
+  # Dedicated MSRV job (#214): installs whatever Cargo.toml rust-version
+  # declares instead of hardcoding a version, then checks and tests on it.
+  # No clippy — an older rustc's clippy can flag lints that did not exist
+  # when the code was written (e.g. uninlined_format_args on 1.88), so the
+  # lint gate stays on the dev pin.
+  msrv:
+    name: MSRV check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Read MSRV from Cargo.toml
+        id: msrv
+        shell: bash
+        run: |
+          set -euo pipefail
+          rv=$(grep -m1 '^rust-version' Cargo.toml | sed -E 's/.*"([^"]+)".*/\1/')
+          echo "$rv" | grep -Eq '^[0-9]+\.[0-9]+(\.[0-9]+)?$' || { echo "invalid rust-version: $rv" >&2; exit 1; }
+          echo "version=$rv" >> "$GITHUB_OUTPUT"
+          echo "MSRV=$rv"
+
+      - name: Install MSRV toolchain
+        uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # pinned action
+        with:
+          toolchain: ${{ steps.msrv.outputs.version }}
+
+      # RUSTUP_TOOLCHAIN keeps the cache's rustc/cargo probes on the MSRV
+      # toolchain; without it rust-toolchain.toml's dev pin would install.
+      - name: Rust Cache
+        uses: Swatinem/rust-cache@c8037a86dde8214a8310e9f54a8fc61ab362aa31 # v2
+        env:
+          RUSTUP_TOOLCHAIN: ${{ steps.msrv.outputs.version }}
+
+      # `--all-targets` covers host targets; the browser-WASM check stays on
+      # the dev pin (wasm builds are outside the MSRV claim).
+      - name: Check and test on MSRV
+        run: |
+          cargo +${{ steps.msrv.outputs.version }} check --locked --all-targets --all-features
+          cargo +${{ steps.msrv.outputs.version }} test --locked --all-features

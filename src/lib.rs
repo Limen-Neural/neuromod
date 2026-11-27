@@ -9,8 +9,9 @@
 //!
 //! ## Requirements
 //!
-//! - **Rust 1.99.0+** (MSRV; also `rust-version` in `Cargo.toml` and
-//!   [`rust-toolchain.toml`](https://github.com/Limen-Neural/neuromod/blob/main/rust-toolchain.toml)).
+//! - **Rust 1.88.0+** (MSRV; `rust-version` in `Cargo.toml`). The dev toolchain
+//!   is pinned separately in
+//!   [`rust-toolchain.toml`](https://github.com/Limen-Neural/neuromod/blob/main/rust-toolchain.toml).
 //! - Edition **2024**.
 //! - **CI-tested platforms:** Linux, macOS, and Windows (GitHub Actions matrix).
 //!

@@ -153,9 +153,9 @@ impl fmt::Display for ChannelVector {
 /// a `_` wildcard.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StepError {
-    /// `stimuli.len()` did not match the network's `num_channels`.
+    /// Input length differed from the channel count (or LIF count for direct currents).
     ///
-    /// This is specific to the caller-supplied stimulus slice. A deserialized
+    /// This is specific to the caller-supplied input slice. A deserialized
     /// per-channel state vector whose length disagrees with `num_channels` is
     /// reported by [`Self::CheckpointShapeMismatch`] instead.
     InputLenMismatch { expected: usize, got: usize },
@@ -366,6 +366,12 @@ pub struct SpikingNetwork {
     /// Channel polarity for LIF drive. Prediction and encoding always use magnitude.
     #[serde(default)]
     pub stimulus_mode: StimulusMode,
+}
+
+#[derive(Clone, Copy)]
+enum StepInput<'a> {
+    Channels(&'a [f32]),
+    NeuronCurrents(&'a [f32]),
 }
 
 #[derive(Clone, Copy)]
@@ -707,7 +713,12 @@ impl SpikingNetwork {
         modulators: &NeuroModulators,
         rng: &mut R,
     ) -> Result<Vec<usize>, StepError> {
-        self.step_with_rng_mode(stimuli, modulators, rng, StepMode::Normal)
+        self.step_with_rng_mode(
+            StepInput::Channels(stimuli),
+            modulators,
+            rng,
+            StepMode::Normal,
+        )
     }
 
     /// Advance one held-out evaluation step using a caller-owned RNG.
@@ -728,18 +739,53 @@ impl SpikingNetwork {
         modulators: &NeuroModulators,
         rng: &mut R,
     ) -> Result<Vec<usize>, StepError> {
-        self.step_with_rng_mode(stimuli, modulators, rng, StepMode::Frozen)
+        self.step_with_rng_mode(
+            StepInput::Channels(stimuli),
+            modulators,
+            rng,
+            StepMode::Frozen,
+        )
+    }
+
+    /// Drive each LIF neuron with its own finite signed current for one normal step.
+    /// Supply exactly one value per LIF neuron in bank order. Current enters
+    /// before leak, bypassing channel weights, surprise, the 0.45 input gain,
+    /// and stress scaling. The resulting membrane is floored at zero.
+    /// Refractory holds, firing, lateral inhibition, and learning still apply.
+    /// Set [`Self::inhibition_strength`] to zero for independent LIF neurons.
+    ///
+    /// Channel inputs are silent on this step: their predictions decay toward
+    /// zero and their spike timestamps are preserved. Length and non-finite
+    /// stimulus errors refer to the neuron current slice.
+    pub fn step_with_neuron_currents(
+        &mut self,
+        currents: &[f32],
+        modulators: &NeuroModulators,
+    ) -> Result<Vec<usize>, StepError> {
+        self.step_with_rng_mode(
+            StepInput::NeuronCurrents(currents),
+            modulators,
+            &mut rand::rng(),
+            StepMode::Normal,
+        )
     }
 
     /// Shared preflight precedes counter mutation, frozen snapshots, and RNG draws.
     fn step_with_rng_mode<R: Rng + ?Sized>(
         &mut self,
-        stimuli: &[f32],
+        input: StepInput<'_>,
         modulators: &NeuroModulators,
         rng: &mut R,
         mode: StepMode,
     ) -> Result<Vec<usize>, StepError> {
-        validate_step_inputs(stimuli, self.num_channels, modulators)?;
+        match input {
+            StepInput::Channels(values) => {
+                validate_step_inputs(values, self.num_channels, modulators)?
+            }
+            StepInput::NeuronCurrents(values) => {
+                validate_step_inputs(values, self.neurons.len(), modulators)?
+            }
+        }
 
         // A malformed self-describing checkpoint (or a hand-edited public field)
         // can leave `predictive_state` or `input_spike_times` a different length
@@ -786,9 +832,22 @@ impl SpikingNetwork {
         let learning_rate = 0.5 * self.modulators.dopamine;
 
         self.retune_lif_from_modulators(learning_rate);
-        let drive = self.update_predictive_drive(stimuli);
-        self.encode_input_spikes(stimuli, rng);
-        self.integrate_lif_bank(&drive, stress_multiplier);
+        match input {
+            StepInput::Channels(stimuli) => {
+                let drive = self.update_predictive_drive(stimuli);
+                self.encode_input_spikes(stimuli, rng);
+                self.integrate_lif_bank(&drive, stress_multiplier);
+            }
+            StepInput::NeuronCurrents(currents) => {
+                for prediction in &mut self.predictive_state {
+                    *prediction *= 1.0 - PRED_ALPHA;
+                }
+                for (neuron, &current) in self.neurons.iter_mut().zip(currents) {
+                    neuron.integrate(current);
+                    neuron.membrane_potential = neuron.membrane_potential.max(0.0);
+                }
+            }
+        }
         let spike_ids = self.fire_lif_and_inhibit();
         if matches!(mode, StepMode::Normal) {
             self.apply_stdp(learning_rate);
@@ -1253,6 +1312,37 @@ mod tests {
         net.reset();
         assert_eq!(net.neurons[0].refractory_remaining, 0);
         assert_eq!(net.neurons[0].refractory_steps, 2);
+    }
+
+    #[test]
+    fn direct_currents_bypass_channel_weights_and_gain() {
+        let mut net = SpikingNetwork::with_dimensions(2, 0, 1);
+        net.inhibition_strength = 0.0;
+        net.predictive_state[0] = 1.0;
+        for n in &mut net.neurons {
+            n.weights[0] = 0.5;
+            n.decay_rate = 0.0;
+            n.threshold = 1.0;
+            n.pinned = true;
+        }
+        let mods = NeuroModulators::default();
+        let before = serde_json::to_value(&net).unwrap();
+        for bad in [&[1.0][..], &[1.0, f32::INFINITY]] {
+            assert!(net.step_with_neuron_currents(bad, &mods).is_err());
+            assert_eq!(serde_json::to_value(&net).unwrap(), before);
+        }
+        assert_eq!(
+            net.step_with_neuron_currents(&[1.0, 0.25], &mods).unwrap(),
+            [0]
+        );
+        assert_eq!(net.neurons[1].membrane_potential, 0.25);
+        assert_ne!(net.neurons[1].weights[0], 0.5);
+        assert_eq!(net.predictive_state, [1.0 - PRED_ALPHA]);
+        assert_eq!(net.input_spike_times, [-1]);
+        net.step_with_neuron_currents(&[0.0, 0.25], &mods).unwrap();
+        assert_eq!(net.neurons[1].membrane_potential, 0.5);
+        net.step_with_neuron_currents(&[0.0, -1.0], &mods).unwrap();
+        assert_eq!(net.neurons[1].membrane_potential, 0.0);
     }
 
     #[test]

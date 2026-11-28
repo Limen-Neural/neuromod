@@ -2084,6 +2084,22 @@ mod tests {
     }
 
     #[test]
+    fn refractory_step_resets_a_hand_edited_membrane_before_firing() {
+        let mut network = refractory_test_network(2);
+        let mods = NeuroModulators::default();
+        assert_eq!(network.step(&[1.0], &mods).unwrap(), [0]);
+        network.neurons[0].membrane_potential = 1.0;
+
+        assert!(network.step(&[1.0], &mods).unwrap().is_empty());
+        assert_eq!(
+            network.neurons[0].membrane_potential.to_bits(),
+            0.0_f32.to_bits()
+        );
+        assert_eq!(network.neurons[0].refractory_remaining, 1);
+        assert_eq!(network.neurons[0].last_spike_time, 1);
+    }
+
+    #[test]
     fn frozen_entry_points_restore_the_refractory_countdown() {
         for seed in [None, Some(1565)] {
             let mut network = refractory_test_network(2);

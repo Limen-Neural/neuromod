@@ -391,11 +391,11 @@ formats such as `bincode` / `postcard` must be re-encoded, as with the other 0.8
 
 ### 0.8 — optional LIF refractory period
 
-Set `LifNeuron::refractory_steps` to block that many normal steps after each
-spike. The neuron ignores drive and holds at its reset potential during the
-blocked steps. The default `0` leaves previous firing behavior unchanged.
-Frozen calls use and restore the current `refractory_remaining` countdown;
-use normal steps if the cooldown should advance between calls.
+Set `LifNeuron::refractory_steps` to block that many steps after a spike on
+a normal step. The neuron ignores drive and holds at its reset potential during
+the blocked steps. The default `0` leaves previous firing behavior unchanged.
+Frozen calls use and restore the current `refractory_remaining` countdown:
+they neither consume a blocked step nor start a new cooldown when they spike.
 
 Exhaustive `LifNeuron` literals need both new fields or `..LifNeuron::new()`.
 Self-describing checkpoints without these fields load with both values set to
@@ -406,9 +406,10 @@ with the other 0.8 fields.
 
 Set `network.stimulus_mode = StimulusMode::Signed` to let a negative
 channel subtract from the LIF membrane. It negates that channel's drive
-including surprise, treats weights as connection magnitudes, and floors the
-membrane at zero after integration. Predictive state and input-spike times
-still use magnitude. `StimulusMode::Magnitude` remains the default.
+including surprise, treats weights as connection magnitudes for integration
+and plasticity, and floors the membrane at zero after evaluating whether the
+neuron fires. The floor cannot trigger a spike. Predictive state and input-spike
+times still use magnitude. `StimulusMode::Magnitude` remains the default.
 
 Exhaustive `SpikingNetwork` literals need the new `stimulus_mode` field or
 `..SpikingNetwork::default()`. Self-describing checkpoints without it load
@@ -420,8 +421,9 @@ other 0.8 fields.
 `SpikingNetwork::lateral_inhibition_strength` defaults to the old `0.05`
 global subtraction. Set it to `0.0` to skip lateral inhibition, or use a
 positive finite strength to subtract that amount once from each non-firing
-LIF neuron whenever at least one LIF neuron spikes. Negative and non-finite
-values fall back to `0.05` for both stepping and checkpoint writes.
+LIF neuron whenever at least one LIF neuron spikes, flooring each affected
+membrane at zero. Negative and non-finite values fall back to `0.05` for
+both stepping and checkpoint writes.
 
 Exhaustive `SpikingNetwork` literals need the new field or
 `..SpikingNetwork::default()`. Old self-describing checkpoints default to

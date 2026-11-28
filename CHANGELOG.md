@@ -63,8 +63,9 @@ All notable changes to this project are documented in this file.
   and hold the membrane at zero. The default zero preserves firing behavior,
   and old self-describing checkpoints default both new fields to zero.
   Frozen calls preserve the countdown; `reset` clears it without changing the
-  configured period. See the README migration notes for struct literals and
-  positional binary checkpoints.
+  configured period. Exhaustive `LifNeuron` literals need both fields or
+  `..LifNeuron::new()`. Re-encode older positional binary checkpoints
+  (bincode/postcard). These changes ship in the 0.8.0 minor release.
 
 - **Opt-in signed channel stimulus for the LIF bank**
   ([#205](https://github.com/Limen-Neural/neuromod/issues/205)).
@@ -72,7 +73,9 @@ All notable changes to this project are documented in this file.
   with a zero membrane floor. Predictive error and input-spike encoding
   still use magnitude. Default magnitude-only dynamics and input
   validation are unchanged. Old self-describing checkpoints default to
-  magnitude mode; see the README migration notes for other formats.
+  magnitude mode. Exhaustive `SpikingNetwork` literals need `stimulus_mode`
+  or `..SpikingNetwork::default()`. Re-encode older positional binary
+  checkpoints, as described in the README migration notes.
 
 - **Configurable lateral inhibition in the LIF bank**
   ([#206](https://github.com/Limen-Neural/neuromod/issues/206)).

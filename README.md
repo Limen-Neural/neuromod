@@ -391,11 +391,11 @@ formats such as `bincode` / `postcard` must be re-encoded, as with the other 0.8
 
 ### 0.8 — optional LIF refractory period
 
-Set `LifNeuron::refractory_steps` to block that many normal steps after each
-spike. The neuron ignores drive and holds at its reset potential during the
-blocked steps. The default `0` leaves previous firing behavior unchanged.
-Frozen calls use and restore the current `refractory_remaining` countdown;
-use normal steps if the cooldown should advance between calls.
+Set `LifNeuron::refractory_steps` to block that many steps after a spike on
+a normal step. The neuron ignores drive and holds at its reset potential during
+the blocked steps. The default `0` leaves previous firing behavior unchanged.
+Frozen calls use and restore the current `refractory_remaining` countdown:
+they neither consume a blocked step nor start a new cooldown when they spike.
 
 Exhaustive `LifNeuron` literals need both new fields or `..LifNeuron::new()`.
 Self-describing checkpoints without these fields load with both values set to

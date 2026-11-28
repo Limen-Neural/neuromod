@@ -294,9 +294,11 @@ mod tests {
 
     #[test]
     fn refractory_neuron_ignores_drive_and_blocks_firing_on_the_final_tick() {
-        let mut neuron = LifNeuron::new();
-        neuron.refractory_steps = 2;
-        neuron.threshold = 0.0;
+        let mut neuron = LifNeuron {
+            refractory_steps: 2,
+            threshold: 0.0,
+            ..LifNeuron::default()
+        };
         neuron.integrate(1.0);
         assert!(neuron.check_fire().is_some());
 

@@ -67,6 +67,16 @@ All notable changes to this project are documented in this file.
   `..LifNeuron::new()`. Re-encode older positional binary checkpoints
   (bincode/postcard). These changes ship in the 0.8.0 minor release.
 
+- **Opt-in signed channel stimulus for the LIF bank**
+  ([#205](https://github.com/Limen-Neural/neuromod/issues/205)).
+  `StimulusMode::Signed` uses negative values for inhibitory LIF drive,
+  with a zero membrane floor. Predictive error and input-spike encoding
+  still use magnitude. Default magnitude-only dynamics and input
+  validation are unchanged. Old self-describing checkpoints default to
+  magnitude mode. Exhaustive `SpikingNetwork` literals need `stimulus_mode`
+  or `..SpikingNetwork::default()`. Re-encode older positional binary
+  checkpoints, as described in the README migration notes.
+
 ## [0.7.0] - 2026-09-27
 
 ### Added

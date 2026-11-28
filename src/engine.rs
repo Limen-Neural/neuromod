@@ -361,6 +361,7 @@ struct PlasticitySnapshot {
 }
 
 struct LifPlasticitySnapshot {
+    refractory_remaining: u32,
     decay_rate: f32,
     threshold: f32,
     base_threshold: f32,
@@ -375,6 +376,7 @@ impl PlasticitySnapshot {
                 .neurons
                 .iter()
                 .map(|neuron| LifPlasticitySnapshot {
+                    refractory_remaining: neuron.refractory_remaining,
                     decay_rate: neuron.decay_rate,
                     threshold: neuron.threshold,
                     base_threshold: neuron.base_threshold,
@@ -388,6 +390,7 @@ impl PlasticitySnapshot {
         network.stdp_config = self.stdp_config;
         debug_assert_eq!(network.neurons.len(), self.lif.len());
         for (neuron, frozen) in network.neurons.iter_mut().zip(self.lif) {
+            neuron.refractory_remaining = frozen.refractory_remaining;
             neuron.decay_rate = frozen.decay_rate;
             neuron.threshold = frozen.threshold;
             neuron.base_threshold = frozen.base_threshold;
@@ -630,7 +633,7 @@ impl SpikingNetwork {
     /// Izhikevich dynamics. It omits the post-runtime STDP/renormalization
     /// mutation phase and restores transiently retuned persistent state, keeping
     /// persistent modulators, R-STDP configuration, LIF thresholds and decay
-    /// parameters, weights, and eligibility traces bit-for-bit identical.
+    /// parameters, refractory countdowns, weights, and eligibility traces bit-for-bit identical.
     /// Runtime outputs and state remain advanced, and the returned LIF spikes
     /// remain observable.
     ///
@@ -1076,6 +1079,7 @@ impl SpikingNetwork {
             neuron.membrane_potential = 0.0;
             neuron.last_spike = false;
             neuron.last_spike_time = -1;
+            neuron.refractory_remaining = 0;
             for trace in &mut neuron.eligibility {
                 trace.reset();
             }
@@ -1178,6 +1182,39 @@ mod tests {
             .expect("valid input length should pass");
         assert_eq!(network.global_step, 1);
         assert!(spikes.len() <= network.neurons.len());
+    }
+
+    #[test]
+    fn refractory_hold_survives_checkpoint_and_frozen_steps() {
+        let mut net = SpikingNetwork::with_dimensions(1, 0, 1);
+        let mods = NeuroModulators::default();
+        net.neurons[0].weights[0] = 2.0;
+        let mut legacy = serde_json::to_value(&net).unwrap();
+        let cell = legacy["neurons"][0].as_object_mut().unwrap();
+        cell.remove("refractory_steps");
+        cell.remove("refractory_remaining");
+        net = serde_json::from_value(legacy).unwrap();
+        assert_eq!(net.neurons[0].refractory_steps, 0);
+        assert_eq!(net.neurons[0].refractory_remaining, 0);
+        net.neurons[0].refractory_steps = 2;
+        assert_eq!(net.step_frozen(&[1.0], &mods).unwrap(), [0]);
+        assert_eq!(net.neurons[0].refractory_remaining, 0);
+        assert_eq!(net.step(&[1.0], &mods).unwrap(), [0]);
+        net = serde_json::from_value(serde_json::to_value(&net).unwrap()).unwrap();
+        assert_eq!(net.neurons[0].refractory_steps, 2);
+        assert!(net.step_frozen(&[1.0], &mods).unwrap().is_empty());
+        assert_eq!(net.neurons[0].refractory_remaining, 2);
+        for remaining in [1, 0] {
+            assert!(net.step(&[1.0], &mods).unwrap().is_empty());
+            assert_eq!(net.neurons[0].membrane_potential, 0.0);
+            assert_eq!(net.neurons[0].refractory_remaining, remaining);
+            assert!(!net.neurons[0].last_spike);
+            assert_eq!(net.neurons[0].last_spike_time, 2);
+        }
+        assert_eq!(net.step(&[1.0], &mods).unwrap(), [0]);
+        net.reset();
+        assert_eq!(net.neurons[0].refractory_remaining, 0);
+        assert_eq!(net.neurons[0].refractory_steps, 2);
     }
 
     #[test]

@@ -152,6 +152,12 @@ pub struct LifNeuron {
     /// checkpoints written before the field existed deserialize as `false`.
     #[serde(default)]
     pub pinned: bool,
+    /// Number of complete steps to suppress after each spike. Zero disables the hold.
+    #[serde(default)]
+    pub refractory_steps: u32,
+    /// Remaining suppressed steps. Each call to [`Self::check_fire`] consumes one.
+    #[serde(default)]
+    pub refractory_remaining: u32,
 }
 
 impl Default for LifNeuron {
@@ -166,6 +172,8 @@ impl Default for LifNeuron {
             last_spike_time: -1,
             eligibility: Vec::new(),
             pinned: false,
+            refractory_steps: 0,
+            refractory_remaining: 0,
         }
     }
 }
@@ -179,6 +187,10 @@ impl LifNeuron {
     /// 1. Add Input (Integration)
     /// 2. Lose Charge (Leak)
     pub fn integrate(&mut self, stimulus: f32) {
+        if self.refractory_remaining > 0 {
+            self.membrane_potential = 0.0;
+            return;
+        }
         // CHARGE: Add input stimulus to current state
         self.membrane_potential += stimulus;
 
@@ -186,14 +198,20 @@ impl LifNeuron {
         self.membrane_potential -= self.membrane_potential * self.decay_rate;
     }
 
-    /// Check if the neuron should fire.
-    /// If yes, captures the peak potential, then performs a hard reset (Refractory Period).
-    /// Returns `Some(peak_potential)` on a spike, `None` otherwise.
-    /// Capturing before reset lets debug logs show the actual firing voltage, not the post-reset 0.0.
+    /// Finish one step after integration. During the refractory hold, consume
+    /// one countdown tick and keep the membrane at zero. Otherwise, crossing
+    /// or reaching threshold returns the peak, resets the membrane, and starts
+    /// the configured hold for the following steps.
     pub fn check_fire(&mut self) -> Option<f32> {
+        if self.refractory_remaining > 0 {
+            self.refractory_remaining -= 1;
+            self.membrane_potential = 0.0;
+            return None;
+        }
         if self.membrane_potential >= self.threshold {
             let peak = self.membrane_potential; // Capture BEFORE reset
             self.membrane_potential = 0.0; // Hard reset after spike
+            self.refractory_remaining = self.refractory_steps;
             return Some(peak);
         }
         None

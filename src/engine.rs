@@ -43,7 +43,26 @@ use super::rm_stdp::*;
 const WEIGHT_BUDGET: f32 = 2.0;
 const PRED_ALPHA: f32 = 0.1;
 const PRED_ERR_WEIGHT: f32 = 0.5;
-const INHIBITION_STRENGTH: f32 = 0.05;
+const DEFAULT_LATERAL_INHIBITION_STRENGTH: f32 = 0.05;
+
+fn default_lateral_inhibition_strength() -> f32 {
+    DEFAULT_LATERAL_INHIBITION_STRENGTH
+}
+
+fn effective_lateral_inhibition_strength(strength: f32) -> f32 {
+    if strength.is_finite() && strength >= 0.0 {
+        strength
+    } else {
+        default_lateral_inhibition_strength()
+    }
+}
+
+fn serialize_lateral_inhibition_strength<S: serde::Serializer>(
+    strength: &f32,
+    serializer: S,
+) -> Result<S::Ok, S::Error> {
+    serializer.serialize_f32(effective_lateral_inhibition_strength(*strength))
+}
 
 /// Classification of a non-finite `f32` rejected by [`SpikingNetwork::step`].
 ///
@@ -381,6 +400,17 @@ pub struct SpikingNetwork {
     /// Polarity of channel drive to the LIF bank (default: magnitude-only).
     #[serde(default)]
     pub stimulus_mode: StimulusMode,
+    /// Potential subtracted from each non-firing LIF neuron when any LIF
+    /// neuron spikes. The subtraction applies once per step and floors the
+    /// membrane at zero. Defaults to 0.05; set to 0.0 to skip inhibition.
+    /// Negative and non-finite values use the default for steps and when
+    /// writing a checkpoint. This keeps a checkpoint readable even if a
+    /// caller writes an invalid value directly to this public field.
+    #[serde(
+        default = "default_lateral_inhibition_strength",
+        serialize_with = "serialize_lateral_inhibition_strength"
+    )]
+    pub lateral_inhibition_strength: f32,
 }
 
 #[derive(Clone, Copy)]
@@ -465,6 +495,7 @@ impl SpikingNetwork {
             predictive_state: vec![0.0; num_channels],
             stdp_config,
             stimulus_mode: StimulusMode::default(),
+            lateral_inhibition_strength: default_lateral_inhibition_strength(),
         }
     }
 
@@ -598,7 +629,9 @@ impl SpikingNetwork {
     ///    A refractory neuron holds at zero, consumes one countdown step, and
     ///    does not fire. A new spike starts [`LifNeuron::refractory_steps`]
     ///    blocked steps.
-    /// 7. Lateral inhibition on non-firing LIF cells if anyone spiked.
+    /// 7. If any LIF neuron spiked, subtract [`Self::lateral_inhibition_strength`]
+    ///    once from each non-firing LIF cell and floor its membrane at zero.
+    ///    A strength of zero skips this pass.
     /// 8. R-STDP on LIF weights (`apply_stdp`): decay and accumulate every
     ///    [`crate::EligibilityTrace`] regardless of dopamine, then convert traces
     ///    into weight changes only when the dopamine-derived learning rate is
@@ -913,11 +946,11 @@ impl SpikingNetwork {
             }
         }
 
-        if !spike_ids.is_empty() {
+        let strength = effective_lateral_inhibition_strength(self.lateral_inhibition_strength);
+        if !spike_ids.is_empty() && strength > 0.0 {
             for neuron in &mut self.neurons {
                 if !neuron.last_spike {
-                    neuron.membrane_potential =
-                        (neuron.membrane_potential - INHIBITION_STRENGTH).max(0.0);
+                    neuron.membrane_potential = (neuron.membrane_potential - strength).max(0.0);
                 }
             }
         }
@@ -1192,6 +1225,7 @@ impl Default for SpikingNetwork {
             predictive_state: vec![0.0; num_channels],
             stdp_config,
             stimulus_mode: StimulusMode::default(),
+            lateral_inhibition_strength: default_lateral_inhibition_strength(),
         }
     }
 }
@@ -2104,6 +2138,94 @@ mod tests {
                     .eligibility
                     .iter()
                     .all(|t| t.tau == network.stdp_config.tau_eligibility)
+            );
+        }
+    }
+
+    #[test]
+    fn lateral_inhibition_uses_the_configured_strength_and_zero_skips_the_pass() {
+        let mods = NeuroModulators::default();
+        for (strength, expected_strength) in [
+            (0.125, 0.125),
+            (0.0, 0.0),
+            (
+                DEFAULT_LATERAL_INHIBITION_STRENGTH,
+                DEFAULT_LATERAL_INHIBITION_STRENGTH,
+            ),
+            (-0.125, DEFAULT_LATERAL_INHIBITION_STRENGTH),
+            (f32::NAN, DEFAULT_LATERAL_INHIBITION_STRENGTH),
+            (f32::INFINITY, DEFAULT_LATERAL_INHIBITION_STRENGTH),
+        ] {
+            let mut net = SpikingNetwork::with_dimensions(3, 0, 1);
+            net.lateral_inhibition_strength = strength;
+            for (neuron, potential) in net.neurons.iter_mut().zip([0.75, 0.375, -0.125]) {
+                neuron.pinned = true;
+                neuron.threshold = 0.5;
+                neuron.decay_rate = 0.0;
+                neuron.membrane_potential = potential;
+            }
+            let mut rng = StdRng::seed_from_u64(1567);
+            assert_eq!(net.step_with_rng(&[0.0], &mods, &mut rng).unwrap(), [0]);
+            assert_eq!(net.neurons[0].membrane_potential, 0.0);
+            assert_eq!(net.neurons[1].membrane_potential, 0.375 - expected_strength);
+            // Negative membrane is allowed in magnitude mode. Zero must skip
+            // even the pass's floor, rather than subtract zero then clamp.
+            let expected = if expected_strength > 0.0 { 0.0 } else { -0.125 };
+            assert_eq!(net.neurons[2].membrane_potential, expected);
+        }
+    }
+
+    #[test]
+    fn lateral_inhibition_strength_round_trips_and_legacy_defaults_match() {
+        let mut net = SpikingNetwork::with_dimensions(2, 0, 1);
+        assert_eq!(net.lateral_inhibition_strength, 0.05);
+        assert_eq!(SpikingNetwork::default().lateral_inhibition_strength, 0.05);
+        net.lateral_inhibition_strength = 0.125;
+        let mut json = serde_json::to_value(&net).unwrap();
+        let mut restored: SpikingNetwork = serde_json::from_value(json.clone()).unwrap();
+        assert_eq!(restored.lateral_inhibition_strength, 0.125);
+        restored.reset();
+        assert_eq!(restored.lateral_inhibition_strength, 0.125);
+
+        json.as_object_mut()
+            .unwrap()
+            .remove("lateral_inhibition_strength");
+        let legacy: SpikingNetwork = serde_json::from_value(json).unwrap();
+        assert_eq!(legacy.lateral_inhibition_strength, 0.05);
+    }
+
+    #[test]
+    fn invalid_inhibition_strength_saves_and_restores_its_effective_default() {
+        let mods = NeuroModulators::default();
+        for invalid in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY, -0.125] {
+            let mut net = SpikingNetwork::with_dimensions(2, 0, 1);
+            net.lateral_inhibition_strength = invalid;
+            for (neuron, potential) in net.neurons.iter_mut().zip([0.75, 0.375]) {
+                neuron.pinned = true;
+                neuron.threshold = 0.5;
+                neuron.decay_rate = 0.0;
+                neuron.membrane_potential = potential;
+            }
+
+            let json = serde_json::to_string(&net).unwrap();
+            let mut restored: SpikingNetwork = serde_json::from_str(&json).unwrap();
+            assert_eq!(
+                restored.lateral_inhibition_strength,
+                DEFAULT_LATERAL_INHIBITION_STRENGTH
+            );
+            assert_eq!(
+                net.lateral_inhibition_strength.to_bits(),
+                invalid.to_bits(),
+                "serialization must not mutate the live configuration"
+            );
+            let mut rng = StdRng::seed_from_u64(1567);
+            assert_eq!(
+                restored.step_with_rng(&[0.0], &mods, &mut rng).unwrap(),
+                [0]
+            );
+            assert_eq!(
+                restored.neurons[1].membrane_potential,
+                0.375 - DEFAULT_LATERAL_INHIBITION_STRENGTH
             );
         }
     }

@@ -303,6 +303,16 @@ fn validate_step_shape(
     Ok(())
 }
 
+/// Polarity of channel drive during LIF integration.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum StimulusMode {
+    /// Both signs excite through the clamped stimulus magnitude.
+    #[default]
+    Magnitude,
+    /// Negative inputs inhibit, including their share of predictive surprise.
+    Signed,
+}
+
 /// Topology-neutral network: LIF bank + Izhikevich bank + neuromodulators.
 ///
 /// Only these two neuron types are wired here. Other models in the crate are
@@ -353,6 +363,9 @@ pub struct SpikingNetwork {
     /// Negative or non-finite values also disable the pass.
     #[serde(default = "default_inhibition_strength")]
     pub inhibition_strength: f32,
+    /// Channel polarity for LIF drive. Prediction and encoding always use magnitude.
+    #[serde(default)]
+    pub stimulus_mode: StimulusMode,
 }
 
 #[derive(Clone, Copy)]
@@ -437,6 +450,7 @@ impl SpikingNetwork {
             predictive_state: vec![0.0; num_channels],
             stdp_config,
             inhibition_strength: default_inhibition_strength(),
+            stimulus_mode: StimulusMode::default(),
         }
     }
 
@@ -499,7 +513,10 @@ impl SpikingNetwork {
     ///   offending index) or [`StepError::NonFiniteModulator`] (with the
     ///   field name) plus the [`NonFiniteClass`]. Finite signed values,
     ///   including `0.0` / `-0.0` and [`f32::MAX`] / [`f32::MIN`], still
-    ///   pass through the existing `abs().clamp(0.0, 1.0)` magnitude path.
+    ///   use clamped magnitude for prediction and input-spike encoding.
+    ///   In the default [`StimulusMode::Magnitude`], both signs excite.
+    ///   In [`StimulusMode::Signed`], a negative channel subtracts its weighted
+    ///   drive (including surprise), and LIF membrane potential is floored at zero.
     /// - [`Self::predictive_state`] and [`Self::input_spike_times`] must each
     ///   have exactly [`Self::num_channels`] entries, else
     ///   [`StepError::CheckpointShapeMismatch`] (naming the offending
@@ -812,7 +829,12 @@ impl SpikingNetwork {
         for ch in 0..self.num_channels {
             let s = stimuli[ch].abs().clamp(0.0, 1.0);
             let err = (s - self.predictive_state[ch]).abs();
-            drive[ch] = s + PRED_ERR_WEIGHT * err;
+            let magnitude = s + PRED_ERR_WEIGHT * err;
+            drive[ch] = if self.stimulus_mode == StimulusMode::Signed && stimuli[ch] < 0.0 {
+                -magnitude
+            } else {
+                magnitude
+            };
             self.predictive_state[ch] =
                 PRED_ALPHA * s + (1.0 - PRED_ALPHA) * self.predictive_state[ch];
         }
@@ -841,6 +863,9 @@ impl SpikingNetwork {
             }
             total_current *= 0.45 * stress_multiplier;
             neuron.integrate(total_current);
+            if self.stimulus_mode == StimulusMode::Signed {
+                neuron.membrane_potential = neuron.membrane_potential.max(0.0);
+            }
         }
     }
 
@@ -1136,6 +1161,7 @@ impl Default for SpikingNetwork {
             predictive_state: vec![0.0; num_channels],
             stdp_config,
             inhibition_strength: default_inhibition_strength(),
+            stimulus_mode: StimulusMode::default(),
         }
     }
 }
@@ -1227,6 +1253,29 @@ mod tests {
         net.reset();
         assert_eq!(net.neurons[0].refractory_remaining, 0);
         assert_eq!(net.neurons[0].refractory_steps, 2);
+    }
+
+    #[test]
+    fn signed_drive_inhibits_while_encoding_magnitude() {
+        let mut net = SpikingNetwork::with_dimensions(1, 0, 1);
+        let n = &mut net.neurons[0];
+        n.pinned = true;
+        n.threshold = 10.0;
+        n.decay_rate = 0.0;
+        n.weights[0] = 2.0;
+        n.membrane_potential = 2.0;
+        net.stimulus_mode = StimulusMode::Signed;
+        let mods = NeuroModulators::default();
+        net.step(&[-1.0], &mods).unwrap();
+        assert!((0.0..2.0).contains(&net.neurons[0].membrane_potential));
+        assert_eq!(net.predictive_state, [PRED_ALPHA]);
+        assert_eq!(net.input_spike_times, [1]);
+        for _ in 0..3 {
+            net.step(&[-1.0], &mods).unwrap();
+        }
+        assert_eq!(net.neurons[0].membrane_potential, 0.0);
+        net.step(&[1.0], &mods).unwrap();
+        assert!(net.neurons[0].membrane_potential > 0.0);
     }
 
     #[test]

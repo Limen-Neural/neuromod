@@ -98,7 +98,9 @@ pub mod lif;
 pub mod modulators;
 pub mod rm_stdp;
 
-pub use engine::{ChannelVector, ModulatorField, NonFiniteClass, SpikingNetwork, StepError};
+pub use engine::{
+    ChannelVector, ModulatorField, NonFiniteClass, SpikingNetwork, StepError, StimulusMode,
+};
 pub use fitzhugh_nagumo::FitzHughNagumoNeuron;
 pub use gif::{GifNeuron, GifParams};
 pub use gif_layer::{GifLayerError, SparseGifHiddenLayer, SparseGifLayerConfig, SpikeRaster};

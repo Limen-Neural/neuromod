@@ -389,6 +389,19 @@ threshold outside that range — across every step. Self-describing checkpoints 
 before the field existed deserialize with `false` and keep retuning; positional binary
 formats such as `bincode` / `postcard` must be re-encoded, as with the other 0.8 field.
 
+### 0.8 — optional LIF refractory period
+
+Set `LifNeuron::refractory_steps` to block that many normal steps after each
+spike. The neuron ignores drive and holds at its reset potential during the
+blocked steps. The default `0` leaves previous firing behavior unchanged.
+Frozen calls use and restore the current `refractory_remaining` countdown;
+use normal steps if the cooldown should advance between calls.
+
+Exhaustive `LifNeuron` literals need both new fields or `..LifNeuron::new()`.
+Self-describing checkpoints without these fields load with both values set to
+zero. Re-encode positional binary checkpoints (such as bincode/postcard) as
+with the other 0.8 fields.
+
 ### 0.7 — finite sparse GIF construction and stepping
 
 `GifLayerError` gains four variants: `NonFiniteParam { field, class }`,

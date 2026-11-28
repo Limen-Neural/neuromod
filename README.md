@@ -186,7 +186,7 @@ fn main() {
 
 ## Step Errors
 
-`step` validates the call **before** mutating the network or drawing from the random-number generator (RNG). A stimulus length mismatch, a non-finite input, a stored per-channel state vector whose length disagrees with `num_channels`, a non-finite stored predictive value, or an exhausted tick counter returns a structured [`StepError`](https://docs.rs/neuromod/latest/neuromod/enum.StepError.html) and leaves every field unchanged (failure-atomic no-op). Finite signed values still go through the existing `abs().clamp` magnitude path.
+`step` validates the call **before** mutating the network or drawing from the random-number generator (RNG). A stimulus length mismatch, a non-finite input, a stored per-channel state vector whose length disagrees with `num_channels`, a non-finite stored predictive value, or an exhausted tick counter returns a structured [`StepError`](https://docs.rs/neuromod/latest/neuromod/enum.StepError.html) and leaves every field unchanged (failure-atomic no-op). The default uses the existing `abs().clamp` magnitude path; set `network.stimulus_mode = StimulusMode::Signed` for negative values to contribute inhibitory LIF drive. Predictive state and input-spike bookkeeping still use magnitude.
 
 A malformed self-describing checkpoint (or a hand-edited public field) can leave `predictive_state` or `input_spike_times` shorter or longer than `num_channels`. Those vectors deserialize as-is — decode never rejects them — but `step` indexes them by channel, so it returns `StepError::CheckpointShapeMismatch` (naming the offending vector) before any mutation or RNG draw rather than panicking on a short vector or silently dropping a long one mid-step. The check is limited to those two vectors; it does **not** police each neuron's `weights` / `eligibility` width, which the engine tolerates by design (see the neuron weight-width note below).
 
@@ -401,6 +401,19 @@ Exhaustive `LifNeuron` literals need both new fields or `..LifNeuron::new()`.
 Self-describing checkpoints without these fields load with both values set to
 zero. Re-encode positional binary checkpoints (such as bincode/postcard) as
 with the other 0.8 fields.
+
+### 0.8 — optional signed LIF stimulus
+
+Set `network.stimulus_mode = StimulusMode::Signed` to let a negative
+channel subtract from the LIF membrane. It negates that channel's drive
+including surprise, treats weights as connection magnitudes, and floors the
+membrane at zero after integration. Predictive state and input-spike times
+still use magnitude. `StimulusMode::Magnitude` remains the default.
+
+Exhaustive `SpikingNetwork` literals need the new `stimulus_mode` field or
+`..SpikingNetwork::default()`. Self-describing checkpoints without it load
+in magnitude mode; re-encode positional binary checkpoints as with the
+other 0.8 fields.
 
 ### 0.7 — finite sparse GIF construction and stepping
 

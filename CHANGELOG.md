@@ -66,6 +66,14 @@ All notable changes to this project are documented in this file.
   configured period. See the README migration notes for struct literals and
   positional binary checkpoints.
 
+- **Opt-in signed channel stimulus for the LIF bank**
+  ([#205](https://github.com/Limen-Neural/neuromod/issues/205)).
+  `StimulusMode::Signed` uses negative values for inhibitory LIF drive,
+  with a zero membrane floor. Predictive error and input-spike encoding
+  still use magnitude. Default magnitude-only dynamics and input
+  validation are unchanged. Old self-describing checkpoints default to
+  magnitude mode; see the README migration notes for other formats.
+
 ## [0.7.0] - 2026-09-27
 
 ### Added

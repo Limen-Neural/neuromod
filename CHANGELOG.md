@@ -74,6 +74,13 @@ All notable changes to this project are documented in this file.
   validation are unchanged. Old self-describing checkpoints default to
   magnitude mode; see the README migration notes for other formats.
 
+- **Configurable lateral inhibition in the LIF bank**
+  ([#206](https://github.com/Limen-Neural/neuromod/issues/206)).
+  Set `SpikingNetwork::lateral_inhibition_strength` to zero to bypass
+  inhibition or to a positive finite amount to subtract once from each
+  non-firing neuron's membrane on any LIF spike. Both new networks and old
+  self-describing checkpoints default to the previous `0.05`.
+
 ## [0.7.0] - 2026-09-27
 
 ### Added

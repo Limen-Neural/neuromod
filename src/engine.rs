@@ -43,7 +43,9 @@ use super::rm_stdp::*;
 const WEIGHT_BUDGET: f32 = 2.0;
 const PRED_ALPHA: f32 = 0.1;
 const PRED_ERR_WEIGHT: f32 = 0.5;
-const INHIBITION_STRENGTH: f32 = 0.05;
+fn default_inhibition_strength() -> f32 {
+    0.05
+}
 
 /// Classification of a non-finite `f32` rejected by [`SpikingNetwork::step`].
 ///
@@ -346,6 +348,11 @@ pub struct SpikingNetwork {
     /// `tau`; use [`SpikingNetwork::set_rm_stdp_config`] to update both.
     #[serde(default)]
     pub stdp_config: RmStdpConfig,
+    /// Membrane potential subtracted from each non-firing LIF cell when any
+    /// LIF cell fires. Defaults to 0.05. Zero disables lateral inhibition.
+    /// Negative or non-finite values also disable the pass.
+    #[serde(default = "default_inhibition_strength")]
+    pub inhibition_strength: f32,
 }
 
 #[derive(Clone, Copy)]
@@ -429,6 +436,7 @@ impl SpikingNetwork {
             input_spike_times: vec![-1; num_channels],
             predictive_state: vec![0.0; num_channels],
             stdp_config,
+            inhibition_strength: default_inhibition_strength(),
         }
     }
 
@@ -852,11 +860,14 @@ impl SpikingNetwork {
             }
         }
 
-        if !spike_ids.is_empty() {
+        if !spike_ids.is_empty()
+            && self.inhibition_strength > 0.0
+            && self.inhibition_strength.is_finite()
+        {
             for neuron in &mut self.neurons {
                 if !neuron.last_spike {
                     neuron.membrane_potential =
-                        (neuron.membrane_potential - INHIBITION_STRENGTH).max(0.0);
+                        (neuron.membrane_potential - self.inhibition_strength).max(0.0);
                 }
             }
         }
@@ -1124,6 +1135,7 @@ impl Default for SpikingNetwork {
             input_spike_times: vec![-1; num_channels],
             predictive_state: vec![0.0; num_channels],
             stdp_config,
+            inhibition_strength: default_inhibition_strength(),
         }
     }
 }
@@ -1215,6 +1227,27 @@ mod tests {
         net.reset();
         assert_eq!(net.neurons[0].refractory_remaining, 0);
         assert_eq!(net.neurons[0].refractory_steps, 2);
+    }
+
+    #[test]
+    fn configured_inhibition_is_applied_once_and_checkpointed() {
+        let net = SpikingNetwork::with_dimensions(2, 0, 0);
+        let mut legacy = serde_json::to_value(&net).unwrap();
+        legacy
+            .as_object_mut()
+            .unwrap()
+            .remove("inhibition_strength");
+        let mut net: SpikingNetwork = serde_json::from_value(legacy).unwrap();
+        assert_eq!(net.inhibition_strength, 0.05);
+        for strength in [0.0, 0.125] {
+            net.inhibition_strength = strength;
+            net = serde_json::from_value(serde_json::to_value(&net).unwrap()).unwrap();
+            net.neurons[0].membrane_potential = 1.0;
+            net.neurons[1].threshold = 1.0;
+            net.neurons[1].membrane_potential = 0.5;
+            assert_eq!(net.fire_and_inhibit(), [0]);
+            assert_eq!(net.neurons[1].membrane_potential, 0.5 - strength);
+        }
     }
 
     #[test]

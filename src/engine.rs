@@ -354,19 +354,20 @@ enum StepMode {
     Frozen,
 }
 
-struct PlasticitySnapshot {
+struct FrozenSnapshot {
     modulators: NeuroModulators,
     stdp_config: RmStdpConfig,
-    lif: Vec<LifPlasticitySnapshot>,
+    lif: Vec<FrozenLifSnapshot>,
 }
 
-struct LifPlasticitySnapshot {
+struct FrozenLifSnapshot {
     decay_rate: f32,
     threshold: f32,
     base_threshold: f32,
+    refractory_remaining: u32,
 }
 
-impl PlasticitySnapshot {
+impl FrozenSnapshot {
     fn capture(network: &SpikingNetwork) -> Self {
         Self {
             modulators: network.modulators,
@@ -374,10 +375,11 @@ impl PlasticitySnapshot {
             lif: network
                 .neurons
                 .iter()
-                .map(|neuron| LifPlasticitySnapshot {
+                .map(|neuron| FrozenLifSnapshot {
                     decay_rate: neuron.decay_rate,
                     threshold: neuron.threshold,
                     base_threshold: neuron.base_threshold,
+                    refractory_remaining: neuron.refractory_remaining,
                 })
                 .collect(),
         }
@@ -391,6 +393,7 @@ impl PlasticitySnapshot {
             neuron.decay_rate = frozen.decay_rate;
             neuron.threshold = frozen.threshold;
             neuron.base_threshold = frozen.base_threshold;
+            neuron.refractory_remaining = frozen.refractory_remaining;
         }
     }
 }
@@ -549,6 +552,9 @@ impl SpikingNetwork {
     ///    run, use [`Self::step_with_rng`] with one caller-owned generator and
     ///    do not reseed it between steps.
     /// 6. Integrate each LIF neuron (weighted stimuli + surprise), then `check_fire`.
+    ///    A refractory neuron holds at zero, consumes one countdown step, and
+    ///    does not fire. A new spike starts [`LifNeuron::refractory_steps`]
+    ///    blocked steps.
     /// 7. Lateral inhibition on non-firing LIF cells if anyone spiked.
     /// 8. R-STDP on LIF weights (`apply_stdp`): decay and accumulate every
     ///    [`crate::EligibilityTrace`] regardless of dopamine, then convert traces
@@ -631,8 +637,11 @@ impl SpikingNetwork {
     /// mutation phase and restores transiently retuned persistent state, keeping
     /// persistent modulators, R-STDP configuration, LIF thresholds and decay
     /// parameters, weights, and eligibility traces bit-for-bit identical.
-    /// Runtime outputs and state remain advanced, and the returned LIF spikes
-    /// remain observable.
+    /// The LIF refractory countdown is also restored: a frozen call uses the
+    /// current countdown but does not consume it or start a persistent period.
+    /// Use normal steps for refractory timing across consecutive calls. Other
+    /// runtime state remains advanced, and the returned LIF spikes remain
+    /// observable.
     ///
     /// This is stronger than passing zero dopamine to [`Self::step`]. With zero
     /// dopamine, eligibility traces still decay and accumulate timing credit,
@@ -748,7 +757,7 @@ impl SpikingNetwork {
             })?;
         let frozen = match mode {
             StepMode::Normal => None,
-            StepMode::Frozen => Some(PlasticitySnapshot::capture(self)),
+            StepMode::Frozen => Some(FrozenSnapshot::capture(self)),
         };
 
         self.global_step = next_step;
@@ -824,6 +833,9 @@ impl SpikingNetwork {
     /// Integrate each LIF neuron from weighted stimuli plus surprise.
     fn integrate_lif_bank(&mut self, drive: &[f32], stress_multiplier: f32) {
         for neuron in &mut self.neurons {
+            if neuron.refractory_remaining > 0 {
+                continue;
+            }
             let mut total_current = 0.0;
             for (&weight, &channel_drive) in neuron.weights.iter().zip(drive) {
                 total_current += weight * channel_drive;
@@ -1059,8 +1071,8 @@ impl SpikingNetwork {
     /// Start a new episode by clearing dynamic state and spike history.
     ///
     /// Resets the engine clock, input timestamps, predictive state, LIF membrane
-    /// state, LIF spike history, eligibility values, and the Izhikevich bank's
-    /// voltage, recovery, and spike history. The neuromodulator snapshot returns
+    /// state, LIF spike history, LIF refractory countdowns, eligibility values,
+    /// and the Izhikevich bank's voltage, recovery, and spike history. The neuromodulator snapshot returns
     /// to [`NeuroModulators::default`].
     ///
     /// Learned LIF weights and configured neuron parameters are preserved. In
@@ -1076,6 +1088,7 @@ impl SpikingNetwork {
             neuron.membrane_potential = 0.0;
             neuron.last_spike = false;
             neuron.last_spike_time = -1;
+            neuron.refractory_remaining = 0;
             for trace in &mut neuron.eligibility {
                 trace.reset();
             }
@@ -2034,6 +2047,107 @@ mod tests {
                     .all(|t| t.tau == network.stdp_config.tau_eligibility)
             );
         }
+    }
+
+    fn refractory_test_network(refractory_steps: u32) -> SpikingNetwork {
+        let mut network = SpikingNetwork::with_dimensions(1, 0, 1);
+        let neuron = &mut network.neurons[0];
+        neuron.pinned = true;
+        // Zero threshold proves the final blocked step cannot fire at reset.
+        neuron.threshold = 0.0;
+        neuron.weights[0] = 2.0;
+        neuron.refractory_steps = refractory_steps;
+        network
+    }
+
+    #[test]
+    fn refractory_countdown_gates_exactly_the_configured_number_of_steps() {
+        for period in [0, 1, 3] {
+            let mut network = refractory_test_network(period);
+            let mods = NeuroModulators::default();
+            let mut rng = StdRng::seed_from_u64(1565);
+            let mut last_spike_time = -1;
+
+            for tick in 1..=10 {
+                let fired = (tick - 1) % i64::from(period + 1) == 0;
+                let spikes = network.step_with_rng(&[1.0], &mods, &mut rng).unwrap();
+                assert_eq!(spikes.as_slice(), if fired { &[0][..] } else { &[] });
+                if fired {
+                    last_spike_time = tick;
+                }
+                let neuron = &network.neurons[0];
+                assert_eq!(neuron.membrane_potential, 0.0);
+                assert_eq!(neuron.last_spike, fired);
+                assert_eq!(neuron.last_spike_time, last_spike_time);
+            }
+        }
+    }
+
+    #[test]
+    fn refractory_step_resets_a_hand_edited_membrane_before_firing() {
+        let mut network = refractory_test_network(2);
+        let mods = NeuroModulators::default();
+        assert_eq!(network.step(&[1.0], &mods).unwrap(), [0]);
+        network.neurons[0].membrane_potential = 1.0;
+
+        assert!(network.step(&[1.0], &mods).unwrap().is_empty());
+        assert_eq!(
+            network.neurons[0].membrane_potential.to_bits(),
+            0.0_f32.to_bits()
+        );
+        assert_eq!(network.neurons[0].refractory_remaining, 1);
+        assert_eq!(network.neurons[0].last_spike_time, 1);
+    }
+
+    #[test]
+    fn frozen_entry_points_restore_the_refractory_countdown() {
+        for seed in [None, Some(1565)] {
+            let mut network = refractory_test_network(2);
+            let mods = NeuroModulators::default();
+            let mut rng = StdRng::seed_from_u64(seed.unwrap_or(0));
+            let mut frozen_step = |network: &mut SpikingNetwork| {
+                if seed.is_some() {
+                    network.step_frozen_with_rng(&[1.0], &mods, &mut rng)
+                } else {
+                    network.step_frozen(&[1.0], &mods)
+                }
+                .unwrap()
+            };
+
+            assert_eq!(frozen_step(&mut network), [0]);
+            assert_eq!(network.neurons[0].refractory_remaining, 0);
+            assert_eq!(network.neurons[0].last_spike_time, 1);
+            assert_eq!(network.step(&[1.0], &mods).unwrap(), [0]);
+            assert!(frozen_step(&mut network).is_empty());
+            assert_eq!(network.neurons[0].refractory_remaining, 2);
+            assert_eq!(network.neurons[0].last_spike_time, 2);
+        }
+    }
+
+    #[test]
+    fn refractory_checkpoint_round_trips_and_reset_clears_only_the_countdown() {
+        let mut network = refractory_test_network(3);
+        let mods = NeuroModulators::default();
+        network.step(&[1.0], &mods).unwrap();
+        let mut json = serde_json::to_value(&network).unwrap();
+        let mut restored: SpikingNetwork = serde_json::from_value(json.clone()).unwrap();
+
+        assert_eq!(restored.neurons[0].refractory_steps, 3);
+        assert_eq!(restored.neurons[0].refractory_remaining, 3);
+        assert!(restored.step(&[1.0], &mods).unwrap().is_empty());
+        assert_eq!(restored.neurons[0].refractory_remaining, 2);
+        restored.reset();
+        assert_eq!(restored.neurons[0].refractory_remaining, 0);
+        assert_eq!(restored.neurons[0].refractory_steps, 3);
+        assert_eq!(restored.step(&[1.0], &mods).unwrap(), [0]);
+
+        let legacy_neuron = json["neurons"][0].as_object_mut().unwrap();
+        legacy_neuron.remove("refractory_steps");
+        legacy_neuron.remove("refractory_remaining");
+        let mut old: SpikingNetwork = serde_json::from_value(json).unwrap();
+        assert_eq!(old.neurons[0].refractory_steps, 0);
+        assert_eq!(old.neurons[0].refractory_remaining, 0);
+        assert_eq!(old.step(&[1.0], &mods).unwrap(), [0]);
     }
 
     // --- Pinned neurons opt out of the per-step retune (#207) ------------

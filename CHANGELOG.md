@@ -57,6 +57,16 @@ All notable changes to this project are documented in this file.
   modulators (50 steps, bit-exact), the unchanged unpinned path (including the
   dopamine-silent clamp), the frozen-step path, and the old-checkpoint default.
 
+- **Optional LIF refractory period**
+  ([#204](https://github.com/Limen-Neural/neuromod/issues/204)). After a spike,
+  `LifNeuron::refractory_steps` controls how many normal steps ignore drive
+  and hold the membrane at zero. The default zero preserves firing behavior,
+  and old self-describing checkpoints default both new fields to zero.
+  Frozen calls preserve the countdown; `reset` clears it without changing the
+  configured period. Exhaustive `LifNeuron` literals need both fields or
+  `..LifNeuron::new()`. Re-encode older positional binary checkpoints
+  (bincode/postcard). These changes ship in the 0.8.0 minor release.
+
 ## [0.7.0] - 2026-09-27
 
 ### Added

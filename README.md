@@ -107,6 +107,8 @@ CI installs the dev toolchain on each OS and runs a dedicated `msrv` job that in
 
 ## Installation
 
+### Published crate (crates.io)
+
 ```toml
 [dependencies]
 neuromod = "0.7.0"
@@ -118,9 +120,20 @@ Browser, Web Worker, and other supported JavaScript-hosted
 consumers should leave this feature disabled and choose the entropy backend for
 their final application. See [the RNG guide](https://github.com/Limen-Neural/neuromod/blob/main/docs/rng.md#webassembly-entropy-backends).
 
-> This README describes the in-repository `0.7.0` candidate. Check
-> [crates.io](https://crates.io/crates/neuromod) for registry availability; before maintainer
-> publication, the in-repository examples use the local source.
+### Unreleased 0.8.0 checkout
+
+This README also covers the in-repository `0.8.0` candidate. The registry
+dependency above does not include the [LIF refractory period](#08--optional-lif-refractory-period).
+To try it in your own project, check out this version of the repository and
+point Cargo at that local copy. In your project's `Cargo.toml`:
+
+```toml
+[dependencies]
+neuromod = { path = "../neuromod" }
+```
+
+Adjust the path relative to your project's `Cargo.toml`. For JavaScript-hosted
+WASM with the checkout, add `features = ["wasm-js"]` to the same dependency.
 
 Links: [crates.io](https://crates.io/crates/neuromod) · [docs.rs](https://docs.rs/neuromod) · [repository](https://github.com/Limen-Neural/neuromod)
 
@@ -388,6 +401,35 @@ its `threshold`, then clamps it to `[0.05, 0.50]` even when dopamine is `0`. Set
 threshold outside that range — across every step. Self-describing checkpoints written
 before the field existed deserialize with `false` and keep retuning; positional binary
 formats such as `bincode` / `postcard` must be re-encoded, as with the other 0.8 field.
+
+### 0.8 — optional LIF refractory period
+
+Set `LifNeuron::refractory_steps` to block that many steps after a spike on
+a normal step. The neuron ignores drive and holds at its reset potential during
+the blocked steps. The default `0` leaves previous firing behavior unchanged.
+Frozen calls use and restore the current `refractory_remaining` countdown:
+they neither consume a blocked step nor start a new cooldown when they spike.
+
+For example, with the local dependency above, this standalone LIF neuron
+spikes, skips the next two steps, then spikes again:
+
+```rust
+use neuromod::LifNeuron;
+
+let mut neuron = LifNeuron {
+    refractory_steps: 2,
+    ..LifNeuron::default()
+};
+for expected_spike in [true, false, false, true] {
+    neuron.integrate(1.0);
+    assert_eq!(neuron.check_fire().is_some(), expected_spike);
+}
+```
+
+Exhaustive `LifNeuron` literals need both new fields or `..LifNeuron::new()`.
+Self-describing checkpoints without these fields load with both values set to
+zero. Re-encode positional binary checkpoints (such as bincode/postcard) as
+with the other 0.8 fields.
 
 ### 0.7 — finite sparse GIF construction and stepping
 
@@ -706,11 +748,10 @@ edition = "2024"
 neuromod = "0.5"
 ```
 
-`neuromod = "0.5"` intentionally resolves the published 0.5.x line. This registry-only demo
-does not validate this repository's 0.7.0 APIs (checkpoint channel-vector validation and live
-`SparseGifHiddenLayer` numeric checks); check
-crates.io for later registry availability. Before maintainer publication, use the in-repository
-examples above, which resolve the local source.
+`neuromod = "0.5"` intentionally resolves the published 0.5.x line. This
+registry-only demo does not exercise later APIs, including 0.7 checkpoint
+channel-vector validation and live `SparseGifHiddenLayer` numeric checks, or
+0.8 LIF refractory support. Use the local checkout to try unreleased APIs.
 
 ## Maintainer release sequence
 

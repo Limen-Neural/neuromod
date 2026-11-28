@@ -152,6 +152,18 @@ pub struct LifNeuron {
     /// checkpoints written before the field existed deserialize as `false`.
     #[serde(default)]
     pub pinned: bool,
+    /// Number of steps to hold the membrane at zero after each spike.
+    ///
+    /// Defaults to zero (no refractory period). A value of `n` prevents
+    /// firing on the next `n` steps.
+    #[serde(default)]
+    pub refractory_steps: u32,
+    /// Remaining refractory steps in the current episode.
+    ///
+    /// This is runtime state maintained by [`Self::check_fire`]; configure
+    /// future periods through [`Self::refractory_steps`] instead.
+    #[serde(default)]
+    pub refractory_remaining: u32,
 }
 
 impl Default for LifNeuron {
@@ -166,6 +178,8 @@ impl Default for LifNeuron {
             last_spike_time: -1,
             eligibility: Vec::new(),
             pinned: false,
+            refractory_steps: 0,
+            refractory_remaining: 0,
         }
     }
 }
@@ -175,10 +189,16 @@ impl LifNeuron {
         Self::default()
     }
 
-    /// The Core Logic Step:
-    /// 1. Add Input (Integration)
-    /// 2. Lose Charge (Leak)
+    /// Add input to the membrane, then apply leak.
+    ///
+    /// While refractory, this holds the membrane at zero and ignores input.
+    /// Pair it with one [`Self::check_fire`] call per step to advance time.
     pub fn integrate(&mut self, stimulus: f32) {
+        if self.refractory_remaining > 0 {
+            self.membrane_potential = 0.0;
+            return;
+        }
+
         // CHARGE: Add input stimulus to current state
         self.membrane_potential += stimulus;
 
@@ -186,14 +206,23 @@ impl LifNeuron {
         self.membrane_potential -= self.membrane_potential * self.decay_rate;
     }
 
-    /// Check if the neuron should fire.
-    /// If yes, captures the peak potential, then performs a hard reset (Refractory Period).
-    /// Returns `Some(peak_potential)` on a spike, `None` otherwise.
-    /// Capturing before reset lets debug logs show the actual firing voltage, not the post-reset 0.0.
+    /// Evaluate one step for firing and advance the refractory countdown.
+    ///
+    /// A refractory step holds the membrane at zero, consumes one remaining
+    /// step, and never fires. Otherwise, a spike returns the pre-reset peak,
+    /// resets the membrane to zero, and starts [`Self::refractory_steps`]
+    /// blocked steps. Returns `None` when there is no spike.
     pub fn check_fire(&mut self) -> Option<f32> {
+        if self.refractory_remaining > 0 {
+            self.membrane_potential = 0.0;
+            self.refractory_remaining -= 1;
+            return None;
+        }
+
         if self.membrane_potential >= self.threshold {
-            let peak = self.membrane_potential; // Capture BEFORE reset
-            self.membrane_potential = 0.0; // Hard reset after spike
+            let peak = self.membrane_potential;
+            self.membrane_potential = 0.0;
+            self.refractory_remaining = self.refractory_steps;
             return Some(peak);
         }
         None
@@ -218,6 +247,8 @@ mod tests {
         assert_eq!(neuron.last_spike_time, -1);
         assert!(neuron.eligibility.is_empty());
         assert!(!neuron.pinned);
+        assert_eq!(neuron.refractory_steps, 0);
+        assert_eq!(neuron.refractory_remaining, 0);
     }
 
     #[test]
@@ -259,6 +290,28 @@ mod tests {
         let expected_after_second = after_first + 0.5 - (after_first + 0.5) * neuron.decay_rate;
         neuron.integrate(0.5);
         assert!((neuron.membrane_potential - expected_after_second).abs() < 1e-6);
+    }
+
+    #[test]
+    fn refractory_neuron_ignores_drive_and_blocks_firing_on_the_final_tick() {
+        let mut neuron = LifNeuron {
+            refractory_steps: 2,
+            threshold: 0.0,
+            ..LifNeuron::default()
+        };
+        neuron.integrate(1.0);
+        assert!(neuron.check_fire().is_some());
+
+        for remaining in [1, 0] {
+            neuron.integrate(1.0);
+            assert_eq!(neuron.membrane_potential, 0.0);
+            assert_eq!(neuron.check_fire(), None);
+            assert_eq!(neuron.refractory_remaining, remaining);
+        }
+
+        neuron.integrate(1.0);
+        assert!(neuron.check_fire().is_some());
+        assert_eq!(neuron.refractory_remaining, 2);
     }
 
     #[test]

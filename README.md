@@ -419,8 +419,9 @@ other 0.8 fields.
 
 `SpikingNetwork::lateral_inhibition_strength` defaults to the old `0.05`
 global subtraction. Set it to `0.0` to skip lateral inhibition, or use a
-positive finite strength to subtract that amount once whenever at least one
-LIF neuron spikes. Negative and non-finite values fall back to `0.05`.
+positive finite strength to subtract that amount once from each non-firing
+LIF neuron whenever at least one LIF neuron spikes. Negative and non-finite
+values fall back to `0.05` for both stepping and checkpoint writes.
 
 Exhaustive `SpikingNetwork` literals need the new field or
 `..SpikingNetwork::default()`. Old self-describing checkpoints default to

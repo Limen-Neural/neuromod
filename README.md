@@ -406,9 +406,10 @@ with the other 0.8 fields.
 
 Set `network.stimulus_mode = StimulusMode::Signed` to let a negative
 channel subtract from the LIF membrane. It negates that channel's drive
-including surprise, treats weights as connection magnitudes, and floors the
-membrane at zero after integration. Predictive state and input-spike times
-still use magnitude. `StimulusMode::Magnitude` remains the default.
+including surprise, treats weights as connection magnitudes for integration
+and plasticity, and floors the membrane at zero after evaluating whether the
+neuron fires. The floor cannot trigger a spike. Predictive state and input-spike
+times still use magnitude. `StimulusMode::Magnitude` remains the default.
 
 Exhaustive `SpikingNetwork` literals need the new `stimulus_mode` field or
 `..SpikingNetwork::default()`. Self-describing checkpoints without it load

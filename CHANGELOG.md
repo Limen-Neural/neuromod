@@ -72,7 +72,9 @@ All notable changes to this project are documented in this file.
   with a zero membrane floor. Predictive error and input-spike encoding
   still use magnitude. Default magnitude-only dynamics and input
   validation are unchanged. Old self-describing checkpoints default to
-  magnitude mode; see the README migration notes for other formats.
+  magnitude mode. Exhaustive `SpikingNetwork` literals need `stimulus_mode`
+  or `..SpikingNetwork::default()`. Re-encode older positional binary
+  checkpoints, as described in the README migration notes.
 
 ## [0.7.0] - 2026-09-27
 

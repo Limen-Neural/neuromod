@@ -314,6 +314,25 @@ pub enum StimulusMode {
     Signed,
 }
 
+impl StimulusMode {
+    fn effective_weight(self, weight: f32) -> f32 {
+        match self {
+            Self::Magnitude => weight,
+            Self::Signed => weight.abs(),
+        }
+    }
+
+    fn check_lif_fire(self, neuron: &mut LifNeuron) -> bool {
+        let fired = neuron.check_fire().is_some();
+        // Check the un-floored membrane: flooring an inhibitory tick must
+        // not manufacture threshold equality for a pinned zero threshold.
+        if self == Self::Signed && neuron.membrane_potential < 0.0 {
+            neuron.membrane_potential = 0.0;
+        }
+        fired
+    }
+}
+
 /// Topology-neutral network: LIF bank + Izhikevich bank + neuromodulators.
 ///
 /// Only these two neuron types are wired here. Other models in the crate are
@@ -511,8 +530,10 @@ impl SpikingNetwork {
     ///   go through `abs().clamp(0.0, 1.0)`. In [`StimulusMode::Signed`], strictly
     ///   negative values negate their channel's entire LIF drive (magnitude
     ///   plus surprise); `-0.0` behaves like `0.0`. LIF weights are treated as
-    ///   connection magnitudes in this mode, and the membrane is floored at
-    ///   zero after charge and leak. Predictive state and input-spike
+    ///   connection magnitudes for integration, R-STDP updates, and weight
+    ///   renormalization in this mode. After deciding whether the neuron
+    ///   fires, its remaining membrane potential is floored at zero. The
+    ///   floor itself cannot trigger a spike. Predictive state and input-spike
     ///   bookkeeping continue to use the same magnitude in both modes.
     /// - [`Self::predictive_state`] and [`Self::input_spike_times`] must each
     ///   have exactly [`Self::num_channels`] entries, else
@@ -859,22 +880,20 @@ impl SpikingNetwork {
 
     /// Integrate each LIF neuron from weighted stimuli plus surprise.
     fn integrate_lif_bank(&mut self, drive: &[f32], stress_multiplier: f32) {
-        let signed = self.stimulus_mode == StimulusMode::Signed;
+        let mode = self.stimulus_mode;
         for neuron in &mut self.neurons {
             if neuron.refractory_remaining > 0 {
                 continue;
             }
-            let mut total_current = 0.0;
-            for (&weight, &channel_drive) in neuron.weights.iter().zip(drive) {
-                // A hand-edited weight must not flip an inhibitory channel.
-                let weight = if signed { weight.abs() } else { weight };
-                total_current += weight * channel_drive;
-            }
-            total_current *= 0.45 * stress_multiplier;
-            neuron.integrate(total_current);
-            if signed && neuron.membrane_potential < 0.0 {
-                neuron.membrane_potential = 0.0;
-            }
+            let total_current =
+                neuron
+                    .weights
+                    .iter()
+                    .zip(drive)
+                    .fold(0.0, |total, (&weight, &channel_drive)| {
+                        total + mode.effective_weight(weight) * channel_drive
+                    });
+            neuron.integrate(total_current * (0.45 * stress_multiplier));
         }
     }
 
@@ -885,7 +904,7 @@ impl SpikingNetwork {
     fn fire_lif_and_inhibit(&mut self) -> Vec<usize> {
         let mut spike_ids = Vec::with_capacity(self.neurons.len());
         for (i, neuron) in self.neurons.iter_mut().enumerate() {
-            if let Some(_peak_v) = neuron.check_fire() {
+            if self.stimulus_mode.check_lif_fire(neuron) {
                 neuron.last_spike = true;
                 neuron.last_spike_time = self.global_step;
                 spike_ids.push(i);
@@ -930,8 +949,9 @@ impl SpikingNetwork {
     /// The decision record, including the measured per-step cost, is
     /// [ADR 003][adr].
     ///
-    /// A neuron whose weights sum to at most `1e-6` is skipped: a blank neuron
-    /// stays blank, and a synapse at exactly zero stays zero.
+    /// A neuron whose effective weights sum to at most `1e-6` is skipped: a
+    /// blank neuron stays blank, and a synapse at exactly zero stays zero.
+    /// In [`StimulusMode::Signed`], this uses and stores connection magnitudes.
     ///
     /// # Examples
     ///
@@ -960,16 +980,20 @@ impl SpikingNetwork {
     /// [adr]: https://github.com/Limen-Neural/neuromod/blob/main/docs/adr/003-renormalization-opt-out.md
     pub fn renormalize_weights(&mut self) {
         let (w_min, w_max) = self.stdp_config.weight_bounds();
+        let mode = self.stimulus_mode;
         for neuron in &mut self.neurons {
-            let total: f32 = neuron.weights.iter().sum();
+            let total: f32 = neuron
+                .weights
+                .iter()
+                .map(|&weight| mode.effective_weight(weight))
+                .sum();
             if total > 1e-6 {
                 let scale = WEIGHT_BUDGET / total;
                 for w in &mut neuron.weights {
                     if *w == 0.0 {
                         continue;
                     }
-                    *w *= scale;
-                    *w = w.clamp(w_min, w_max);
+                    *w = (mode.effective_weight(*w) * scale).clamp(w_min, w_max);
                 }
             }
         }
@@ -1004,6 +1028,7 @@ impl SpikingNetwork {
     fn apply_stdp(&mut self, dopamine_lr: f32) {
         let now = self.global_step;
         let config = self.stdp_config;
+        let mode = self.stimulus_mode;
         let (w_min, w_max) = config.weight_bounds();
         let reward_lr = config.effective_reward_lr();
         let decay_tau = config.effective_tau_eligibility();
@@ -1055,7 +1080,7 @@ impl SpikingNetwork {
 
                 if rewarding && trace.value != 0.0 {
                     let dw = reward_lr * dopamine_lr * trace.value;
-                    let w = neuron.weights[ch];
+                    let w = mode.effective_weight(neuron.weights[ch]);
                     // The bounds must never move a weight on their own. Writing
                     // unconditionally lets them do exactly that on a synapse
                     // left at exactly zero -- unconnected, the state the L1 pass
@@ -2132,6 +2157,78 @@ mod tests {
             0.0f32.to_bits()
         );
         assert_eq!(signed_rng.next_u64(), magnitude_rng.next_u64());
+    }
+
+    #[test]
+    fn signed_weight_magnitudes_survive_normal_steps_and_reward_learning() {
+        for (dopamine, renormalize_weights) in [(0.0, true), (1.0, false)] {
+            let make_net = |weight| {
+                let mut net = SpikingNetwork::with_dimensions(1, 0, 2);
+                net.stimulus_mode = StimulusMode::Signed;
+                net.stdp_config.renormalize_weights = renormalize_weights;
+                let neuron = &mut net.neurons[0];
+                neuron.pinned = true;
+                neuron.threshold = 0.1;
+                neuron.decay_rate = 0.0;
+                neuron.weights = vec![weight, 1.5];
+                net
+            };
+            let mods = NeuroModulators {
+                dopamine,
+                ..NeuroModulators::default()
+            };
+            let mut edited = make_net(-1.0);
+            let mut control = make_net(1.0);
+            let mut edited_rng = StdRng::seed_from_u64(1566);
+            let mut control_rng = StdRng::seed_from_u64(1566);
+
+            // The first frame would previously delete the negative connection
+            // during normalization or an R-STDP update; the next uses it again.
+            for frame in [[-1.0, 1.0], [-1.0, 0.5]] {
+                let spikes = edited
+                    .step_with_rng(&frame, &mods, &mut edited_rng)
+                    .unwrap();
+                assert_eq!(
+                    spikes,
+                    control
+                        .step_with_rng(&frame, &mods, &mut control_rng)
+                        .unwrap()
+                );
+                assert_eq!(edited.neurons[0].weights, control.neurons[0].weights);
+                assert_eq!(
+                    edited.neurons[0].membrane_potential.to_bits(),
+                    control.neurons[0].membrane_potential.to_bits()
+                );
+            }
+            assert!(edited.neurons[0].weights[0] > 0.0);
+            if renormalize_weights {
+                assert_eq!(edited.neurons[0].weights.iter().sum::<f32>(), WEIGHT_BUDGET);
+            }
+        }
+    }
+
+    #[test]
+    fn signed_floor_cannot_trigger_a_pinned_zero_threshold_spike() {
+        let mut net = SpikingNetwork::with_dimensions(1, 0, 1);
+        net.stimulus_mode = StimulusMode::Signed;
+        let neuron = &mut net.neurons[0];
+        neuron.pinned = true;
+        neuron.threshold = 0.0;
+        neuron.weights[0] = 2.0;
+        let mods = NeuroModulators::default();
+        let mut rng = StdRng::seed_from_u64(1566);
+
+        assert!(
+            net.step_with_rng(&[-1.0], &mods, &mut rng)
+                .unwrap()
+                .is_empty()
+        );
+        assert_eq!(
+            net.neurons[0].membrane_potential.to_bits(),
+            0.0_f32.to_bits()
+        );
+        assert_eq!(net.neurons[0].last_spike_time, -1);
+        assert_eq!(net.step_with_rng(&[1.0], &mods, &mut rng).unwrap(), [0]);
     }
 
     #[test]

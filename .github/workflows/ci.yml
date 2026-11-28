@@ -71,7 +71,7 @@ jobs:
           }'
 
       - name: Rust Cache
-        uses: Swatinem/rust-cache@c8037a86dde8214a8310e9f54a8fc61ab362aa31 # v2
+        uses: Swatinem/rust-cache@eedcf2fb1c22f010a0eb66b92f378c110977f266 # v2
 
       - name: Check formatting
         if: runner.os == 'Linux'
@@ -277,7 +277,7 @@ jobs:
       # RUSTUP_TOOLCHAIN keeps the cache's rustc/cargo probes on the MSRV
       # toolchain; without it rust-toolchain.toml's dev pin would install.
       - name: Rust Cache
-        uses: Swatinem/rust-cache@c8037a86dde8214a8310e9f54a8fc61ab362aa31 # v2
+        uses: Swatinem/rust-cache@eedcf2fb1c22f010a0eb66b92f378c110977f266 # v2
         env:
           RUSTUP_TOOLCHAIN: ${{ steps.msrv.outputs.version }}
 
